@@ -8,7 +8,7 @@ cache:
   directories:
   - "$HOME/.cache/pip"
 install:
-- pip install tox flake8 pylint gql
+- pip install tox flake8 pylint gql aiohttp==2.2.5 async_timeout==1.4.0
 language: python
 script:
 - flake8 Tibber --max-line-length=120
