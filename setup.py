@@ -3,7 +3,7 @@ from setuptools import setup
 setup(
     name = 'pyTibber',
     packages = ['Tibber'],
-    install_requires=['gql==0.1.0'],
+    install_requires=['gql==0.1.0', 'aiohttp==2.2.5', 'async_timeout==1.4.0'],
     version = '0.1.0',
     description = 'a library to communicate with Tibber',
     author='Daniel Hoyer Iversen',
