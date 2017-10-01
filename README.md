@@ -10,7 +10,7 @@ pip3 install pyTibber
 
 ## Example:
 
-```
+```python
 import Tibber
 tibber = Tibber.Tibber()  # access_token=YOUR_TOKEN
 tibber.sync_update_info()
