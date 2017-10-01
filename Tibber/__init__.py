@@ -114,6 +114,7 @@ class TibberHome(object):
         self._home_id = home_id
         self._current_price_total = None
         self._current_price_info = {}
+        self._price_info = {}
         self.info = {}
 
     @asyncio.coroutine
@@ -185,21 +186,61 @@ class TibberHome(object):
         }
         ''' % (self.home_id))
         price_info_temp = yield from self._execute(query)
-        print(price_info_temp)
         if not price_info_temp:
             return
         try:
             home = price_info_temp['viewer']['home']
             current_subscription = home['currentSubscription']
             price_info = current_subscription['priceInfo']['current']
-        except KeyError:
+        except (KeyError, TypeError):
             return
         self._current_price_info = price_info
+
+    @asyncio.coroutine
+    def update_price_info(self):
+        """Update price info."""
+        query = gql('''
+        {
+          viewer {
+            home(id: "%s") {
+              currentSubscription {
+                priceInfo {
+                  today {
+                    total
+                    startsAt
+                  }
+                  tomorrow {
+                    total
+                    startsAt
+                  }
+                }
+              }
+            }
+          }
+        }
+        ''' % (self.home_id))
+        price_info_temp = yield from self._execute(query)
+        if not price_info_temp:
+            return
+        self._price_info = {}
+        for key in ['today', 'tomorrow']:
+            try:
+                home = price_info_temp['viewer']['home']
+                current_subscription = home['currentSubscription']
+                price_info = current_subscription['priceInfo'][key]
+            except (KeyError, TypeError):
+                continue
+            self._price_info[price_info.get('startsAt')] = price_info.get('total')
 
     @property
     def current_price_total(self):
         """Get current price total."""
         return self._current_price_info.get('total')
+
+    @property
+    def price_total(self):
+        """Get dictionary with price total, key is date-time."""
+        return self._price_info
 
     @property
     def current_price_info(self):
@@ -216,6 +257,6 @@ class TibberHome(object):
         """Return the home adress1."""
         try:
             return self.info['viewer']['home']['address']['address1']
-        except KeyError:
+        except (KeyError, TypeError):
             _LOGGER.warning("Could not find address1.")
-            return None
+            return ''
