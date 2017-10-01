@@ -5,7 +5,7 @@ Go to [developer.tibber.com/](https://developer.tibber.com/) to get your API tok
 
 ## Install
 ```
-pip3 install Tibber
+pip3 install pyTibber
 ```
 
 ## Example:
