@@ -13,4 +13,12 @@ language: python
 script:
 - flake8 Tibber --max-line-length=120
 - pylint Tibber --max-line-length=120
-
+deploy:
+  provider: pypi
+  user: dahoiv
+  password:
+    secure: qahuIJBHjbeLshJJRx1UsuXwZz05x8tzAmB1nTT6tITKiqTXCQa5GmfAUKkagDW3DUw3Ylql56NaogBexxZ9bzmWogvgGTpegJswy6aFUVtIvOfkRqETzxPslOznrzXbLYXm9LPmJ/Hhy4OskZ2ycMtOA4wKLk7B8SeBlbthhYEtZ4rjhNupe7Pp2E4FkcE2h5mW1eoAODq6Y3vaTrSXUFa34DRB+iKadUuhJeDuww3j/Xc18J/ToHxDasI50OrPZA7XmKYtTNdwAVpIfBmz+dO4RKnyml+hZn6J8Z/PkD8cYqtWC8ehLoWmDe/yYCaliy533KBK7+Kk7PpvIc10c9ryfjsVeLhbo1DHWzpVX2f4eYxc1zgtTeA/zZdxg0JmVBtfowz7vu0Irl0hDKpiSqYvyUyeLuGqslKJ5qzRTU0y5WtjI/QFvYQh7ZISX5elOawuKfXvDtDTAdnyjmKAy14d8/tGZxabFdzNdI0MKoQ6qbHCJsAI2AW1gM50ESPO3r8pMPwWpNSGXPOK4txhY6pXjQ8qM3foGhTM+VkLM9GvzZ7ZPdZaNgxuxDNaW8syduXvoUaXLyHICVfaRY+FgnG7eR69POFxqN/+H8CWqhWzzwp7/Yzfm27LL9npMgV5WeMr/upSfzjyB/zpa73hW2u0sFQHragnlQxjqcZ8cio=
+  on:
+    tags: true
+    distributions: sdist bdist_wheel
+    repo: Danielhiversen/PyTibber
