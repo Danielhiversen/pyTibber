@@ -305,9 +305,9 @@ class TibberHome(object):
     def price_unit(self):
         """Return the price unit."""
         country = self.country
-        if contry == 'NO':
+        if country == 'NO':
             return 'NOK/kWh'
-        elif contry == 'SE':
+        elif country == 'SE':
             return 'SEK/kWh'
         else:
             return ''
