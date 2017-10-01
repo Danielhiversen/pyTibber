@@ -291,3 +291,22 @@ class TibberHome(object):
         except (KeyError, TypeError):
             _LOGGER.warning("Could not find address1.")
             return ''
+
+    @property
+    def country(self):
+        """Return the country."""
+        try:
+            return self.info['viewer']['home']['address']['country']
+        except (KeyError, TypeError):
+            _LOGGER.warning("Could not find country.")
+            return ''
+
+    @property
+    def price_unit(self):
+        """Return the price unit."""
+        country = self.country
+        if country == 'NO':
+            return 'NOK/kWh'
+        elif country == 'SE':
+            return 'SEK/kWh'
+        return ''
