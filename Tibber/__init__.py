@@ -309,5 +309,4 @@ class TibberHome(object):
             return 'NOK/kWh'
         elif country == 'SE':
             return 'SEK/kWh'
-        else:
-            return ''
+        return ''
