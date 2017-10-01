@@ -12,7 +12,7 @@ pip3 install pyTibber
 
 ```
 import Tibber
-tibber = Tibber.Tibber()
+tibber = Tibber.Tibber()  # access_token=YOUR_TOKEN
 tibber.sync_update_info()
 print(tibber.name)
 
