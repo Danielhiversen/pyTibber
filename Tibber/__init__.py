@@ -18,9 +18,16 @@ class Tibber(object):
 
     def __init__(self, access_token=DEMO_TOKEN,
                  timeout=DEFAULT_TIMEOUT,
-                 websession=aiohttp.ClientSession()):
+                 websession=None):
         """Initialize the Tibber connection."""
-        self.websession = websession
+        if websession is None:
+            @asyncio.coroutine
+            def _create_session():
+                return aiohttp.ClientSession()
+            loop = asyncio.get_event_loop()
+            self.websession = loop.run_until_complete(_create_session())
+        else:
+            self.websession = websession
         self._timeout = timeout
         self._headers = {'Authorization': 'Bearer ' + access_token}
         self._name = None
@@ -54,9 +61,15 @@ class Tibber(object):
             'Received non-compatible response "{}"'.format(result)
         return result.get('data')
 
+    def sync_update_info(self, *_):
+        """Update home info."""
+        loop = asyncio.get_event_loop()
+        task = loop.create_task(self.update_info())
+        loop.run_until_complete(task)
+
     @asyncio.coroutine
     def update_info(self, *_):
-        """Update home info."""
+        """Update home info async."""
         query = gql('''
         {
           viewer {
@@ -114,11 +127,18 @@ class TibberHome(object):
         self._home_id = home_id
         self._current_price_total = None
         self._current_price_info = {}
+        self._price_info = {}
         self.info = {}
+
+    def sync_update_info(self):
+        """Update current price info."""
+        loop = asyncio.get_event_loop()
+        task = loop.create_task(self.update_info())
+        loop.run_until_complete(task)
 
     @asyncio.coroutine
     def update_info(self):
-        """Update current price info."""
+        """Update current price info async."""
         query = gql('''
         {
           viewer {
@@ -163,9 +183,15 @@ class TibberHome(object):
         ''' % (self._home_id))
         self.info = yield from self._execute(query)
 
+    def sync_update_current_price_info(self):
+        """Update current price info."""
+        loop = asyncio.get_event_loop()
+        task = loop.create_task(self.update_current_price_info())
+        loop.run_until_complete(task)
+
     @asyncio.coroutine
     def update_current_price_info(self):
-        """Update current price info."""
+        """Update current price info async."""
         query = gql('''
         {
           viewer {
@@ -185,21 +211,67 @@ class TibberHome(object):
         }
         ''' % (self.home_id))
         price_info_temp = yield from self._execute(query)
-        print(price_info_temp)
         if not price_info_temp:
             return
         try:
             home = price_info_temp['viewer']['home']
             current_subscription = home['currentSubscription']
             price_info = current_subscription['priceInfo']['current']
-        except KeyError:
+        except (KeyError, TypeError):
             return
         self._current_price_info = price_info
+
+    def sync_update_price_info(self):
+        """Update current price info."""
+        loop = asyncio.get_event_loop()
+        task = loop.create_task(self.update_price_info())
+        loop.run_until_complete(task)
+
+    @asyncio.coroutine
+    def update_price_info(self):
+        """Update price info async."""
+        query = gql('''
+        {
+          viewer {
+            home(id: "%s") {
+              currentSubscription {
+                priceInfo {
+                  today {
+                    total
+                    startsAt
+                  }
+                  tomorrow {
+                    total
+                    startsAt
+                  }
+                }
+              }
+            }
+          }
+        }
+        ''' % (self.home_id))
+        price_info_temp = yield from self._execute(query)
+        if not price_info_temp:
+            return
+        self._price_info = {}
+        for key in ['today', 'tomorrow']:
+            try:
+                home = price_info_temp['viewer']['home']
+                current_subscription = home['currentSubscription']
+                price_info = current_subscription['priceInfo'][key]
+            except (KeyError, TypeError):
+                continue
+            self._price_info[price_info.get('startsAt')] = price_info.get('total')
 
     @property
     def current_price_total(self):
         """Get current price total."""
         return self._current_price_info.get('total')
+
+    @property
+    def price_total(self):
+        """Get dictionary with price total, key is date-time."""
+        return self._price_info
 
     @property
     def current_price_info(self):
@@ -216,6 +288,6 @@ class TibberHome(object):
         """Return the home adress1."""
         try:
             return self.info['viewer']['home']['address']['address1']
-        except KeyError:
+        except (KeyError, TypeError):
             _LOGGER.warning("Could not find address1.")
-            return None
+            return ''
