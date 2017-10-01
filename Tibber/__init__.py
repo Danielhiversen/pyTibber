@@ -18,9 +18,16 @@ class Tibber(object):
 
     def __init__(self, access_token=DEMO_TOKEN,
                  timeout=DEFAULT_TIMEOUT,
-                 websession=aiohttp.ClientSession()):
+                 websession=None):
         """Initialize the Tibber connection."""
-        self.websession = websession
+        if websession is None:
+            @asyncio.coroutine
+            def _create_session():
+                return aiohttp.ClientSession()
+            loop = asyncio.get_event_loop()
+            self.websession = loop.run_until_complete(_create_session())
+        else:
+            self.websession = websession
         self._timeout = timeout
         self._headers = {'Authorization': 'Bearer ' + access_token}
         self._name = None
@@ -54,9 +61,15 @@ class Tibber(object):
             'Received non-compatible response "{}"'.format(result)
         return result.get('data')
 
+    def sync_update_info(self, *_):
+        """Update home info."""
+        loop = asyncio.get_event_loop()
+        task = loop.create_task(self.update_info())
+        loop.run_until_complete(task)
+
     @asyncio.coroutine
     def update_info(self, *_):
-        """Update home info."""
+        """Update home info async."""
         query = gql('''
         {
           viewer {
@@ -117,9 +130,15 @@ class TibberHome(object):
         self._price_info = {}
         self.info = {}
 
+    def sync_update_info(self):
+        """Update current price info."""
+        loop = asyncio.get_event_loop()
+        task = loop.create_task(self.update_info())
+        loop.run_until_complete(task)
+
     @asyncio.coroutine
     def update_info(self):
-        """Update current price info."""
+        """Update current price info async."""
         query = gql('''
         {
           viewer {
@@ -164,9 +183,15 @@ class TibberHome(object):
         ''' % (self._home_id))
         self.info = yield from self._execute(query)
 
+    def sync_update_current_price_info(self):
+        """Update current price info."""
+        loop = asyncio.get_event_loop()
+        task = loop.create_task(self.update_current_price_info())
+        loop.run_until_complete(task)
+
     @asyncio.coroutine
     def update_current_price_info(self):
-        """Update current price info."""
+        """Update current price info async."""
         query = gql('''
         {
           viewer {
@@ -196,9 +221,15 @@ class TibberHome(object):
             return
         self._current_price_info = price_info
 
+    def sync_update_price_info(self):
+        """Update current price info."""
+        loop = asyncio.get_event_loop()
+        task = loop.create_task(self.update_price_info())
+        loop.run_until_complete(task)
+
     @asyncio.coroutine
     def update_price_info(self):
-        """Update price info."""
+        """Update price info async."""
         query = gql('''
         {
           viewer {
