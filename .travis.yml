@@ -21,4 +21,5 @@ deploy:
   on:
     tags: true
     distributions: sdist bdist_wheel
-    repo: Danielhiversen/PyTibber
+    repo: Danielhiversen/pyTibber
+
