@@ -16,7 +16,7 @@ tibber = Tibber.Tibber()  # access_token=YOUR_TOKEN
 tibber.sync_update_info()
 print(tibber.name)
 
-home=tibber.get_homes()[0]
+home = tibber.get_homes()[0]
 home.sync_update_info()
 print(home.address1)
 
