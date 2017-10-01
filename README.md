@@ -14,14 +14,14 @@ pip3 install pyTibber
 import Tibber
 tibber = Tibber.Tibber()
 tibber.sync_update_info()
-tibber.name
+print(tibber.name)
 
 home=tibber.get_homes()[0]
 home.sync_update_info()
-home.address1
+print(home.address1)
 
 home.sync_update_current_price_info()
-home.current_price_info
+print(home.current_price_info)
 
 tibber.websession.close()
 ```
