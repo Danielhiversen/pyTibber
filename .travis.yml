@@ -9,7 +9,7 @@ matrix:
   - python: '3.6'
     env: TOXENV=py36
   - python: "nightly"
-    env: TOXENV=py36
+    env: TOXENV=py37
 
   - python: '3.5'
     env: TOXENV=lint
@@ -17,7 +17,7 @@ cache:
   directories:
   - "$HOME/.cache/pip"
 install:
-- pip install tox
+- pip install tox coveralls
 language: python
 script: tox
 after_success: coveralls
