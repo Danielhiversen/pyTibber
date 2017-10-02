@@ -26,6 +26,10 @@ class TestTibber(unittest.TestCase):
         self.assertEqual(self.tibber.name, 'Arya Stark')
         self.assertEqual(len(self.tibber.get_homes()), 1)
 
+    def test_invalid_home(self):
+        home = self.tibber.get_home("INVALID_KEY")
+        self.assertEqual(home, None)
+
     def test_home(self):
         home = self.tibber.get_homes()[0]
         home.sync_update_info()
@@ -51,6 +55,25 @@ class TestTibber(unittest.TestCase):
         self.assertEqual(home.country, 'SE')
         self.assertEqual(home.price_unit, 'SEK/kWh')
 
+
+
+class TestTibberInvalidToken(unittest.TestCase):
+    """
+    Tests Tibber
+    """
+
+    def setUp(self):     # pylint: disable=invalid-name
+        """ things to be run when tests are started. """
+        self.tibber = Tibber.Tibber(access_token='INVALID_TOKEN')
+        self.tibber.sync_update_info()
+
+    def tearDown(self):  # pylint: disable=invalid-name
+        """ Stop stuff we started. """
+        self.tibber.websession.close()
+
+    def test_tibber(self):
+        self.assertEqual(self.tibber.name, None)
+        self.assertEqual(len(self.tibber.get_homes()), 0)
 
 if __name__ == '__main__':
     unittest.main()
