@@ -180,6 +180,14 @@ class TibberHome(object):
                 statusReason
               }
             }
+            homes {
+              consumption(resolution: HOURLY, last: 1) {
+                nodes {
+                  consumptionUnit
+                  currency
+                }
+              }
+            }
           }
         }
         ''' % (self._home_id))
@@ -214,12 +222,14 @@ class TibberHome(object):
         ''' % (self.home_id))
         price_info_temp = yield from self._execute(query)
         if not price_info_temp:
+            _LOGGER.warning("Could not find current price info.")
             return
         try:
             home = price_info_temp['viewer']['home']
             current_subscription = home['currentSubscription']
             price_info = current_subscription['priceInfo']['current']
         except (KeyError, TypeError):
+            _LOGGER.warning("Could not find current price info.")
             return
         self._current_price_info = price_info
 
@@ -254,6 +264,7 @@ class TibberHome(object):
         ''' % (self.home_id))
         price_info_temp = yield from self._execute(query)
         if not price_info_temp:
+            _LOGGER.warning("Could not find price info.")
             return
         self._price_info = {}
         for key in ['today', 'tomorrow']:
@@ -262,6 +273,7 @@ class TibberHome(object):
                 current_subscription = home['currentSubscription']
                 price_info = current_subscription['priceInfo'][key]
             except (KeyError, TypeError):
+                _LOGGER.warning("Could not find price info for %s.", key)
                 continue
             for data in price_info:
                 self._price_info[data.get('startsAt')] = data.get('total')
@@ -296,6 +308,24 @@ class TibberHome(object):
             return ''
 
     @property
+    def consumption_unit(self):
+        """Return the consumption."""
+        try:
+            return self.info['viewer']['homes'][0]['consumption']['nodes'][0]['consumptionUnit']
+        except (KeyError, TypeError):
+            _LOGGER.warning("Could not find consumption unit.")
+            return ''
+
+    @property
+    def currency(self):
+        """Return the currency."""
+        try:
+            return self.info['viewer']['homes'][0]['consumption']['nodes'][0]['currency']
+        except (KeyError, TypeError):
+            _LOGGER.warning("Could not find currency.")
+            return ''
+
+    @property
     def country(self):
         """Return the country."""
         try:
@@ -307,9 +337,8 @@ class TibberHome(object):
     @property
     def price_unit(self):
         """Return the price unit."""
-        country = self.country
-        if country == 'NO':
-            return 'NOK/kWh'
-        elif country == 'SE':
-            return 'SEK/kWh'
-        return ''
+        currency = self.currency
+        consumption_unit = self.consumption_unit
+        if not currency or not consumption_unit:
+            return ''
+        return  currency + '/' + consumption_unit
