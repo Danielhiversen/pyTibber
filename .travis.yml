@@ -17,7 +17,7 @@ cache:
   directories:
   - "$HOME/.cache/pip"
 install:
-- pip install tox
+- pip install tox coveralls
 language: python
 script: tox
 after_success: coveralls

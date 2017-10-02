@@ -1,5 +1,5 @@
-# pyTibber [![Build Status](https://travis-ci.org/Danielhiversen/pyTibber.svg?branch=master)](https://travis-ci.org/Danielhiversen/pyTibber)
-Python3 interace for Tibber.
+# pyTibber [![Build Status](https://travis-ci.org/Danielhiversen/pyTibber.svg?branch=master)](https://travis-ci.org/Danielhiversen/pyTibber)  [![Coverage Status](https://coveralls.io/repos/github/Danielhiversen/pyTibber/badge.svg?branch=master)](https://coveralls.io/github/Danielhiversen/pyTibber?branch=master)
+Python3 library for Tibber.
 
 Go to [developer.tibber.com/](https://developer.tibber.com/) to get your API token.
 
@@ -20,7 +20,8 @@ home = tibber.get_homes()[0]
 home.sync_update_info()
 print(home.address1)
 
-home.sync_update_current_price_info()
+home.sync_update_price_info()
+
 print(home.current_price_info)
 
 tibber.websession.close()
