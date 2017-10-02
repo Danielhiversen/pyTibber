@@ -7,8 +7,6 @@ import unittest
 
 import Tibber
 
-IGTL_HEADER_SIZE = 58
-
 
 class TestTibber(unittest.TestCase):
     """
@@ -37,7 +35,7 @@ class TestTibber(unittest.TestCase):
         self.assertEqual(home.current_price_info, {})
 
         home.sync_update_current_price_info()
-        self.assertEqual(home.current_price_total, 0.7758)
+        self.assertTrue(home.current_price_total > 0)
         self.assertTrue(isinstance(home.current_price_info.get('energy'), float))
         self.assertTrue(isinstance(home.current_price_info.get('startsAt'), str))
         self.assertTrue(isinstance(home.current_price_info.get('tax'), float))
@@ -50,8 +48,8 @@ class TestTibber(unittest.TestCase):
 
         self.assertEqual(home.home_id, 'c70dcbe5-4485-4821-933d-a8a86452737b')
         self.assertEqual(home.address1, 'Förmansvägen 21 Lgh 1502')
-        self.assertEqual(home.price_unit, 'SEK/kWh')
         self.assertEqual(home.country, 'SE')
+        self.assertEqual(home.price_unit, 'SEK/kWh')
 
 
 if __name__ == '__main__':
