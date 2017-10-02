@@ -2,9 +2,10 @@
 """
 Tests for pyTibber
 """
+import unittest
+
 import asyncio
 import aiohttp
-import unittest
 
 import Tibber
 
@@ -34,6 +35,10 @@ class TestTibber(unittest.TestCase):
     def test_home(self):
         home = self.tibber.get_homes()[0]
         home.sync_update_info()
+        self.assertEqual(home.home_id, 'c70dcbe5-4485-4821-933d-a8a86452737b')
+        self.assertEqual(home.address1, 'Förmansvägen 21 Lgh 1502')
+        self.assertEqual(home.country, 'SE')
+        self.assertEqual(home.price_unit, 'SEK/kWh')
 
         self.assertEqual(home.current_price_total, None)
         self.assertEqual(home.price_total, {})
@@ -50,11 +55,6 @@ class TestTibber(unittest.TestCase):
         for key in home.price_total.keys():
             self.assertTrue(isinstance(key, str))
             self.assertTrue(isinstance(home.price_total[key], float))
-
-        self.assertEqual(home.home_id, 'c70dcbe5-4485-4821-933d-a8a86452737b')
-        self.assertEqual(home.address1, 'Förmansvägen 21 Lgh 1502')
-        self.assertEqual(home.country, 'SE')
-        self.assertEqual(home.price_unit, 'SEK/kWh')
 
 
 class TestTibberWebsession(unittest.TestCase):
@@ -80,8 +80,15 @@ class TestTibberWebsession(unittest.TestCase):
         self.assertEqual(self.tibber.name, 'Arya Stark')
         self.assertEqual(len(self.tibber.get_homes()), 1)
 
+        home = self.tibber.get_homes()[0]
         self.websession.close()
         self.assertRaises(RuntimeError, self.tibber.sync_update_info)
+
+        self.assertRaises(RuntimeError, home.sync_update_info)
+        self.assertEqual(home.home_id, 'c70dcbe5-4485-4821-933d-a8a86452737b')
+        self.assertEqual(home.address1, '')
+        self.assertEqual(home.country, '')
+        self.assertEqual(home.price_unit, '')
 
 
 class TestTibberInvalidToken(unittest.TestCase):
@@ -101,6 +108,7 @@ class TestTibberInvalidToken(unittest.TestCase):
     def test_tibber(self):
         self.assertEqual(self.tibber.name, None)
         self.assertEqual(len(self.tibber.get_homes()), 0)
+
 
 if __name__ == '__main__':
     unittest.main()
