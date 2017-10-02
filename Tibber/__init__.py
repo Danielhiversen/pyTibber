@@ -82,6 +82,8 @@ class Tibber(object):
         ''')
 
         res = yield from self._execute(query)
+        if not res:
+            return
         viewer = res.get('viewer')
         if not viewer:
             return
