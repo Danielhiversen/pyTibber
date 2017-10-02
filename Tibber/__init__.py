@@ -261,7 +261,8 @@ class TibberHome(object):
                 price_info = current_subscription['priceInfo'][key]
             except (KeyError, TypeError):
                 continue
-            self._price_info[price_info.get('startsAt')] = price_info.get('total')
+            for data in price_info:
+                self._price_info[data.get('startsAt')] = data.get('total')
 
     @property
     def current_price_total(self):
@@ -269,14 +270,14 @@ class TibberHome(object):
         return self._current_price_info.get('total')
 
     @property
-    def price_total(self):
-        """Get dictionary with price total, key is date-time."""
-        return self._price_info
-
-    @property
     def current_price_info(self):
         """Get current price info."""
         return self._current_price_info
+
+    @property
+    def price_total(self):
+        """Get dictionary with price total, key is date-time."""
+        return self._price_info
 
     @property
     def home_id(self):
