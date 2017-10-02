@@ -2,7 +2,8 @@
 """
 Tests for pyTibber
 """
-
+import asyncio
+import aiohttp
 import unittest
 
 import Tibber
@@ -55,6 +56,32 @@ class TestTibber(unittest.TestCase):
         self.assertEqual(home.country, 'SE')
         self.assertEqual(home.price_unit, 'SEK/kWh')
 
+
+class TestTibberWebsession(unittest.TestCase):
+    """
+    Tests Tibber
+    """
+
+    def setUp(self):     # pylint: disable=invalid-name
+        """ things to be run when tests are started. """
+        @asyncio.coroutine
+        def _create_session():
+            return aiohttp.ClientSession()
+        loop = asyncio.get_event_loop()
+        self.websession = loop.run_until_complete(_create_session())
+        self.tibber = Tibber.Tibber(websession=self.websession)
+        self.tibber.sync_update_info()
+
+    def tearDown(self):  # pylint: disable=invalid-name
+        """ Stop stuff we started. """
+        self.tibber.websession.close()
+
+    def test_tibber(self):
+        self.assertEqual(self.tibber.name, 'Arya Stark')
+        self.assertEqual(len(self.tibber.get_homes()), 1)
+
+        self.websession.close()
+        self.assertRaises(RuntimeError, self.tibber.sync_update_info)
 
 
 class TestTibberInvalidToken(unittest.TestCase):
