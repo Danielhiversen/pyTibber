@@ -113,7 +113,7 @@ class Tibber(object):
         """Retun an instance of TibberHome for given home id."""
         if home_id not in self._home_ids:
             _LOGGER.error("Could not find any Tibber home with id: %s",
-                            home_id)
+                          home_id)
             return None
         if home_id not in self._homes.keys():
             self._homes[home_id] = TibberHome(home_id, self._execute)
@@ -342,4 +342,4 @@ class TibberHome(object):
         if not currency or not consumption_unit:
             _LOGGER.error("Could not find price_unit.")
             return ''
-        return  currency + '/' + consumption_unit
+        return currency + '/' + consumption_unit
