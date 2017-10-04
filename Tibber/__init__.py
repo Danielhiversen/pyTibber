@@ -55,7 +55,7 @@ class Tibber(object):
                 return
             result = yield from resp.json()
         except (asyncio.TimeoutError, aiohttp.ClientError) as err:
-            _LOGGER.warning("Error connecting to Tibber: %s", err)
+            _LOGGER.error("Error connecting to Tibber: %s", err)
             return
         assert 'errors' in result or 'data' in result,\
             'Received non-compatible response "{}"'.format(result)
@@ -112,7 +112,7 @@ class Tibber(object):
     def get_home(self, home_id):
         """Retun an instance of TibberHome for given home id."""
         if home_id not in self._home_ids:
-            _LOGGER.warning("Could not find any Tibber home with id: %s",
+            _LOGGER.error("Could not find any Tibber home with id: %s",
                             home_id)
             return None
         if home_id not in self._homes.keys():
@@ -222,14 +222,14 @@ class TibberHome(object):
         ''' % (self.home_id))
         price_info_temp = yield from self._execute(query)
         if not price_info_temp:
-            _LOGGER.warning("Could not find current price info.")
+            _LOGGER.error("Could not find current price info.")
             return
         try:
             home = price_info_temp['viewer']['home']
             current_subscription = home['currentSubscription']
             price_info = current_subscription['priceInfo']['current']
         except (KeyError, TypeError):
-            _LOGGER.warning("Could not find current price info.")
+            _LOGGER.error("Could not find current price info.")
             return
         self._current_price_info = price_info
 
@@ -264,7 +264,7 @@ class TibberHome(object):
         ''' % (self.home_id))
         price_info_temp = yield from self._execute(query)
         if not price_info_temp:
-            _LOGGER.warning("Could not find price info.")
+            _LOGGER.error("Could not find price info.")
             return
         self._price_info = {}
         for key in ['today', 'tomorrow']:
@@ -273,7 +273,7 @@ class TibberHome(object):
                 current_subscription = home['currentSubscription']
                 price_info = current_subscription['priceInfo'][key]
             except (KeyError, TypeError):
-                _LOGGER.warning("Could not find price info for %s.", key)
+                _LOGGER.error("Could not find price info for %s.", key)
                 continue
             for data in price_info:
                 self._price_info[data.get('startsAt')] = data.get('total')
@@ -304,7 +304,7 @@ class TibberHome(object):
         try:
             return self.info['viewer']['home']['address']['address1']
         except (KeyError, TypeError):
-            _LOGGER.warning("Could not find address1.")
+            _LOGGER.error("Could not find address1.")
             return ''
 
     @property
@@ -313,7 +313,7 @@ class TibberHome(object):
         try:
             return self.info['viewer']['homes'][0]['consumption']['nodes'][0]['consumptionUnit']
         except (KeyError, TypeError):
-            _LOGGER.warning("Could not find consumption unit.")
+            _LOGGER.error("Could not find consumption unit.")
             return ''
 
     @property
@@ -322,7 +322,7 @@ class TibberHome(object):
         try:
             return self.info['viewer']['homes'][0]['consumption']['nodes'][0]['currency']
         except (KeyError, TypeError):
-            _LOGGER.warning("Could not find currency.")
+            _LOGGER.error("Could not find currency.")
             return ''
 
     @property
@@ -331,7 +331,7 @@ class TibberHome(object):
         try:
             return self.info['viewer']['home']['address']['country']
         except (KeyError, TypeError):
-            _LOGGER.warning("Could not find country.")
+            _LOGGER.error("Could not find country.")
             return ''
 
     @property
@@ -340,5 +340,6 @@ class TibberHome(object):
         currency = self.currency
         consumption_unit = self.consumption_unit
         if not currency or not consumption_unit:
+            _LOGGER.error("Could not find price_unit.")
             return ''
         return  currency + '/' + consumption_unit
