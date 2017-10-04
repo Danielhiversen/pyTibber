@@ -27,3 +27,5 @@ print(home.current_price_info)
 
 tibber.websession.close()
 ```
+
+The library is used as part of Home Assitant: [https://github.com/home-assistant/home-assistant/blob/dev/homeassistant/components/sensor/tibber.py](https://github.com/home-assistant/home-assistant/blob/dev/homeassistant/components/sensor/tibber.py)
