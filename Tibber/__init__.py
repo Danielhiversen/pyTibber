@@ -231,7 +231,8 @@ class TibberHome(object):
         except (KeyError, TypeError):
             _LOGGER.error("Could not find current price info.")
             return
-        self._current_price_info = price_info
+        if price_info:
+            self._current_price_info = price_info
 
     def sync_update_price_info(self):
         """Update current price info."""
