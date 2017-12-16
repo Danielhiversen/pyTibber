@@ -52,11 +52,11 @@ class Tibber(object):
                 resp = yield from self.websession.post(API_ENDPOINT,
                                                        **post_args)
             if resp.status != 200:
-                return
+                return None
             result = yield from resp.json()
         except (asyncio.TimeoutError, aiohttp.ClientError) as err:
             _LOGGER.error("Error connecting to Tibber: %s", err)
-            return
+            return None
         assert 'errors' in result or 'data' in result,\
             'Received non-compatible response "{}"'.format(result)
         return result.get('data')
