@@ -52,11 +52,11 @@ class Tibber(object):
                 resp = yield from self.websession.post(API_ENDPOINT,
                                                        **post_args)
             if resp.status != 200:
-                return
+                return None
             result = yield from resp.json()
         except (asyncio.TimeoutError, aiohttp.ClientError) as err:
             _LOGGER.error("Error connecting to Tibber: %s", err)
-            return
+            return None
         assert 'errors' in result or 'data' in result,\
             'Received non-compatible response "{}"'.format(result)
         return result.get('data')
@@ -231,7 +231,8 @@ class TibberHome(object):
         except (KeyError, TypeError):
             _LOGGER.error("Could not find current price info.")
             return
-        self._current_price_info = price_info
+        if price_info:
+            self._current_price_info = price_info
 
     def sync_update_price_info(self):
         """Update current price info."""
@@ -248,6 +249,12 @@ class TibberHome(object):
             home(id: "%s") {
               currentSubscription {
                 priceInfo {
+                  current {
+                    energy
+                    tax
+                    total
+                    startsAt
+                  }
                   today {
                     total
                     startsAt
@@ -267,13 +274,16 @@ class TibberHome(object):
             _LOGGER.error("Could not find price info.")
             return
         self._price_info = {}
-        for key in ['today', 'tomorrow']:
+        for key in ['current', 'today', 'tomorrow']:
             try:
                 home = price_info_temp['viewer']['home']
                 current_subscription = home['currentSubscription']
                 price_info = current_subscription['priceInfo'][key]
             except (KeyError, TypeError):
                 _LOGGER.error("Could not find price info for %s.", key)
+                continue
+            if key == 'current':
+                self._current_price_info = price_info
                 continue
             for data in price_info:
                 self._price_info[data.get('startsAt')] = data.get('total')
@@ -343,3 +353,4 @@ class TibberHome(object):
             _LOGGER.error("Could not find price_unit.")
             return ''
         return currency + '/' + consumption_unit
+

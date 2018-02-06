@@ -2,14 +2,12 @@
 """
 Tests for pyTibber
 """
-
 import unittest
 
 import asyncio
 import aiohttp
 
 import Tibber
-
 
 
 class TestTibber(unittest.TestCase):
@@ -34,12 +32,20 @@ class TestTibber(unittest.TestCase):
         home = self.tibber.get_home("INVALID_KEY")
         self.assertEqual(home, None)
 
+    def test_home(self):
+        home = self.tibber.get_homes()[0]
+        home.sync_update_info()
+        self.assertEqual(home.home_id, 'c70dcbe5-4485-4821-933d-a8a86452737b')
+        self.assertEqual(home.address1, 'Förmansvägen 21 Lgh 1502')
+        self.assertEqual(home.country, 'SE')
+        self.assertEqual(home.price_unit, 'SEK/kWh')
+
         self.assertEqual(home.current_price_total, None)
         self.assertEqual(home.price_total, {})
         self.assertEqual(home.current_price_info, {})
 
         home.sync_update_current_price_info()
-        self.assertEqual(home.current_price_total, 0.7758)
+        self.assertTrue(home.current_price_total > 0)
         self.assertTrue(isinstance(home.current_price_info.get('energy'), float))
         self.assertTrue(isinstance(home.current_price_info.get('startsAt'), str))
         self.assertTrue(isinstance(home.current_price_info.get('tax'), float))
@@ -102,10 +108,6 @@ class TestTibberInvalidToken(unittest.TestCase):
     def test_tibber(self):
         self.assertEqual(self.tibber.name, None)
         self.assertEqual(len(self.tibber.get_homes()), 0)
-        self.assertEqual(home.home_id, 'c70dcbe5-4485-4821-933d-a8a86452737b')
-        self.assertEqual(home.address1, 'Förmansvägen 21 Lgh 1502')
-        self.assertEqual(home.price_unit, 'SEK/kWh')
-        self.assertEqual(home.country, 'SE')
 
 
 if __name__ == '__main__':
