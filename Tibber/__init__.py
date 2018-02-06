@@ -353,4 +353,3 @@ class TibberHome(object):
             _LOGGER.error("Could not find price_unit.")
             return ''
         return currency + '/' + consumption_unit
-
