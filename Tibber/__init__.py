@@ -52,11 +52,11 @@ class Tibber(object):
                 resp = yield from self.websession.post(API_ENDPOINT,
                                                        **post_args)
             if resp.status != 200:
-                return None
+                return
             result = yield from resp.json()
         except (asyncio.TimeoutError, aiohttp.ClientError) as err:
             _LOGGER.error("Error connecting to Tibber: %s", err)
-            return None
+            return
         assert 'errors' in result or 'data' in result,\
             'Received non-compatible response "{}"'.format(result)
         return result.get('data')
@@ -231,8 +231,7 @@ class TibberHome(object):
         except (KeyError, TypeError):
             _LOGGER.error("Could not find current price info.")
             return
-        if price_info:
-            self._current_price_info = price_info
+        self._current_price_info = price_info
 
     def sync_update_price_info(self):
         """Update current price info."""
