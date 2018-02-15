@@ -12,12 +12,12 @@ pip3 install pyTibber
 ## Example:
 
 ```python
-import Tibber
-tibber = Tibber.Tibber()  # access_token=YOUR_TOKEN
-tibber.sync_update_info()
-print(tibber.name)
+import tibber
+tibber_connection = tibber.Tibber()  # access_token=YOUR_TOKEN
+tibber_connection.sync_update_info()
+print(tibber_connection.name)
 
-home = tibber.get_homes()[0]
+home = tibber_connection.get_homes()[0]
 home.sync_update_info()
 print(home.address1)
 
@@ -25,7 +25,7 @@ home.sync_update_price_info()
 
 print(home.current_price_info)
 
-tibber.websession.close()
+tibber_connection.websession.close()
 ```
 
 The library is used as part of Home Assitant: [https://github.com/home-assistant/home-assistant/blob/dev/homeassistant/components/sensor/tibber.py](https://github.com/home-assistant/home-assistant/blob/dev/homeassistant/components/sensor/tibber.py)
