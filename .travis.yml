@@ -12,6 +12,8 @@ matrix:
     env: TOXENV=py37
   - python: '3.7-dev'
     env: TOXENV=py37
+  - python: '3.8-dev'
+    env: TOXENV=py38
 
   - python: '3.5'
     env: TOXENV=lint
@@ -19,6 +21,7 @@ matrix:
   allow_failures:
   - python: 'nightly'
   - python: '3.7-dev'
+  - python: '3.8-dev'
 
 
 cache:
