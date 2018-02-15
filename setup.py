@@ -6,7 +6,7 @@ with open("README.md", 'r') as fp:
 
 setup(
     name = 'pyTibber',
-    packages = ['Tibber'],
+    packages = ['tibber'],
     install_requires=['gql==0.1.0', 'aiohttp==2.2.5', 'async_timeout==1.4.0'],
     version='0.2.3',
     description='A python3 library to communicate with Tibber',
