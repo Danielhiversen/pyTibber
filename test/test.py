@@ -7,7 +7,7 @@ import unittest
 import asyncio
 import aiohttp
 
-import Tibber
+import tibber
 
 
 class TestTibber(unittest.TestCase):
