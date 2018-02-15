@@ -36,7 +36,7 @@ class TestTibber(unittest.TestCase):
         home = self.tibber.get_homes()[0]
         home.sync_update_info()
         self.assertEqual(home.home_id, 'c70dcbe5-4485-4821-933d-a8a86452737b')
-        self.assertEqual(home.address1, 'Förmansvägen 21 Lgh 1502')
+        self.assertEqual(home.address1, 'Kungsgatan 8')
         self.assertEqual(home.country, 'SE')
         self.assertEqual(home.price_unit, 'SEK/kWh')
 
