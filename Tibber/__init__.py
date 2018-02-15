@@ -56,7 +56,7 @@ class Tibber(object):
             result = yield from resp.json()
         except (asyncio.TimeoutError, aiohttp.ClientError) as err:
             _LOGGER.error("Error connecting to Tibber: %s", err)
-            return None
+            raise
         assert 'errors' in result or 'data' in result,\
             'Received non-compatible response "{}"'.format(result)
         return result.get('data')
