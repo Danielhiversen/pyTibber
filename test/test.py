@@ -7,7 +7,7 @@ import unittest
 import asyncio
 import aiohttp
 
-import Tibber
+import tibber
 
 
 class TestTibber(unittest.TestCase):
@@ -17,7 +17,7 @@ class TestTibber(unittest.TestCase):
 
     def setUp(self):     # pylint: disable=invalid-name
         """ things to be run when tests are started. """
-        self.tibber = Tibber.Tibber()
+        self.tibber = tibber.Tibber()
         self.tibber.sync_update_info()
 
     def tearDown(self):  # pylint: disable=invalid-name
@@ -36,7 +36,7 @@ class TestTibber(unittest.TestCase):
         home = self.tibber.get_homes()[0]
         home.sync_update_info()
         self.assertEqual(home.home_id, 'c70dcbe5-4485-4821-933d-a8a86452737b')
-        self.assertEqual(home.address1, 'Förmansvägen 21 Lgh 1502')
+        self.assertEqual(home.address1, 'Kungsgatan 8')
         self.assertEqual(home.country, 'SE')
         self.assertEqual(home.price_unit, 'SEK/kWh')
 
@@ -69,7 +69,7 @@ class TestTibberWebsession(unittest.TestCase):
             return aiohttp.ClientSession()
         loop = asyncio.get_event_loop()
         self.websession = loop.run_until_complete(_create_session())
-        self.tibber = Tibber.Tibber(websession=self.websession)
+        self.tibber = tibber.Tibber(websession=self.websession)
         self.tibber.sync_update_info()
 
     def tearDown(self):  # pylint: disable=invalid-name
@@ -98,7 +98,7 @@ class TestTibberInvalidToken(unittest.TestCase):
 
     def setUp(self):     # pylint: disable=invalid-name
         """ things to be run when tests are started. """
-        self.tibber = Tibber.Tibber(access_token='INVALID_TOKEN')
+        self.tibber = tibber.Tibber(access_token='INVALID_TOKEN')
         self.tibber.sync_update_info()
 
     def tearDown(self):  # pylint: disable=invalid-name
