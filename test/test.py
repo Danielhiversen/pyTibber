@@ -88,7 +88,7 @@ class TestTibberWebsession(unittest.TestCase):
         self.assertEqual(home.home_id, 'c70dcbe5-4485-4821-933d-a8a86452737b')
         self.assertEqual(home.address1, '')
         self.assertEqual(home.country, '')
-        self.assertEqual(home.price_unit, '')
+        self.assertEqual(home.price_unit, ' ')
 
 
 class TestTibberInvalidToken(unittest.TestCase):

@@ -322,7 +322,7 @@ class TibberHome(object):
         """Return the consumption."""
         try:
             return self.info['viewer']['homes'][0]['consumption']['nodes'][0]['consumptionUnit']
-        except (KeyError, TypeError):
+        except (KeyError, TypeError, IndexError):
             _LOGGER.error("Could not find consumption unit.")
             return ''
 
@@ -331,7 +331,7 @@ class TibberHome(object):
         """Return the currency."""
         try:
             return self.info['viewer']['homes'][0]['consumption']['nodes'][0]['currency']
-        except (KeyError, TypeError):
+        except (KeyError, TypeError, IndexError):
             _LOGGER.error("Could not find currency.")
             return ''
 
@@ -351,5 +351,5 @@ class TibberHome(object):
         consumption_unit = self.consumption_unit
         if not currency or not consumption_unit:
             _LOGGER.error("Could not find price_unit.")
-            return ''
+            return ' '
         return currency + '/' + consumption_unit
