@@ -145,6 +145,7 @@ class TibberHome(object):
         {
           viewer {
             home(id: "%s") {
+              appNickname
               address {
                 address1
                 address2
@@ -157,9 +158,10 @@ class TibberHome(object):
               }
               meteringPointData {
                 consumptionEan
+                energyTaxType
+                estimatedAnnualConsumption
                 gridCompany
                 productionEan
-                energyTaxType
                 vatType
               }
               owner {
