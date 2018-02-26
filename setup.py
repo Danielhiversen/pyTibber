@@ -8,7 +8,7 @@ setup(
     name = 'pyTibber',
     packages = ['tibber'],
     install_requires=['gql==0.1.0', 'aiohttp==2.2.5', 'async_timeout==1.4.0'],
-    version='0.3.0',
+    version='0.3.1',
     description='A python3 library to communicate with Tibber',
     long_description=long_description,
     author='Daniel Hoyer Iversen',
