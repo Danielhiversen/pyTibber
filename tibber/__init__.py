@@ -37,7 +37,7 @@ class Tibber(object):
     @asyncio.coroutine
     def close_connection(self):
         """Close the Tibber connection."""
-        self.websession.close()
+        yield from self.websession.close()
 
     def sync_close_connection(self):
         """Close the Tibber connection."""
