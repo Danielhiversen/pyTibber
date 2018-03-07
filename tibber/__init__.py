@@ -34,6 +34,19 @@ class Tibber(object):
         self._home_ids = []
         self._homes = {}
 
+
+    @asyncio.coroutine
+    def close_connection(self):
+    """Close the Tibber connection."""
+        self.websession.close()
+
+
+    def sync_close_connection(self):
+    """Close the Tibber connection."""
+        loop = asyncio.get_event_loop()
+        task = loop.create_task(self.close_connection())
+        loop.run_until_complete(task)
+
     @asyncio.coroutine
     def _execute(self, document, variable_values=None):
         query_str = print_ast(document)

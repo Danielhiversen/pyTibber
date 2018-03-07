@@ -22,7 +22,7 @@ class TestTibber(unittest.TestCase):
 
     def tearDown(self):  # pylint: disable=invalid-name
         """ Stop stuff we started. """
-        self.tibber.websession.close()
+        self.tibber.close_connection()
 
     def test_tibber(self):
         self.assertEqual(self.tibber.name, 'Arya Stark')
