@@ -21,8 +21,7 @@ class Tibber(object):
                  websession=None):
         """Initialize the Tibber connection."""
         if websession is None:
-            @asyncio.coroutine
-            def _create_session():
+            async def _create_session():
                 return aiohttp.ClientSession()
             loop = asyncio.get_event_loop()
             self.websession = loop.run_until_complete(_create_session())
@@ -34,10 +33,9 @@ class Tibber(object):
         self._home_ids = []
         self._homes = {}
 
-    @asyncio.coroutine
-    def close_connection(self):
+    async def close_connection(self):
         """Close the Tibber connection."""
-        yield from self.websession.close()
+        await self.websession.close()
 
     def sync_close_connection(self):
         """Close the Tibber connection."""
@@ -45,8 +43,7 @@ class Tibber(object):
         task = loop.create_task(self.close_connection())
         loop.run_until_complete(task)
 
-    @asyncio.coroutine
-    def _execute(self, document, variable_values=None):
+    async def _execute(self, document, variable_values=None):
         query_str = print_ast(document)
         payload = {
             'query': query_str,
@@ -60,11 +57,11 @@ class Tibber(object):
 
         try:
             with async_timeout.timeout(self._timeout):
-                resp = yield from self.websession.post(API_ENDPOINT,
-                                                       **post_args)
+                resp = await self.websession.post(API_ENDPOINT,
+                                                  **post_args)
             if resp.status != 200:
                 return None
-            result = yield from resp.json()
+            result = await resp.json()
         except (asyncio.TimeoutError, aiohttp.ClientError) as err:
             _LOGGER.error("Error connecting to Tibber: %s", err)
             raise
@@ -78,8 +75,7 @@ class Tibber(object):
         task = loop.create_task(self.update_info())
         loop.run_until_complete(task)
 
-    @asyncio.coroutine
-    def update_info(self, *_):
+    async def update_info(self, *_):
         """Update home info async."""
         query = gql('''
         {
@@ -92,7 +88,7 @@ class Tibber(object):
         }
         ''')
 
-        res = yield from self._execute(query)
+        res = await self._execute(query)
         if not res:
             return
         viewer = res.get('viewer')
@@ -149,8 +145,7 @@ class TibberHome(object):
         task = loop.create_task(self.update_info())
         loop.run_until_complete(task)
 
-    @asyncio.coroutine
-    def update_info(self):
+    async def update_info(self):
         """Update current price info async."""
         query = gql('''
         {
@@ -202,7 +197,7 @@ class TibberHome(object):
           }
         }
         ''' % (self._home_id))
-        self.info = yield from self._execute(query)
+        self.info = await self._execute(query)
 
     def sync_update_current_price_info(self):
         """Update current price info."""
@@ -210,8 +205,7 @@ class TibberHome(object):
         task = loop.create_task(self.update_current_price_info())
         loop.run_until_complete(task)
 
-    @asyncio.coroutine
-    def update_current_price_info(self):
+    async def update_current_price_info(self):
         """Update current price info async."""
         query = gql('''
         {
@@ -231,7 +225,7 @@ class TibberHome(object):
           }
         }
         ''' % (self.home_id))
-        price_info_temp = yield from self._execute(query)
+        price_info_temp = await self._execute(query)
         if not price_info_temp:
             _LOGGER.error("Could not find current price info.")
             return
@@ -251,8 +245,7 @@ class TibberHome(object):
         task = loop.create_task(self.update_price_info())
         loop.run_until_complete(task)
 
-    @asyncio.coroutine
-    def update_price_info(self):
+    async def update_price_info(self):
         """Update price info async."""
         query = gql('''
         {
@@ -280,7 +273,7 @@ class TibberHome(object):
           }
         }
         ''' % (self.home_id))
-        price_info_temp = yield from self._execute(query)
+        price_info_temp = await self._execute(query)
         if not price_info_temp:
             _LOGGER.error("Could not find price info.")
             return
@@ -326,7 +319,7 @@ class TibberHome(object):
             return self.info['viewer']['home']['address']['address1']
         except (KeyError, TypeError):
             _LOGGER.error("Could not find address1.")
-            return ''
+        return ''
 
     @property
     def consumption_unit(self):
@@ -335,7 +328,7 @@ class TibberHome(object):
             return self.info['viewer']['home']['consumption']['nodes'][0]['consumptionUnit']
         except (KeyError, TypeError, IndexError):
             _LOGGER.error("Could not find consumption unit.")
-            return ''
+        return ''
 
     @property
     def currency(self):
@@ -344,7 +337,7 @@ class TibberHome(object):
             return self.info['viewer']['home']['consumption']['nodes'][0]['currency']
         except (KeyError, TypeError, IndexError):
             _LOGGER.error("Could not find currency.")
-            return ''
+        return ''
 
     @property
     def country(self):
@@ -353,7 +346,7 @@ class TibberHome(object):
             return self.info['viewer']['home']['address']['country']
         except (KeyError, TypeError):
             _LOGGER.error("Could not find country.")
-            return ''
+        return ''
 
     @property
     def price_unit(self):
