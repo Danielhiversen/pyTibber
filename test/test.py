@@ -22,7 +22,7 @@ class TestTibber(unittest.TestCase):
 
     def tearDown(self):  # pylint: disable=invalid-name
         """ Stop stuff we started. """
-        self.tibber.websession.close()
+        self.tibber.sync_close_connection()
 
     def test_tibber(self):
         self.assertEqual(self.tibber.name, 'Arya Stark')
@@ -74,14 +74,14 @@ class TestTibberWebsession(unittest.TestCase):
 
     def tearDown(self):  # pylint: disable=invalid-name
         """ Stop stuff we started. """
-        self.tibber.websession.close()
+        self.tibber.sync_close_connection()
 
     def test_tibber(self):
         self.assertEqual(self.tibber.name, 'Arya Stark')
         self.assertEqual(len(self.tibber.get_homes()), 1)
 
         home = self.tibber.get_homes()[0]
-        self.websession.close()
+        self.tibber.sync_close_connection()
         self.assertRaises(RuntimeError, self.tibber.sync_update_info)
 
         self.assertRaises(RuntimeError, home.sync_update_info)
@@ -103,7 +103,7 @@ class TestTibberInvalidToken(unittest.TestCase):
 
     def tearDown(self):  # pylint: disable=invalid-name
         """ Stop stuff we started. """
-        self.tibber.websession.close()
+        self.tibber.sync_close_connection()
 
     def test_tibber(self):
         self.assertEqual(self.tibber.name, None)
