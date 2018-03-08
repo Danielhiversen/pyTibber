@@ -33,7 +33,7 @@ class Tibber(object):
         self._home_ids = []
         self._homes = {}
 
-   async def close_connection(self):
+    async def close_connection(self):
         """Close the Tibber connection."""
         await self.websession.close()
 
