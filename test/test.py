@@ -64,8 +64,7 @@ class TestTibberWebsession(unittest.TestCase):
 
     def setUp(self):     # pylint: disable=invalid-name
         """ things to be run when tests are started. """
-        @asyncio.coroutine
-        def _create_session():
+        async def _create_session():
             return aiohttp.ClientSession()
         loop = asyncio.get_event_loop()
         self.websession = loop.run_until_complete(_create_session())
