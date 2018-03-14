@@ -7,7 +7,6 @@ import async_timeout
 from gql import gql
 from graphql.language.printer import print_ast
 
-DEFAULT_TIMEOUT = 10
 DEMO_TOKEN = 'd1007ead2dc84a2b82f0de19451c5fb22112f7ae11d19bf2bedb224a003ff74a'
 API_ENDPOINT = 'https://api.tibber.com/v1-beta/gql'
 _LOGGER = logging.getLogger(__name__)
@@ -17,7 +16,7 @@ class Tibber(object):
     """Class to comunicate with the Tibber api."""
 
     def __init__(self, access_token=DEMO_TOKEN,
-                 timeout=DEFAULT_TIMEOUT,
+                 timeout=aiohttp.client.DEFAULT_TIMEOUT,
                  websession=None):
         """Initialize the Tibber connection."""
         if websession is None:
