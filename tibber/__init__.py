@@ -295,6 +295,8 @@ class TibberHome(object):
     @property
     def current_price_total(self):
         """Get current price total."""
+        if not self._current_price_info:
+            return None
         return self._current_price_info.get('total')
 
     @property
