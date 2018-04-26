@@ -60,6 +60,7 @@ class Tibber(object):
                 resp = await self.websession.post(API_ENDPOINT,
                                                   **post_args)
             if resp.status != 200:
+                _LOGGER.error("Error connecting to Tibber, resp code: %s", resp.status)
                 return None
             result = await resp.json()
         except (asyncio.TimeoutError, aiohttp.ClientError) as err:
