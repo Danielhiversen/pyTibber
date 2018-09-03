@@ -46,15 +46,15 @@ class TestTibber(unittest.TestCase):
 
         home.sync_update_current_price_info()
         self.assertTrue(home.current_price_total > 0)
-        self.assertTrue(isinstance(home.current_price_info.get('energy'), float))
+        self.assertTrue(isinstance(home.current_price_info.get('energy'), (float, int)))
         self.assertTrue(isinstance(home.current_price_info.get('startsAt'), str))
-        self.assertTrue(isinstance(home.current_price_info.get('tax'), float))
-        self.assertTrue(isinstance(home.current_price_info.get('total'), float))
+        self.assertTrue(isinstance(home.current_price_info.get('tax'), (float, int)))
+        self.assertTrue(isinstance(home.current_price_info.get('total'), (float, int)))
 
         home.sync_update_price_info()
         for key in home.price_total.keys():
             self.assertTrue(isinstance(key, str))
-            self.assertTrue(isinstance(home.price_total[key], float))
+            self.assertTrue(isinstance(home.price_total[key], (float, int)))
 
 
 class TestTibberWebsession(unittest.TestCase):
