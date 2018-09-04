@@ -13,7 +13,7 @@ API_ENDPOINT = 'https://api.tibber.com/v1-beta/gql'
 _LOGGER = logging.getLogger(__name__)
 
 
-class Tibber(object):
+class Tibber:
     """Class to comunicate with the Tibber api."""
 
     def __init__(self, access_token=DEMO_TOKEN,
@@ -128,7 +128,7 @@ class Tibber(object):
         return self._homes[home_id]
 
 
-class TibberHome(object):
+class TibberHome:
     """Instance of Tibber home."""
 
     def __init__(self, home_id, execute):
