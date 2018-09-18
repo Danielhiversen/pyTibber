@@ -39,6 +39,7 @@ class TestTibber(unittest.TestCase):
         self.assertEqual(home.address1, 'Kungsgatan 8')
         self.assertEqual(home.country, 'SE')
         self.assertEqual(home.price_unit, 'SEK/kWh')
+        self.assertTrue(home.has_real_time_consumption)
 
         self.assertEqual(home.current_price_total, None)
         self.assertEqual(home.price_total, {})
@@ -86,6 +87,7 @@ class TestTibberWebsession(unittest.TestCase):
         self.assertRaises(RuntimeError, home.sync_update_info)
         self.assertEqual(home.home_id, 'c70dcbe5-4485-4821-933d-a8a86452737b')
         self.assertEqual(home.address1, '')
+        self.assertFalse(home.has_real_time_consumption)
         self.assertEqual(home.country, '')
         self.assertEqual(home.price_unit, ' ')
 

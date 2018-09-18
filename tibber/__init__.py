@@ -157,6 +157,9 @@ class TibberHome:
           viewer {
             home(id: "%s") {
               appNickname
+              features {
+                  realTimeConsumptionEnabled
+                }
               address {
                 address1
                 address2
@@ -201,7 +204,7 @@ class TibberHome:
             }
           }
         }
-        ''' % (self._home_id))
+        ''' % self._home_id)
         self.info = await self._execute(query)
 
     def sync_update_current_price_info(self):
@@ -229,7 +232,7 @@ class TibberHome:
             }
           }
         }
-        ''' % (self.home_id))
+        ''' % self.home_id)
         price_info_temp = await self._execute(query)
         if not price_info_temp:
             _LOGGER.error("Could not find current price info.")
@@ -277,7 +280,7 @@ class TibberHome:
             }
           }
         }
-        ''' % (self.home_id))
+        ''' % self.home_id)
         price_info_temp = await self._execute(query)
         if not price_info_temp:
             _LOGGER.error("Could not find price info.")
@@ -318,6 +321,14 @@ class TibberHome:
     def home_id(self):
         """Return home id."""
         return self._home_id
+
+    @property
+    def has_real_time_consumption(self):
+        """Return home id."""
+        try:
+            return self.info['viewer']['home']['features']['realTimeConsumptionEnabled']
+        except (KeyError, TypeError):
+            return False
 
     @property
     def address1(self):
