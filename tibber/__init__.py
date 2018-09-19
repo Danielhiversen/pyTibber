@@ -51,14 +51,16 @@ class Tibber:
         """Start subscription manager for real time data."""
         if self.sub_manager is not None:
             return
-        self.sub_manager = SubscriptionManager(loop, self._access_token, SUB_ENDPOINT)
+        self.sub_manager = SubscriptionManager(loop,
+                                               "token={}".format(self._access_token),
+                                               SUB_ENDPOINT)
         self.sub_manager.start()
 
     async def rt_disconnect(self):
         """Stop subscription manager."""
         if self.sub_manager is None:
             return
-        self.sub_manager.stop()
+        await self.sub_manager.stop()
 
     async def execute(self, document, variable_values=None):
         """Execute gql."""
