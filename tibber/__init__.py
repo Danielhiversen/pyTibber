@@ -1,15 +1,18 @@
 """Library to handle connection with Tibber API."""
+import asyncio
 import logging
 
-import asyncio
 import aiohttp
 import async_timeout
 from gql import gql
 from graphql.language.printer import print_ast
 
+from .subscription_manager import SubscriptionManager
+
 DEFAULT_TIMEOUT = 10
 DEMO_TOKEN = 'd1007ead2dc84a2b82f0de19451c5fb22112f7ae11d19bf2bedb224a003ff74a'
 API_ENDPOINT = 'https://api.tibber.com/v1-beta/gql'
+SUB_ENDPOINT = 'wss://api.tibber.com/v1-beta/gql/subscriptions'
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -28,10 +31,11 @@ class Tibber:
         else:
             self.websession = websession
         self._timeout = timeout
-        self._headers = {'Authorization': 'Bearer ' + access_token}
+        self._access_token = access_token
         self._name = None
         self._home_ids = []
         self._homes = {}
+        self.sub_manager = None
 
     async def close_connection(self):
         """Close the Tibber connection."""
@@ -43,7 +47,21 @@ class Tibber:
         task = loop.create_task(self.close_connection())
         loop.run_until_complete(task)
 
-    async def _execute(self, document, variable_values=None):
+    async def rt_connect(self, loop):
+        """Start subscription manager for real time data."""
+        if self.sub_manager is not None:
+            return
+        self.sub_manager = SubscriptionManager(loop, self._access_token, SUB_ENDPOINT)
+        self.sub_manager.start()
+
+    async def rt_disconnect(self):
+        """Stop subscription manager."""
+        if self.sub_manager is None:
+            return
+        self.sub_manager.stop()
+
+    async def execute(self, document, variable_values=None):
+        """Execute gql."""
         query_str = print_ast(document)
         payload = {
             'query': query_str,
@@ -51,7 +69,7 @@ class Tibber:
         }
 
         post_args = {
-            'headers': self._headers,
+            'headers': {'Authorization': 'Bearer ' + self._access_token},
             'data': payload
         }
 
@@ -92,7 +110,7 @@ class Tibber:
         }
         ''')
 
-        res = await self._execute(query)
+        res = await self.execute(query)
         if not res:
             return
         viewer = res.get('viewer')
@@ -128,21 +146,24 @@ class Tibber:
                           home_id)
             return None
         if home_id not in self._homes.keys():
-            self._homes[home_id] = TibberHome(home_id, self._execute)
+            self._homes[home_id] = TibberHome(home_id, self)
         return self._homes[home_id]
 
 
 class TibberHome:
     """Instance of Tibber home."""
+    # pylint: disable=too-many-instance-attributes
 
-    def __init__(self, home_id, execute):
+    def __init__(self, home_id, tibber_control):
         """Initialize the Tibber home class."""
-        self._execute = execute
+        self._tibber_control = tibber_control
         self._home_id = home_id
         self._current_price_total = None
         self._current_price_info = {}
         self._price_info = {}
+        self.sub_manager = None
         self.info = {}
+        self._subscription_id = None
 
     def sync_update_info(self):
         """Update current price info."""
@@ -205,7 +226,7 @@ class TibberHome:
           }
         }
         ''' % self._home_id)
-        self.info = await self._execute(query)
+        self.info = await self._tibber_control.execute(query)
 
     def sync_update_current_price_info(self):
         """Update current price info."""
@@ -233,7 +254,7 @@ class TibberHome:
           }
         }
         ''' % self.home_id)
-        price_info_temp = await self._execute(query)
+        price_info_temp = await self._tibber_control.execute(query)
         if not price_info_temp:
             _LOGGER.error("Could not find current price info.")
             return
@@ -281,7 +302,7 @@ class TibberHome:
           }
         }
         ''' % self.home_id)
-        price_info_temp = await self._execute(query)
+        price_info_temp = await self._tibber_control.execute(query)
         if not price_info_temp:
             _LOGGER.error("Could not find price info.")
             return
@@ -375,3 +396,30 @@ class TibberHome:
             _LOGGER.error("Could not find price_unit.")
             return ' '
         return currency + '/' + consumption_unit
+
+    async def rt_subscribe(self, loop, async_callback):
+        """Connect to Tibber and subscribe to Tibber rt subscription."""
+        if self._subscription_id is not None:
+            _LOGGER.error("Already subscribed.")
+            return
+        await self._tibber_control.rt_connect(loop)
+        sub_query = 'subscription{{liveMeasurement(homeId:"{}"){{\n    timestamp\n    ' \
+                    'power\n    accumulatedConsumption\n    accumulatedCost\n    currency\n    ' \
+                    'minPower\n  averagePower\n    maxPower\n  }}\n}}\n'.format(self.home_id)
+        self._subscription_id = await self._tibber_control.sub_manager.subscribe(sub_query,
+                                                                                 async_callback)
+
+    async def rt_unsubscribe(self):
+        """Unsubscribe to Tibber rt subscription."""
+        if self._subscription_id is None:
+            _LOGGER.error("Not subscribed.")
+            return
+        await self._tibber_control.sub_manager.unsubscribe(self._subscription_id)
+
+    @property
+    def rt_subscription_running(self):
+        """Is real time subscription running."""
+        return (self._tibber_control.sub_manager is not None and
+                self._tibber_control.sub_manager.is_running and
+                self._subscription_id is not None and
+                self._subscription_id in self._tibber_control.sub_manager.async_callbacks)
