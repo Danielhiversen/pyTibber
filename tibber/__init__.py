@@ -54,13 +54,13 @@ class Tibber:
         self.sub_manager = SubscriptionManager(loop,
                                                "token={}".format(self._access_token),
                                                SUB_ENDPOINT)
-        self.sub_manager.start()
+        await self.sub_manager.start()
 
-    async def rt_disconnect(self):
+    async def rt_disconnect(self, blocking=False):
         """Stop subscription manager."""
         if self.sub_manager is None:
             return
-        await self.sub_manager.stop()
+        await self.sub_manager.stop(blocking)
 
     async def execute(self, document, variable_values=None):
         """Execute gql."""
@@ -405,9 +405,22 @@ class TibberHome:
             _LOGGER.error("Already subscribed.")
             return
         await self._tibber_control.rt_connect(loop)
-        sub_query = 'subscription{{liveMeasurement(homeId:"{}"){{\n    timestamp\n    ' \
-                    'power\n    accumulatedConsumption\n    accumulatedCost\n    currency\n    ' \
-                    'minPower\n  averagePower\n    maxPower\n  }}\n}}\n'.format(self.home_id)
+        document = gql('''
+            subscription{
+              liveMeasurement(homeId:"%s"){
+                timestamp
+                power
+                accumulatedConsumption
+                accumulatedCost
+                currency
+                minPower
+                averagePower
+            maxPower
+            }
+           }
+        ''' % self.home_id)
+        sub_query = print_ast(document)
+
         self._subscription_id = await self._tibber_control.sub_manager.subscribe(sub_query,
                                                                                  async_callback)
 
@@ -424,4 +437,4 @@ class TibberHome:
         return (self._tibber_control.sub_manager is not None and
                 self._tibber_control.sub_manager.is_running and
                 self._subscription_id is not None and
-                self._subscription_id in self._tibber_control.sub_manager.async_callbacks)
+                self._subscription_id in self._tibber_control.sub_manager.subscriptions)

@@ -1,4 +1,4 @@
-"""Subscription manager."""
+"""Subscription manager for Graph QL."""
 
 import asyncio
 import json
@@ -17,7 +17,7 @@ class SubscriptionManager:
     def __init__(self, loop, init_payload, url):
         """Create resources for websocket communication."""
         self.loop = loop
-        self.async_callbacks = {}
+        self.subscriptions = {}
         self._url = url
         self.is_running = False
         self.websocket = None
@@ -25,13 +25,17 @@ class SubscriptionManager:
         self._session_id = 0
         self._init_payload = init_payload
 
-    def start(self):
+    async def start(self):
         """Start websocket."""
         if self.is_running:
             return
-        self.is_running = True
-        self._session_id = 0
+        self._session_id = len(self.subscriptions)
         self.loop.create_task(self._connect())
+        for subscription_id in range(len(self.subscriptions)):
+            callback, sub_query = self.subscriptions.get(subscription_id, (None, None))
+            if callback is None:
+                continue
+            await self.subscribe(sub_query, callback, subscription_id)
 
     async def _connect(self):
         """Start websocket connection."""
@@ -48,19 +52,24 @@ class SubscriptionManager:
                 self.retry()
 
         try:
-            self.is_running = True
             self.websocket.send(json.dumps({"type": "init",
                                             "payload": self._init_payload}))
-            k = 0
+            self.is_running = True
+
             while self.is_running:
-                k += 1
+                print("-------")
                 result = json.loads(await self.websocket.recv())
-                session_id = result.get('id')
-                if session_id is None:
+                print(result)
+                subscription_id = result.get('id')
+                if subscription_id is None:
                     continue
 
-                callback = self.async_callbacks.get(session_id)
+                callback, _ = self.subscriptions.get(subscription_id, (None, None))
                 if callback is None:
+                    continue
+
+                if result.get('type', '') == 'complete':
+                    del self.subscriptions[subscription_id]
                     continue
 
                 data = result.get('payload', {})
@@ -70,50 +79,55 @@ class SubscriptionManager:
 
         except Exception:  # pylint: disable=broad-except
             _LOGGER.error('Unexpected error', exc_info=True)
-            if self.is_running:
-                self.retry()
         finally:
+            print("finish")
             await self.websocket.close()
+            if self.is_running:
+                self.is_running = False
+                await self.retry()
 
     async def stop(self, blocking=False):
         """Close websocket connection."""
-        for subscription_id in range(len(self.async_callbacks)):
+        for subscription_id in range(len(self.subscriptions)):
             await self.unsubscribe(subscription_id)
-        self.is_running = False
-        k = 0
-        while blocking and not self.websocket.closed:
-            k += 1
+        while blocking and not self.subscriptions:
             await asyncio.sleep(0.1, loop=self.loop)
-            if k % 5:
-                await self.websocket.close()
 
-    def retry(self):
-        """Retry to connect to Tibber."""
-        self.loop.call_later(self.retry_timer, self.start)
-        _LOGGER.debug('Reconnecting to Tibber in %i.', self.retry_timer)
+        self.is_running = False
+        await self.websocket.close()
+        while (blocking and
+               self.websocket is not None and
+               not self.websocket.closed):
+            await asyncio.sleep(0.1, loop=self.loop)
 
-    async def subscribe(self, sub_query, callback):
+    async def retry(self):
+        """Retry to connect to werbsocket."""
+        await asyncio.sleep(self.retry_timer, loop=self.loop)
+        await self.start()
+        _LOGGER.debug('Reconnecting to server in %i.', self.retry_timer)
+
+    async def subscribe(self, sub_query, callback, current_session_id=None):
         """Add a new subscription."""
+        print("a")
         if not self.is_running:
+            print("av")
             await self.start()
-        if self.websocket is None:
+        if current_session_id is None:
+            current_session_id = self._session_id
+            self._session_id += 1
+        if self.websocket is None or not self.websocket.open:
             await asyncio.sleep(1, loop=self.loop)
-            return await self.subscribe(sub_query, callback)
+            return await self.subscribe(sub_query, callback, current_session_id)
 
-        current_session_id = self._session_id
-        self._session_id += 1
-        await self._send_subscription(current_session_id, sub_query)
-        self.async_callbacks[current_session_id] = callback
-        return current_session_id
-
-    async def _send_subscription(self, current_session_id, sub_query):
         subscription = {"query": sub_query,
                         "type": "subscription_start", "id": current_session_id}
         json_subscription = json.dumps(subscription)
         await self.websocket.send(json_subscription)
+        print("avddd")
+        self.subscriptions[current_session_id] = (callback, sub_query)
+        return current_session_id
 
     async def unsubscribe(self, subscription_id):
         """Unsubscribe."""
-        del self.async_callbacks[subscription_id]
         await self.websocket.send(json.dumps({"id": subscription_id,
                                               "type": "subscription_end"}))
