@@ -2,12 +2,26 @@
 """
 Tests for pyTibber
 """
+import asyncio
+import os
+import sys
+import time
 import unittest
 
-import asyncio
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 import aiohttp
-
 import tibber
+
+
+import logging
+_LOGGER = logging.getLogger(__name__)
+
+_LOGGER.setLevel(logging.DEBUG)
+def async_test(coro):
+    def wrapper(*args, **kwargs):
+        loop = asyncio.new_event_loop()
+        return loop.run_until_complete(coro(*args, **kwargs))
+    return wrapper
 
 
 class TestTibber(unittest.TestCase):
@@ -90,6 +104,39 @@ class TestTibberWebsession(unittest.TestCase):
         self.assertFalse(home.has_real_time_consumption)
         self.assertEqual(home.country, '')
         self.assertEqual(home.price_unit, ' ')
+
+
+class TestTibberRTdata(unittest.TestCase):
+    """
+    Tests Tibber
+    """
+
+    def setUp(self):     # pylint: disable=invalid-name
+        """ things to be run when tests are started. """
+        async def _create_session():
+            return aiohttp.ClientSession()
+        self.loop = asyncio.get_event_loop()
+        self.websession = self.loop.run_until_complete(_create_session())
+        self.tibber = tibber.Tibber(websession=self.websession)
+        self.tibber.sync_update_info()
+
+    def tearDown(self):  # pylint: disable=invalid-name
+        """ Stop stuff we started. """
+        self.tibber.sync_close_connection()
+
+    def test_tibber(self):
+        num_calbacks = 0
+
+        async def _callback(data):
+            nonlocal num_calbacks
+            num_calbacks += 1
+            print(num_calbacks, data)
+        home = self.tibber.get_homes()[0]
+        asyncio.get_event_loop().run_until_complete(home.rt_subscribe(asyncio.get_event_loop(), _callback))
+        time.sleep(20)
+        self.assertTrue(num_calbacks > 0)
+
+        self.loop.run_until_complete(self.tibber.rt_disconnect())
 
 
 class TestTibberInvalidToken(unittest.TestCase):

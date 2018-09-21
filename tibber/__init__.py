@@ -54,7 +54,7 @@ class Tibber:
         self.sub_manager = SubscriptionManager(loop,
                                                "token={}".format(self._access_token),
                                                SUB_ENDPOINT)
-        await self.sub_manager.start()
+        self.sub_manager.start()
 
     async def rt_disconnect(self, blocking=False):
         """Stop subscription manager."""

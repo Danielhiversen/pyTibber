@@ -9,6 +9,10 @@ import websockets
 
 _LOGGER = logging.getLogger(__name__)
 
+STATE_STARTING = 'starting'
+STATE_RUNNING = 'running'
+STATE_STOPPED = 'stopped'
+
 
 class SubscriptionManager:
     """Subscription manager."""
@@ -19,25 +23,29 @@ class SubscriptionManager:
         self.loop = loop
         self.subscriptions = {}
         self._url = url
-        self.is_running = False
+        self._state = None
         self.websocket = None
         self.retry_timer = 15
         self._session_id = 0
         self._init_payload = init_payload
 
-    async def start(self):
+    def start(self):
         """Start websocket."""
-        if self.is_running:
+        if self._state == STATE_RUNNING:
             return
-        self._session_id = len(self.subscriptions)
-        self.loop.create_task(self._connect())
+        self._state = STATE_STARTING
+        self.loop.create_task(self.running())
         for subscription_id in range(len(self.subscriptions)):
             callback, sub_query = self.subscriptions.get(subscription_id, (None, None))
             if callback is None:
                 continue
-            await self.subscribe(sub_query, callback, subscription_id)
+            self.loop.create_task(self.subscribe(sub_query, callback, subscription_id))
 
-    async def _connect(self):
+    @property
+    def is_running(self):
+        return self._state == STATE_RUNNING
+
+    async def running(self):
         """Start websocket connection."""
         ssl_context = ssl.create_default_context()
         ssl_context.check_hostname = False
@@ -46,17 +54,15 @@ class SubscriptionManager:
             self.websocket = await websockets.connect(self._url,
                                                       ssl=ssl_context,
                                                       subprotocols=["graphql-subscriptions"])
+            self._state = STATE_RUNNING
         except Exception:  # pylint: disable=broad-except
             _LOGGER.error('Unexpected error', exc_info=True)
-            if self.is_running:
-                self.retry()
+            self.retry()
 
         try:
             self.websocket.send(json.dumps({"type": "init",
                                             "payload": self._init_payload}))
-            self.is_running = True
-
-            while self.is_running:
+            while self._state != STATE_STOPPED:
                 print("-------")
                 result = json.loads(await self.websocket.recv())
                 print(result)
@@ -82,8 +88,7 @@ class SubscriptionManager:
         finally:
             print("finish")
             await self.websocket.close()
-            if self.is_running:
-                self.is_running = False
+            if self._state != STATE_STOPPED:
                 await self.retry()
 
     async def stop(self, blocking=False):
@@ -93,7 +98,7 @@ class SubscriptionManager:
         while blocking and not self.subscriptions:
             await asyncio.sleep(0.1, loop=self.loop)
 
-        self.is_running = False
+        self._state = STATE_STOPPED
         await self.websocket.close()
         while (blocking and
                self.websocket is not None and
@@ -102,16 +107,15 @@ class SubscriptionManager:
 
     async def retry(self):
         """Retry to connect to werbsocket."""
-        await asyncio.sleep(self.retry_timer, loop=self.loop)
-        await self.start()
+        self.loop.call_later(self.retry_timer, self.start)
         _LOGGER.debug('Reconnecting to server in %i.', self.retry_timer)
 
     async def subscribe(self, sub_query, callback, current_session_id=None):
         """Add a new subscription."""
         print("a")
-        if not self.is_running:
+        if self._state != STATE_RUNNING:
             print("av")
-            await self.start()
+            self.start()
         if current_session_id is None:
             current_session_id = self._session_id
             self._session_id += 1
