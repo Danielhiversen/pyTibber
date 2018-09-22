@@ -192,11 +192,10 @@ class TibberHome:
                 validTo
                 statusReason
               }
-              consumption(resolution: HOURLY, last: 1) {
-                nodes {
-                  consumptionUnit
-                  currency
-                }
+              priceInfo {
+                  current {
+                    currency
+                  }
               }
             }
           }
@@ -259,6 +258,7 @@ class TibberHome:
               currentSubscription {
                 priceInfo {
                   current {
+                    currency
                     energy
                     tax
                     total
@@ -331,17 +331,13 @@ class TibberHome:
     @property
     def consumption_unit(self):
         """Return the consumption."""
-        try:
-            return self.info['viewer']['home']['consumption']['nodes'][0]['consumptionUnit']
-        except (KeyError, TypeError, IndexError):
-            _LOGGER.error("Could not find consumption unit.")
-        return ''
+        return 'kWh'
 
     @property
     def currency(self):
         """Return the currency."""
         try:
-            return self.info['viewer']['home']['consumption']['nodes'][0]['currency']
+            return self.info['viewer']['home']['priceInfo']['current']['currency']
         except (KeyError, TypeError, IndexError):
             _LOGGER.error("Could not find currency.")
         return ''
