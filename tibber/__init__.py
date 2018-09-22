@@ -152,6 +152,7 @@ class TibberHome:
 
     async def update_info(self):
         """Update current price info async."""
+        print("-------------------aaaa")
         query = gql('''
         {
           viewer {
@@ -192,14 +193,16 @@ class TibberHome:
                 validTo
                 statusReason
               }
-              priceInfo {
-                  current {
-                    currency
+             currentSubscription {
+                    priceInfo {
+                      current {
+                        currency
+                      }
+                    }
                   }
+                }
               }
             }
-          }
-        }
         ''' % (self._home_id))
         self.info = await self._execute(query)
 
@@ -337,7 +340,8 @@ class TibberHome:
     def currency(self):
         """Return the currency."""
         try:
-            return self.info['viewer']['home']['priceInfo']['current']['currency']
+            current_subscription = self.info['viewer']['home']['currentSubscription']
+            return current_subscription['priceInfo']['current']['currency']
         except (KeyError, TypeError, IndexError):
             _LOGGER.error("Could not find currency.")
         return ''
