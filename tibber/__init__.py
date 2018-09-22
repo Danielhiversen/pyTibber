@@ -259,7 +259,6 @@ class TibberHome:
               currentSubscription {
                 priceInfo {
                   current {
-                    currency
                     energy
                     tax
                     total
