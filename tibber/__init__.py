@@ -44,6 +44,7 @@ class Tibber:
         loop.run_until_complete(task)
 
     async def _execute(self, document, variable_values=None):
+        query_str = print_ast(document)
         payload = {
             'query': query_str,
             'variables': variable_values or {}
