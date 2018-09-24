@@ -56,11 +56,11 @@ class Tibber:
                                                SUB_ENDPOINT)
         self.sub_manager.start()
 
-    async def rt_disconnect(self, blocking=False):
+    async def rt_disconnect(self):
         """Stop subscription manager."""
         if self.sub_manager is None:
             return
-        await self.sub_manager.stop(blocking)
+        await self.sub_manager.stop()
 
     async def execute(self, document, variable_values=None):
         """Execute gql."""

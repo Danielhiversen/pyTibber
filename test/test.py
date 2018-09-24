@@ -106,39 +106,6 @@ class TestTibberWebsession(unittest.TestCase):
         self.assertEqual(home.price_unit, ' ')
 
 
-class TestTibberRTdata(unittest.TestCase):
-    """
-    Tests Tibber
-    """
-
-    def setUp(self):     # pylint: disable=invalid-name
-        """ things to be run when tests are started. """
-        async def _create_session():
-            return aiohttp.ClientSession()
-        self.loop = asyncio.get_event_loop()
-        self.websession = self.loop.run_until_complete(_create_session())
-        self.tibber = tibber.Tibber(websession=self.websession)
-        self.tibber.sync_update_info()
-
-    def tearDown(self):  # pylint: disable=invalid-name
-        """ Stop stuff we started. """
-        self.tibber.sync_close_connection()
-
-    def test_tibber(self):
-        num_calbacks = 0
-
-        async def _callback(data):
-            nonlocal num_calbacks
-            num_calbacks += 1
-            print(num_calbacks, data)
-        home = self.tibber.get_homes()[0]
-        asyncio.get_event_loop().run_until_complete(home.rt_subscribe(asyncio.get_event_loop(), _callback))
-        time.sleep(20)
-        self.assertTrue(num_calbacks > 0)
-
-        self.loop.run_until_complete(self.tibber.rt_disconnect())
-
-
 class TestTibberInvalidToken(unittest.TestCase):
     """
     Tests Tibber

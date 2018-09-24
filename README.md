@@ -2,6 +2,11 @@
 
 Python3 library for Tibber.
 
+Read electricity price and consumption.
+
+If you have a Tibber Pulse you can see your consumption in real time.
+
+
 Go to [developer.tibber.com/](https://developer.tibber.com/) to get your API token.
 
 ## Install
