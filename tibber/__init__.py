@@ -13,6 +13,7 @@ DEFAULT_TIMEOUT = 10
 DEMO_TOKEN = 'd1007ead2dc84a2b82f0de19451c5fb22112f7ae11d19bf2bedb224a003ff74a'
 API_ENDPOINT = 'https://api.tibber.com/v1-beta/gql'
 SUB_ENDPOINT = 'wss://api.tibber.com/v1-beta/gql/subscriptions'
+
 _LOGGER = logging.getLogger(__name__)
 
 

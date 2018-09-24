@@ -1,4 +1,4 @@
-"""Subscription manager for Graph QL."""
+"""Subscription manager for Graph QL websocket."""
 
 import asyncio
 import json
