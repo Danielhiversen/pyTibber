@@ -13,17 +13,6 @@ import aiohttp
 import tibber
 
 
-import logging
-_LOGGER = logging.getLogger(__name__)
-
-_LOGGER.setLevel(logging.DEBUG)
-def async_test(coro):
-    def wrapper(*args, **kwargs):
-        loop = asyncio.new_event_loop()
-        return loop.run_until_complete(coro(*args, **kwargs))
-    return wrapper
-
-
 class TestTibber(unittest.TestCase):
     """
     Tests Tibber

@@ -36,11 +36,7 @@ class SubscriptionManager:
         if self._state == STATE_RUNNING:
             return
         self._state = STATE_STARTING
-        if self._client_task:
-            try:
-                self._client_task.cancel()
-            finally:
-                self._client_task = None
+        self._cancel_client_task()
         self._client_task = self.loop.create_task(self.running())
         for subscription_id in range(len(self.subscriptions)):
             callback, sub_query = self.subscriptions.get(subscription_id, (None, None))
@@ -90,12 +86,12 @@ class SubscriptionManager:
         """Close websocket connection."""
         _LOGGER.debug("Stopping client.")
         start_time = time()
-        if self._retry_timer:
-            self._retry_timer.cancel()
+        self._cancel_retry_timer()
 
         for subscription_id in range(len(self.subscriptions)):
             _LOGGER.debug("Sending unsubscribe: %s", subscription_id)
             await self.unsubscribe(subscription_id)
+
         while (timeout > 0 and
                self.websocket is not None
                and not self.subscriptions
@@ -108,25 +104,17 @@ class SubscriptionManager:
                not self.websocket.closed and
                (time() - start_time) < timeout):
             await asyncio.sleep(0.1, loop=self.loop)
+
         await self._close_websocket()
-        if self._client_task:
-            try:
-                self._client_task.cancel()
-            finally:
-                self._client_task = None
+        self._cancel_client_task()
         _LOGGER.debug("Server connection is stopped")
 
     def retry(self):
         """Retry to connect to websocket."""
         if self._state in [STATE_STARTING, STATE_RUNNING]:
             return
-        if self._retry_timer:
-            self._retry_timer.cancel()
-        if self._client_task:
-            try:
-                self._client_task.cancel()
-            finally:
-                self._client_task = None
+        self._cancel_retry_timer()
+        self._cancel_client_task()
         self._state = STATE_STARTING
         self._retry_timer = self.loop.call_later(self._wait_time_before_retry, self.start)
         _LOGGER.debug('Reconnecting to server in %i seconds.', self._wait_time_before_retry)
@@ -185,3 +173,14 @@ class SubscriptionManager:
             return
 
         await callback(data)
+
+    def _cancel_retry_timer(self):
+        if self._retry_timer:
+            self._retry_timer.cancel()
+
+    def _cancel_client_task(self):
+        if self._client_task:
+            try:
+                self._client_task.cancel()
+            finally:
+                self._client_task = None
