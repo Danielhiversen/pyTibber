@@ -229,8 +229,6 @@ class TibberHome:
                 }
               }
             }
-          }
-        }
         ''' % self._home_id)
         self.info = await self._tibber_control.execute(query)
 
