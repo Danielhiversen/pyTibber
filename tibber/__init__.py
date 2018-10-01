@@ -153,6 +153,7 @@ class Tibber:
         return self._homes[home_id]
 
     async def send_notification(self, title, message):
+        """Send notification."""
         query = gql('''
         mutation{
           sendPushNotification(input: {
