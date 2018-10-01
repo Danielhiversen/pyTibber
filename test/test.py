@@ -114,5 +114,28 @@ class TestTibberInvalidToken(unittest.TestCase):
         self.assertEqual(len(self.tibber.get_homes()), 0)
 
 
+class TestTibberPrivateToken(unittest.TestCase):
+    """
+    Tests Tibber
+    """
+
+    def setUp(self):     # pylint: disable=invalid-name
+        """ things to be run when tests are started. """
+        self.tibber = tibber.Tibber(access_token='d11a43897efa4cf478afd659d6c8b7117da9e33b38232fd454b0e9f28af98012')
+        self.tibber.sync_update_info()
+
+    def tearDown(self):  # pylint: disable=invalid-name
+        """ Stop stuff we started. """
+        self.tibber.sync_close_connection()
+
+    def test_tibber(self):
+        self.assertEqual(self.tibber.name, 'Daniel Høyer')
+        self.assertEqual(len(self.tibber.get_homes()), 0)
+
+    def test_invalid_home(self):
+        home = self.tibber.get_home("INVALID_KEY")
+        self.assertEqual(home, None)
+
+
 if __name__ == '__main__':
     unittest.main()

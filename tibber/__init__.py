@@ -123,7 +123,10 @@ class Tibber:
         homes = viewer.get('homes', [])
         for _home in homes:
             home_id = _home.get('id')
-            status = _home.get('subscriptions', [{}])[0].get('status', 'ended').lower()
+            subs = _home.get('subscriptions', [{}])
+            if not subs:
+                continue
+            status = subs[0].get('status', 'ended').lower()
             if not home_id or not status == 'running':
                 continue
             self._home_ids += [home_id]
