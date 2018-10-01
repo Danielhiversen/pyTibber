@@ -152,6 +152,30 @@ class Tibber:
             self._homes[home_id] = TibberHome(home_id, self)
         return self._homes[home_id]
 
+    async def send_notification(self, title, message):
+        query = gql('''
+        mutation{
+          sendPushNotification(input: {
+            title: "%s",
+            message: "%s",
+          }){
+            successful
+            pushedToNumberOfDevices
+          }
+        }
+        ''' % (title, message))
+
+        res = await self.execute(query)
+        if not res:
+            return False
+        noti = res.get("sendPushNotification", {})
+        successful = noti.get('successful', False)
+        pushed_to_number_of_devices = noti.get('pushedToNumberOfDevices', 0)
+        print(res)
+        _LOGGER.error("send_notification: status %s, send to %s devices",
+                      successful, pushed_to_number_of_devices)
+        return successful
+
 
 class TibberHome:
     """Instance of Tibber home."""
