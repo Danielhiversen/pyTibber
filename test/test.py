@@ -112,6 +112,7 @@ class TestTibberInvalidToken(unittest.TestCase):
     def test_tibber(self):
         self.assertEqual(self.tibber.name, None)
         self.assertEqual(len(self.tibber.get_homes()), 0)
+        self.assertTrue(self.tibber.send_notification("Test tittle", "message"))
 
 
 if __name__ == '__main__':
