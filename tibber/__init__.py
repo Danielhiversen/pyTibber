@@ -175,8 +175,7 @@ class Tibber:
         noti = res.get("sendPushNotification", {})
         successful = noti.get('successful', False)
         pushed_to_number_of_devices = noti.get('pushedToNumberOfDevices', 0)
-        print(res)
-        _LOGGER.error("send_notification: status %s, send to %s devices",
+        _LOGGER.debug("send_notification: status %s, send to %s devices",
                       successful, pushed_to_number_of_devices)
         return successful
 
