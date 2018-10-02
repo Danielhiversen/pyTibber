@@ -63,13 +63,14 @@ class SubscriptionManager:
                 try:
                     msg = await asyncio.wait_for(self.websocket.recv(), timeout=20)
                 except asyncio.TimeoutError:
-                    _LOGGER.error("No data in 20 seconds, checking the connection.")
+                    _LOGGER.error("No websocket data in 20 seconds, checking the connection.")
                     try:
                         pong_waiter = await self.websocket.ping()
                         await asyncio.wait_for(pong_waiter, timeout=10)
                     except asyncio.TimeoutError:
                         _LOGGER.debug("No response to ping in 10 seconds, reconnecting.")
                         break
+                    continue
                 await self._process_msg(msg)
         except Exception:  # pylint: disable=broad-except
             _LOGGER.error('Unexpected error', exc_info=True)
