@@ -163,11 +163,6 @@ class TestTibberPrivateToken(unittest.TestCase):
         self.assertIsNone(home.current_price_info.get('tax'))
         self.assertIsNone(home.current_price_info.get('total'))
 
-        home.sync_update_price_info()
-        for key in home.price_total.keys():
-            self.assertTrue(isinstance(key, str))
-            self.assertTrue(isinstance(home.price_total[key], (float, int)))
-
     def test_invalid_home(self):
         home = self.tibber.get_home("INVALID_KEY")
         self.assertEqual(home, None)
