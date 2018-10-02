@@ -60,7 +60,7 @@ class TestTibber(unittest.TestCase):
             self.assertTrue(isinstance(key, str))
             self.assertTrue(isinstance(home.price_total[key], (float, int)))
 
-    def test_update_inf(self):
+    def test_update_info(self):
         self.assertEqual(len(self.tibber.get_homes()), 1)
         self.tibber.sync_update_info()
         self.assertEqual(len(self.tibber.get_homes()), 1)
