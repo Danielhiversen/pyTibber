@@ -112,7 +112,12 @@ class TestTibberInvalidToken(unittest.TestCase):
     def test_tibber(self):
         self.assertEqual(self.tibber.name, None)
         self.assertEqual(len(self.tibber.get_homes()), 0)
-        self.assertTrue(self.tibber.send_notification("Test tittle", "message"))
+
+        async def run():
+            self.assertFalse(await self.tibber.send_notification("Test tittle", "message"))
+        loop = asyncio.get_event_loop()
+        task = loop.create_task(run())
+        loop.run_until_complete(task)
 
 
 class TestTibberPrivateToken(unittest.TestCase):
@@ -132,6 +137,12 @@ class TestTibberPrivateToken(unittest.TestCase):
     def test_tibber(self):
         self.assertEqual(self.tibber.name, 'Daniel Høyer')
         self.assertEqual(len(self.tibber.get_homes()), 0)
+
+        async def run():
+            self.assertTrue(await self.tibber.send_notification("Test tittle", "message"))
+        loop = asyncio.get_event_loop()
+        task = loop.create_task(run())
+        loop.run_until_complete(task)
 
     def test_invalid_home(self):
         home = self.tibber.get_home("INVALID_KEY")
