@@ -60,6 +60,11 @@ class TestTibber(unittest.TestCase):
             self.assertTrue(isinstance(key, str))
             self.assertTrue(isinstance(home.price_total[key], (float, int)))
 
+    def test_update_info(self):
+        self.assertEqual(len(self.tibber.get_homes()), 1)
+        self.tibber.sync_update_info()
+        self.assertEqual(len(self.tibber.get_homes()), 1)
+
 
 class TestTibberWebsession(unittest.TestCase):
     """
@@ -112,7 +117,12 @@ class TestTibberInvalidToken(unittest.TestCase):
     def test_tibber(self):
         self.assertEqual(self.tibber.name, None)
         self.assertEqual(len(self.tibber.get_homes()), 0)
-        self.assertTrue(self.tibber.send_notification("Test tittle", "message"))
+
+        async def run():
+            self.assertFalse(await self.tibber.send_notification("Test tittle", "message"))
+        loop = asyncio.get_event_loop()
+        task = loop.create_task(run())
+        loop.run_until_complete(task)
 
 
 class TestTibberPrivateToken(unittest.TestCase):
@@ -132,6 +142,26 @@ class TestTibberPrivateToken(unittest.TestCase):
     def test_tibber(self):
         self.assertEqual(self.tibber.name, 'Daniel Høyer')
         self.assertEqual(len(self.tibber.get_homes()), 0)
+        self.assertEqual(len(self.tibber.get_homes(only_active=False)), 1)
+
+        home = self.tibber.get_homes(only_active=False)[0]
+        home.sync_update_info()
+        self.assertEqual(home.home_id, '618343f8-dfa9-4524-9717-d2476971ef2a')
+        self.assertEqual(home.address1, 'G')
+        self.assertEqual(home.country, 'NO')
+        self.assertEqual(home.price_unit, ' ')
+        self.assertFalse(home.has_real_time_consumption)
+
+        self.assertEqual(home.current_price_total, None)
+        self.assertEqual(home.price_total, {})
+        self.assertEqual(home.current_price_info, {})
+
+        home.sync_update_current_price_info()
+        self.assertIsNone(home.current_price_total)
+        self.assertIsNone(home.current_price_info.get('energy'))
+        self.assertIsNone(home.current_price_info.get('startsAt'))
+        self.assertIsNone(home.current_price_info.get('tax'))
+        self.assertIsNone(home.current_price_info.get('total'))
 
     def test_invalid_home(self):
         home = self.tibber.get_home("INVALID_KEY")
