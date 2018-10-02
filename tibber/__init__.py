@@ -19,6 +19,7 @@ _LOGGER = logging.getLogger(__name__)
 
 class Tibber:
     """Class to comunicate with the Tibber api."""
+    # pylint: disable=too-many-instance-attributes
 
     def __init__(self, access_token=DEMO_TOKEN,
                  timeout=DEFAULT_TIMEOUT,
@@ -35,6 +36,7 @@ class Tibber:
         self._access_token = access_token
         self._name = None
         self._home_ids = []
+        self._all_home_ids = []
         self._homes = {}
         self.sub_manager = None
 
@@ -121,9 +123,11 @@ class Tibber:
             return
         self._name = viewer.get('name')
         homes = viewer.get('homes', [])
+        self._home_ids = []
         for _home in homes:
             home_id = _home.get('id')
             subs = _home.get('subscriptions', [{}])
+            self._all_home_ids += [home_id]
             if not subs:
                 continue
             status = subs[0].get('status', 'ended').lower()
@@ -139,15 +143,21 @@ class Tibber:
     @property
     def home_ids(self):
         """Return list of home ids."""
-        return self._home_ids
+        return self.get_home_ids(only_active=True)
 
-    def get_homes(self):
+    def get_home_ids(self, only_active=True):
+        """Return list of home ids."""
+        if only_active:
+            return self._home_ids
+        return self._all_home_ids
+
+    def get_homes(self, only_active=True):
         """Return list of Tibber homes."""
-        return [self.get_home(home_id) for home_id in self.home_ids]
+        return [self.get_home(home_id) for home_id in self.get_home_ids(only_active)]
 
     def get_home(self, home_id):
         """Retun an instance of TibberHome for given home id."""
-        if home_id not in self._home_ids:
+        if home_id not in self._all_home_ids:
             _LOGGER.error("Could not find any Tibber home with id: %s",
                           home_id)
             return None
