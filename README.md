@@ -6,6 +6,8 @@ Read electricity price and consumption.
 
 If you have a Tibber Pulse you can see your consumption in real time.
 
+[Buy me a coffee :)](http://paypal.me/dahoiv)
+
 
 Go to [developer.tibber.com/](https://developer.tibber.com/) to get your API token.
 
