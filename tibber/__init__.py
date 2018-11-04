@@ -16,6 +16,8 @@ SUB_ENDPOINT = 'wss://api.tibber.com/v1-beta/gql/subscriptions'
 
 _LOGGER = logging.getLogger(__name__)
 
+class InvalidLogin(Exception):
+    pass
 
 class Tibber:
     """Class to comunicate with the Tibber api."""
@@ -119,12 +121,11 @@ class Tibber:
         res = await self._execute(query)
         errors = res.get('errors', [])
         if not errors:
-            return ''
+            return True
         msg = errors[0].get('message')
         if msg:
-            return msg
-
-        return ''
+            raise InvalidLogin
+        return True
 
     async def update_info(self, *_):
         """Update home info async."""
