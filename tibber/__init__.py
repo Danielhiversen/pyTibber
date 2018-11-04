@@ -67,6 +67,13 @@ class Tibber:
 
     async def execute(self, document, variable_values=None):
         """Execute gql."""
+        res = await self._execute(document, variable_values)
+        if res is None:
+            return None
+        return res.get('data')
+
+    async def _execute(self, document, variable_values=None):
+        """Execute gql."""
         query_str = print_ast(document)
         payload = {
             'query': query_str,
@@ -91,13 +98,33 @@ class Tibber:
             raise
         if 'errors' in result or 'data' not in result:
             _LOGGER.error('Received non-compatible response %s', result)
-        return result.get('data')
+        return result
 
     def sync_update_info(self, *_):
         """Update home info."""
         loop = asyncio.get_event_loop()
         task = loop.create_task(self.update_info())
         loop.run_until_complete(task)
+
+    async def validate_login(self):
+        """Validate login info."""
+        query = gql('''
+        {
+          viewer {
+            name
+          }
+        }
+        ''')
+
+        res = await self._execute(query)
+        errors = res.get('errors', [])
+        if not errors:
+            return ''
+        msg = errors[0].get('message')
+        if msg:
+            return msg
+
+        return ''
 
     async def update_info(self, *_):
         """Update home info async."""
