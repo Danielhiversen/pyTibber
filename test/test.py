@@ -107,8 +107,8 @@ class TestTibberInvalidToken(unittest.TestCase):
 
     def setUp(self):     # pylint: disable=invalid-name
         """ things to be run when tests are started. """
-        self.tibber = tibber.Tibber(access_token='INVALID_TOKEN')
-        self.tibber.sync_update_info()
+        self.tibber = tibber.Tibber(access_token='INVALID_TOKEN')        
+        self.assertRaises(tibber.InvalidLogin, self.tibber.sync_update_info)
 
     def tearDown(self):  # pylint: disable=invalid-name
         """ Stop stuff we started. """
