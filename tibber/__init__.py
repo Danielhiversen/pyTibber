@@ -122,6 +122,7 @@ class Tibber:
             return True
         msg = errors[0].get('message')
         if msg:
+            _LOGGER.error(msg)
             return False
         return True
 
