@@ -17,10 +17,6 @@ SUB_ENDPOINT = 'wss://api.tibber.com/v1-beta/gql/subscriptions'
 _LOGGER = logging.getLogger(__name__)
 
 
-class InvalidLogin(Exception):
-    pass
-
-
 class Tibber:
     """Class to comunicate with the Tibber api."""
     # pylint: disable=too-many-instance-attributes
@@ -110,7 +106,7 @@ class Tibber:
         task = loop.create_task(self.update_info())
         loop.run_until_complete(task)
 
-    async def validate_login(self):
+    async def valid_login(self):
         """Validate login info."""
         query = gql('''
         {
@@ -126,7 +122,7 @@ class Tibber:
             return True
         msg = errors[0].get('message')
         if msg:
-            raise InvalidLogin
+            return False
         return True
 
     async def update_info(self, *_):
