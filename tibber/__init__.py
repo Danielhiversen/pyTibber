@@ -493,4 +493,5 @@ class TibberHome:
 
 
 class InvalidLogin(Exception):
+    """Invalid login exception."""
     pass
