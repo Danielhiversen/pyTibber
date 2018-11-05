@@ -17,10 +17,6 @@ SUB_ENDPOINT = 'wss://api.tibber.com/v1-beta/gql/subscriptions'
 _LOGGER = logging.getLogger(__name__)
 
 
-class InvalidLogin(Exception):
-    pass
-
-
 class Tibber:
     """Class to comunicate with the Tibber api."""
     # pylint: disable=too-many-instance-attributes
@@ -110,25 +106,6 @@ class Tibber:
         task = loop.create_task(self.update_info())
         loop.run_until_complete(task)
 
-    async def validate_login(self):
-        """Validate login info."""
-        query = gql('''
-        {
-          viewer {
-            name
-          }
-        }
-        ''')
-
-        res = await self._execute(query)
-        errors = res.get('errors', [])
-        if not errors:
-            return True
-        msg = errors[0].get('message')
-        if msg:
-            raise InvalidLogin
-        return True
-
     async def update_info(self, *_):
         """Update home info async."""
         query = gql('''
@@ -145,10 +122,19 @@ class Tibber:
         }
         ''')
 
-        res = await self.execute(query)
-        if not res:
+        res = await self._execute(query)
+        if res is None:
             return
-        viewer = res.get('viewer')
+        errors = res.get('errors', [])
+        if errors:
+            msg = errors[0].get('message', 'failed to login')
+            _LOGGER.error(msg)
+            raise InvalidLogin(msg)
+
+        data = res.get('data')
+        if not data:
+            return
+        viewer = data.get('viewer')
         if not viewer:
             return
         self._name = viewer.get('name')
@@ -504,3 +490,8 @@ class TibberHome:
                 self._tibber_control.sub_manager.is_running and
                 self._subscription_id is not None and
                 self._subscription_id in self._tibber_control.sub_manager.subscriptions)
+
+
+class InvalidLogin(Exception):
+    """Invalid login exception."""
+    pass
