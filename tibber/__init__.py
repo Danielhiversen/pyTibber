@@ -96,8 +96,9 @@ class Tibber:
         except (asyncio.TimeoutError, aiohttp.ClientError) as err:
             _LOGGER.error("Error connecting to Tibber: %s", err)
             raise
-        if 'errors' in result or 'data' not in result:
-            _LOGGER.error('Received non-compatible response %s', result)
+        errors = result.get('errors')
+        if errors:
+            _LOGGER.error('Received non-compatible response %s', errors)
         return result
 
     def sync_update_info(self, *_):
