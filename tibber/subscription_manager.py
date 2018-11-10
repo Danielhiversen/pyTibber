@@ -33,6 +33,7 @@ class SubscriptionManager:
 
     def start(self):
         """Start websocket."""
+        _LOGGER.debug('Start state %s.', self._state)
         if self._state == STATE_RUNNING:
             return
         self._state = STATE_STARTING
@@ -42,6 +43,7 @@ class SubscriptionManager:
             callback, sub_query = self.subscriptions.get(subscription_id, (None, None))
             if callback is None:
                 continue
+            _LOGGER.debug('Add subscription id %s.', subscription_id)
             self.loop.create_task(self.subscribe(sub_query, callback, subscription_id))
 
     @property
@@ -53,6 +55,7 @@ class SubscriptionManager:
         """Start websocket connection."""
         await self._close_websocket()
         try:
+            _LOGGER.debug("Running")
             self.websocket = await websockets.connect(self._url,
                                                       subprotocols=["graphql-subscriptions"])
             self._state = STATE_RUNNING
@@ -77,8 +80,8 @@ class SubscriptionManager:
         finally:
             await self._close_websocket()
             if self._state != STATE_STOPPED:
-                self._state = STATE_STOPPED
                 _LOGGER.warning("Reconnecting")
+                self._state = STATE_STOPPED
                 self.retry()
             else:
                 self._state = STATE_STOPPED
@@ -112,7 +115,9 @@ class SubscriptionManager:
 
     def retry(self):
         """Retry to connect to websocket."""
+        _LOGGER.debug("Retry, state: %s", self._state)
         if self._state in [STATE_STARTING, STATE_RUNNING]:
+            _LOGGER.debug("Skip retry since state: %s", self._state)
             return
         self._cancel_retry_timer()
         self._cancel_client_task()
