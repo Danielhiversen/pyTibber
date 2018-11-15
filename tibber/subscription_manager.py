@@ -66,12 +66,12 @@ class SubscriptionManager:
 
             while self._state == STATE_RUNNING:
                 try:
-                    msg = await asyncio.wait_for(self.websocket.recv(), timeout=4)
+                    msg = await asyncio.wait_for(self.websocket.recv(), timeout=30)
                 except asyncio.TimeoutError:
-                    _LOGGER.warning("No websocket data in 20 seconds, checking the connection.")
+                    _LOGGER.warning("No websocket data in 30 seconds, checking the connection.")
                     try:
                         pong_waiter = await self.websocket.ping()
-                        await asyncio.wait_for(pong_waiter, timeout=2)
+                        await asyncio.wait_for(pong_waiter, timeout=10)
                     except asyncio.TimeoutError:
                         _LOGGER.error("No response to ping in 10 seconds, reconnecting.")
                         return
