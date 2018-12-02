@@ -94,10 +94,10 @@ class Tibber:
                 return None
             result = await resp.json()
         except aiohttp.ClientError as err:
-            _LOGGER.error("Error connecting to Tibber: %s", err)
+            _LOGGER.error("Error connecting to Tibber: %s, %s", err, document)
             raise
         except asyncio.TimeoutError as err:
-            _LOGGER.error("Timed out when connecting to Tibber: %s", err)
+            _LOGGER.error("Timed out when connecting to Tibber: %s, %s", err, document)
             raise
         errors = result.get('errors')
         if errors:
