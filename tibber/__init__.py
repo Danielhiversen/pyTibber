@@ -72,7 +72,7 @@ class Tibber:
             return None
         return res.get('data')
 
-    async def _execute(self, document, variable_values=None):
+    async def _execute(self, document, variable_values=None, retry=2):
         """Execute gql."""
         query_str = print_ast(document)
         payload = {
@@ -94,10 +94,14 @@ class Tibber:
                 return None
             result = await resp.json()
         except aiohttp.ClientError as err:
-            _LOGGER.error("Error connecting to Tibber: %s, %s", err, document)
+            _LOGGER.error("Error connecting to Tibber: %s ", err, exc_info=True)
+            if retry > 0:
+                return await self._execute(document, variable_values, retry-1)
             raise
         except asyncio.TimeoutError as err:
-            _LOGGER.error("Timed out when connecting to Tibber: %s, %s", err, document)
+            _LOGGER.error("Timed out when connecting to Tibber: %s ", err, exc_info=True)
+            if retry > 0:
+                return await self._execute(document, variable_values, retry-1)
             raise
         errors = result.get('errors')
         if errors:
