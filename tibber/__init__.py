@@ -475,7 +475,13 @@ class TibberHome:
                 currency
                 minPower
                 averagePower
-            maxPower
+                maxPower
+                voltagePhase1
+                voltagePhase2
+                voltagePhase3
+                currentPhase1
+                currentPhase2
+                currentPhase3
             }
            }
         ''' % self.home_id)
