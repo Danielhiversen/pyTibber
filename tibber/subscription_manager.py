@@ -61,8 +61,8 @@ class SubscriptionManager:
                                                       subprotocols=["graphql-subscriptions"])
             self._state = STATE_RUNNING
             _LOGGER.debug("Running")
-            self.websocket.send(json.dumps({"type": "init",
-                                            "payload": self._init_payload}))
+            await self.websocket.send(json.dumps({"type": "init",
+                                                  "payload": self._init_payload}))
 
             while self._state == STATE_RUNNING:
                 try:
