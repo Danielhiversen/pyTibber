@@ -6,7 +6,7 @@ import aiohttp
 import async_timeout
 from gql import gql
 from graphql.language.printer import print_ast
-from graphql-subscription-manager import SubscriptionManager
+from graphql_subscription_manager import SubscriptionManager
 
 DEFAULT_TIMEOUT = 10
 DEMO_TOKEN = 'd1007ead2dc84a2b82f0de19451c5fb22112f7ae11d19bf2bedb224a003ff74a'
