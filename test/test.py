@@ -46,7 +46,7 @@ class TestTibber(unittest.TestCase):
                 self.assertTrue(home.has_real_time_consumption)
             else:
                 self.assertEqual(home.home_id, '68e6938b-91a6-4199-a0d4-f24c22be87bb')
-                self.assertEqual(home.address1, 'Kungsgatan 8')
+                self.assertEqual(home.address1, 'Winterfell')
                 self.assertEqual(home.country, 'No')
                 self.assertEqual(home.price_unit, 'NOK/kWh')
                 self.assertFalse(home.has_real_time_consumption)
