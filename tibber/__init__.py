@@ -151,11 +151,10 @@ class Tibber:
             home_id = _home.get('id')
             subs = _home.get('subscriptions', [{}])
             self._all_home_ids += [home_id]
-            if not subs:
-                continue
-            status = subs[0].get('status', 'ended').lower()
-            if not home_id or not status == 'running':
-                continue
+            if subs:
+                status = subs[0].get('status', 'ended').lower()
+                if not home_id or not status != 'ended':
+                    continue
             self._home_ids += [home_id]
 
     @property
@@ -244,6 +243,9 @@ class TibberHome:
               features {
                   realTimeConsumptionEnabled
                 }
+              subscriptions {
+                status
+              }
               address {
                 address1
                 address2
@@ -406,6 +408,15 @@ class TibberHome:
     def home_id(self):
         """Return home id."""
         return self._home_id
+
+    @property
+    def has_active_subscription(self):
+        """Return home id."""
+        try:
+            sub = self.info['viewer']['home']['subscriptions']['status']
+        except (KeyError, TypeError):
+            return False
+        return sub == 'running'
 
     @property
     def has_real_time_consumption(self):
