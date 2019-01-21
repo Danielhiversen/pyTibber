@@ -153,7 +153,7 @@ class Tibber:
             self._all_home_ids += [home_id]
             if subs:
                 status = subs[0].get('status', 'ended').lower()
-                if not home_id or not status != 'ended':
+                if not home_id or not status != 'running':
                     continue
             self._home_ids += [home_id]
 
@@ -243,7 +243,7 @@ class TibberHome:
               features {
                   realTimeConsumptionEnabled
                 }
-              subscriptions {
+              currentSubscription {
                 status
               }
               address {
@@ -413,7 +413,7 @@ class TibberHome:
     def has_active_subscription(self):
         """Return home id."""
         try:
-            sub = self.info['viewer']['home']['subscriptions']['status']
+            sub = self.info['viewer']['home']['currentSubscription']['status']
         except (KeyError, TypeError):
             return False
         return sub == 'running'
