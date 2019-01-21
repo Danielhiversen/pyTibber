@@ -29,48 +29,54 @@ class TestTibber(unittest.TestCase):
 
     def test_tibber(self):
         self.assertEqual(self.tibber.name, 'Arya Stark')
-        self.assertEqual(len(self.tibber.get_homes()), 2)
+        self.assertEqual(len(self.tibber.get_homes()), 1)
 
     def test_invalid_home(self):
         home = self.tibber.get_home("INVALID_KEY")
         self.assertEqual(home, None)
 
     def test_home(self):
-        for home in  self.tibber.get_homes():
+        k = 0
+        for home in self.tibber.get_homes(only_active=False):
             home.sync_update_info()
             if home.home_id == 'c70dcbe5-4485-4821-933d-a8a86452737b':
+                k += 1
                 self.assertEqual(home.home_id, 'c70dcbe5-4485-4821-933d-a8a86452737b')
                 self.assertEqual(home.address1, 'Kungsgatan 8')
                 self.assertEqual(home.country, 'SE')
                 self.assertEqual(home.price_unit, 'SEK/kWh')
                 self.assertTrue(home.has_real_time_consumption)
+
+                self.assertEqual(home.current_price_total, None)
+                self.assertEqual(home.price_total, {})
+                self.assertEqual(home.current_price_info, {})
+
+                home.sync_update_current_price_info()
+                self.assertTrue(home.current_price_total > 0)
+                self.assertTrue(isinstance(home.current_price_info.get('energy'), (float, int)))
+                self.assertTrue(isinstance(home.current_price_info.get('startsAt'), str))
+                self.assertTrue(isinstance(home.current_price_info.get('tax'), (float, int)))
+                self.assertTrue(isinstance(home.current_price_info.get('total'), (float, int)))
+
+                home.sync_update_price_info()
+                for key in home.price_total.keys():
+                    self.assertTrue(isinstance(key, str))
+                    self.assertTrue(isinstance(home.price_total[key], (float, int)))
             else:
+                k += 1
                 self.assertEqual(home.home_id, '68e6938b-91a6-4199-a0d4-f24c22be87bb')
                 self.assertEqual(home.address1, 'Winterfell')
                 self.assertEqual(home.country, 'NO')
                 self.assertEqual(home.price_unit, ' ')
                 self.assertTrue(home.has_real_time_consumption)
 
-        self.assertEqual(home.current_price_total, None)
-        self.assertEqual(home.price_total, {})
-        self.assertEqual(home.current_price_info, {})
+        self.assertEqual(k, 2)
 
-        home.sync_update_current_price_info()
-        self.assertTrue(home.current_price_total > 0)
-        self.assertTrue(isinstance(home.current_price_info.get('energy'), (float, int)))
-        self.assertTrue(isinstance(home.current_price_info.get('startsAt'), str))
-        self.assertTrue(isinstance(home.current_price_info.get('tax'), (float, int)))
-        self.assertTrue(isinstance(home.current_price_info.get('total'), (float, int)))
-
-        home.sync_update_price_info()
-        for key in home.price_total.keys():
-            self.assertTrue(isinstance(key, str))
-            self.assertTrue(isinstance(home.price_total[key], (float, int)))
 
     def test_update_info(self):
-        self.assertEqual(len(self.tibber.get_homes()), 2)
+        self.assertEqual(len(self.tibber.get_homes()), 1)
         self.tibber.sync_update_info()
-        self.assertEqual(len(self.tibber.get_homes()), 2)
+        self.assertEqual(len(self.tibber.get_homes()), 1)
 
 
 class TestTibberWebsession(unittest.TestCase):
@@ -93,7 +99,8 @@ class TestTibberWebsession(unittest.TestCase):
 
     def test_tibber(self):
         self.assertEqual(self.tibber.name, 'Arya Stark')
-        self.assertEqual(len(self.tibber.get_homes()), 2)
+        self.assertEqual(len(self.tibber.get_homes()), 1)
+        self.assertEqual(len(self.tibber.get_homes(only_active=False)), 2)
 
         home = self.tibber.get_homes()[0]
         self.tibber.sync_close_connection()
