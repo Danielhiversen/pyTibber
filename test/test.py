@@ -29,7 +29,7 @@ class TestTibber(unittest.TestCase):
 
     def test_tibber(self):
         self.assertEqual(self.tibber.name, 'Arya Stark')
-        self.assertEqual(len(self.tibber.get_homes()), 1)
+        self.assertEqual(len(self.tibber.get_homes()), 2)
 
     def test_invalid_home(self):
         home = self.tibber.get_home("INVALID_KEY")
@@ -72,11 +72,10 @@ class TestTibber(unittest.TestCase):
 
         self.assertEqual(k, 2)
 
-
     def test_update_info(self):
-        self.assertEqual(len(self.tibber.get_homes()), 1)
+        self.assertEqual(len(self.tibber.get_homes()), 2)
         self.tibber.sync_update_info()
-        self.assertEqual(len(self.tibber.get_homes()), 1)
+        self.assertEqual(len(self.tibber.get_homes()), 2)
 
 
 class TestTibberWebsession(unittest.TestCase):
@@ -84,7 +83,7 @@ class TestTibberWebsession(unittest.TestCase):
     Tests Tibber
     """
 
-    def setUp(self):     # pylint: disable=invalid-name
+    def setUp(self):  # pylint: disable=invalid-name
         """ things to be run when tests are started. """
         async def _create_session():
             return aiohttp.ClientSession()
@@ -99,7 +98,7 @@ class TestTibberWebsession(unittest.TestCase):
 
     def test_tibber(self):
         self.assertEqual(self.tibber.name, 'Arya Stark')
-        self.assertEqual(len(self.tibber.get_homes()), 1)
+        self.assertEqual(len(self.tibber.get_homes()), 2)
         self.assertEqual(len(self.tibber.get_homes(only_active=False)), 2)
 
         home = self.tibber.get_homes()[0]
