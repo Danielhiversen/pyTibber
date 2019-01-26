@@ -151,9 +151,9 @@ class Tibber:
             home_id = _home.get('id')
             subs = _home.get('subscriptions', [{}])
             self._all_home_ids += [home_id]
-            if subs:
+            if subs is not None:
                 status = subs[0].get('status', 'ended').lower()
-                if not home_id or not status != 'running':
+                if not home_id or status != 'running':
                     continue
             self._home_ids += [home_id]
 
