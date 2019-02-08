@@ -214,7 +214,7 @@ class Tibber:
 
 class TibberHome:
     """Instance of Tibber home."""
-    # pylint: disable=too-many-instance-attributes
+    # pylint: disable=too-many-instance-attributes, too-many-public-methods
 
     def __init__(self, home_id, tibber_control):
         """Initialize the Tibber home class."""
