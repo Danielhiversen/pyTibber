@@ -214,7 +214,7 @@ class Tibber:
 
 class TibberHome:
     """Instance of Tibber home."""
-    # pylint: disable=too-many-instance-attributes
+    # pylint: disable=too-many-instance-attributes, too-many-public-methods
 
     def __init__(self, home_id, tibber_control):
         """Initialize the Tibber home class."""
@@ -226,6 +226,7 @@ class TibberHome:
         self.sub_manager = None
         self.info = {}
         self._subscription_id = None
+        self._data = None
 
     def sync_update_info(self):
         """Update current price info."""
@@ -514,6 +515,40 @@ class TibberHome:
                 self._tibber_control.sub_manager.is_running and
                 self._subscription_id is not None
                 )
+
+    async def get_historic_data(self, n_data):
+        """Get historic data."""
+        query = gql('''
+                {
+                  viewer {
+                    home(id: "%s") {
+                      consumption(resolution: HOURLY, last: %s) {
+                        nodes {
+                          from
+                          totalCost
+                          consumption
+                        }
+                      }
+                    }
+                  }
+                }
+          ''' % (self.home_id, n_data))
+        data = await self._tibber_control.execute(query)
+        if not data:
+            _LOGGER.error("Could not find current the data.")
+            return
+        data = data['viewer']['home']['consumption']
+        if data is None:
+            self._data = []
+            return
+        self._data = data['nodes']
+
+    def sync_get_historic_data(self, n_data):
+        """get_historic_data."""
+        loop = asyncio.get_event_loop()
+        task = loop.create_task(self.get_historic_data(n_data))
+        loop.run_until_complete(task)
+        return self._data
 
 
 class InvalidLogin(Exception):
