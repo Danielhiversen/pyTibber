@@ -481,6 +481,7 @@ class TibberHome:
               liveMeasurement(homeId:"%s"){
                 timestamp
                 power
+                powerProduction
                 accumulatedConsumption
                 accumulatedCost
                 currency
@@ -493,6 +494,8 @@ class TibberHome:
                 currentPhase1
                 currentPhase2
                 currentPhase3
+                lastMeterConsumption
+                lastMeterProduction
             }
            }
         ''' % self.home_id)
