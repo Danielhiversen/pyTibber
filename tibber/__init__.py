@@ -9,24 +9,27 @@ from graphql.language.printer import print_ast
 from graphql_subscription_manager import SubscriptionManager
 
 DEFAULT_TIMEOUT = 10
-DEMO_TOKEN = 'd1007ead2dc84a2b82f0de19451c5fb22112f7ae11d19bf2bedb224a003ff74a'
-API_ENDPOINT = 'https://api.tibber.com/v1-beta/gql'
-SUB_ENDPOINT = 'wss://api.tibber.com/v1-beta/gql/subscriptions'
+DEMO_TOKEN = "d1007ead2dc84a2b82f0de19451c5fb22112f7ae11d19bf2bedb224a003ff74a"
+API_ENDPOINT = "https://api.tibber.com/v1-beta/gql"
+SUB_ENDPOINT = "wss://api.tibber.com/v1-beta/gql/subscriptions"
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class Tibber:
     """Class to comunicate with the Tibber api."""
+
     # pylint: disable=too-many-instance-attributes
 
-    def __init__(self, access_token=DEMO_TOKEN,
-                 timeout=DEFAULT_TIMEOUT,
-                 websession=None):
+    def __init__(
+        self, access_token=DEMO_TOKEN, timeout=DEFAULT_TIMEOUT, websession=None
+    ):
         """Initialize the Tibber connection."""
         if websession is None:
+
             async def _create_session():
                 return aiohttp.ClientSession()
+
             loop = asyncio.get_event_loop()
             self.websession = loop.run_until_complete(_create_session())
         else:
@@ -53,9 +56,9 @@ class Tibber:
         """Start subscription manager for real time data."""
         if self.sub_manager is not None:
             return
-        self.sub_manager = SubscriptionManager(loop,
-                                               "token={}".format(self._access_token),
-                                               SUB_ENDPOINT)
+        self.sub_manager = SubscriptionManager(
+            loop, "token={}".format(self._access_token), SUB_ENDPOINT
+        )
         self.sub_manager.start()
 
     async def rt_disconnect(self):
@@ -69,25 +72,21 @@ class Tibber:
         res = await self._execute(document, variable_values)
         if res is None:
             return None
-        return res.get('data')
+        return res.get("data")
 
     async def _execute(self, document, variable_values=None, retry=2):
         """Execute gql."""
         query_str = print_ast(document)
-        payload = {
-            'query': query_str,
-            'variables': variable_values or {}
-        }
+        payload = {"query": query_str, "variables": variable_values or {}}
 
         post_args = {
-            'headers': {'Authorization': 'Bearer ' + self._access_token},
-            'data': payload
+            "headers": {"Authorization": "Bearer " + self._access_token},
+            "data": payload,
         }
 
         try:
             with async_timeout.timeout(self._timeout):
-                resp = await self.websession.post(API_ENDPOINT,
-                                                  **post_args)
+                resp = await self.websession.post(API_ENDPOINT, **post_args)
             if resp.status != 200:
                 _LOGGER.error("Error connecting to Tibber, resp code: %s", resp.status)
                 return None
@@ -95,16 +94,18 @@ class Tibber:
         except aiohttp.ClientError as err:
             _LOGGER.error("Error connecting to Tibber: %s ", err, exc_info=True)
             if retry > 0:
-                return await self._execute(document, variable_values, retry-1)
+                return await self._execute(document, variable_values, retry - 1)
             raise
         except asyncio.TimeoutError as err:
-            _LOGGER.error("Timed out when connecting to Tibber: %s ", err, exc_info=True)
+            _LOGGER.error(
+                "Timed out when connecting to Tibber: %s ", err, exc_info=True
+            )
             if retry > 0:
-                return await self._execute(document, variable_values, retry-1)
+                return await self._execute(document, variable_values, retry - 1)
             raise
-        errors = result.get('errors')
+        errors = result.get("errors")
         if errors:
-            _LOGGER.error('Received non-compatible response %s', errors)
+            _LOGGER.error("Received non-compatible response %s", errors)
         return result
 
     def sync_update_info(self, *_):
@@ -115,7 +116,8 @@ class Tibber:
 
     async def update_info(self, *_):
         """Update home info async."""
-        query = gql('''
+        query = gql(
+            """
         {
           viewer {
             name
@@ -127,33 +129,34 @@ class Tibber:
             }
           }
         }
-        ''')
+        """
+        )
 
         res = await self._execute(query)
         if res is None:
             return
-        errors = res.get('errors', [])
+        errors = res.get("errors", [])
         if errors:
-            msg = errors[0].get('message', 'failed to login')
+            msg = errors[0].get("message", "failed to login")
             _LOGGER.error(msg)
             raise InvalidLogin(msg)
 
-        data = res.get('data')
+        data = res.get("data")
         if not data:
             return
-        viewer = data.get('viewer')
+        viewer = data.get("viewer")
         if not viewer:
             return
-        self._name = viewer.get('name')
-        homes = viewer.get('homes', [])
+        self._name = viewer.get("name")
+        homes = viewer.get("homes", [])
         self._home_ids = []
         for _home in homes:
-            home_id = _home.get('id')
+            home_id = _home.get("id")
             self._all_home_ids += [home_id]
-            subs = _home.get('subscriptions')
+            subs = _home.get("subscriptions")
             if subs:
-                status = subs[0].get('status', 'ended').lower()
-                if not home_id or status != 'running':
+                status = subs[0].get("status", "ended").lower()
+                if not home_id or status != "running":
                     continue
             self._home_ids += [home_id]
 
@@ -180,8 +183,7 @@ class Tibber:
     def get_home(self, home_id):
         """Retun an instance of TibberHome for given home id."""
         if home_id not in self._all_home_ids:
-            _LOGGER.error("Could not find any Tibber home with id: %s",
-                          home_id)
+            _LOGGER.error("Could not find any Tibber home with id: %s", home_id)
             return None
         if home_id not in self._homes.keys():
             self._homes[home_id] = TibberHome(home_id, self)
@@ -189,7 +191,8 @@ class Tibber:
 
     async def send_notification(self, title, message):
         """Send notification."""
-        query = gql('''
+        query = gql(
+            """
         mutation{
           sendPushNotification(input: {
             title: "%s",
@@ -199,21 +202,27 @@ class Tibber:
             pushedToNumberOfDevices
           }
         }
-        ''' % (title, message))
+        """
+            % (title, message)
+        )
 
         res = await self.execute(query)
         if not res:
             return False
         noti = res.get("sendPushNotification", {})
-        successful = noti.get('successful', False)
-        pushed_to_number_of_devices = noti.get('pushedToNumberOfDevices', 0)
-        _LOGGER.debug("send_notification: status %s, send to %s devices",
-                      successful, pushed_to_number_of_devices)
+        successful = noti.get("successful", False)
+        pushed_to_number_of_devices = noti.get("pushedToNumberOfDevices", 0)
+        _LOGGER.debug(
+            "send_notification: status %s, send to %s devices",
+            successful,
+            pushed_to_number_of_devices,
+        )
         return successful
 
 
 class TibberHome:
     """Instance of Tibber home."""
+
     # pylint: disable=too-many-instance-attributes, too-many-public-methods
 
     def __init__(self, home_id, tibber_control):
@@ -236,7 +245,8 @@ class TibberHome:
 
     async def update_info(self):
         """Update current price info async."""
-        query = gql('''
+        query = gql(
+            """
         {
           viewer {
             home(id: "%s") {
@@ -292,7 +302,9 @@ class TibberHome:
                 }
               }
             }
-        ''' % self._home_id)
+        """
+            % self._home_id
+        )
         self.info = await self._tibber_control.execute(query)
 
     def sync_update_current_price_info(self):
@@ -303,7 +315,8 @@ class TibberHome:
 
     async def update_current_price_info(self):
         """Update current price info async."""
-        query = gql('''
+        query = gql(
+            """
         {
           viewer {
             home(id: "%s") {
@@ -320,15 +333,17 @@ class TibberHome:
             }
           }
         }
-        ''' % self.home_id)
+        """
+            % self.home_id
+        )
         price_info_temp = await self._tibber_control.execute(query)
         if not price_info_temp:
             _LOGGER.error("Could not find current price info.")
             return
         try:
-            home = price_info_temp['viewer']['home']
-            current_subscription = home['currentSubscription']
-            price_info = current_subscription['priceInfo']['current']
+            home = price_info_temp["viewer"]["home"]
+            current_subscription = home["currentSubscription"]
+            price_info = current_subscription["priceInfo"]["current"]
         except (KeyError, TypeError):
             _LOGGER.error("Could not find current price info.")
             return
@@ -343,7 +358,8 @@ class TibberHome:
 
     async def update_price_info(self):
         """Update price info async."""
-        query = gql('''
+        query = gql(
+            """
         {
           viewer {
             home(id: "%s") {
@@ -368,32 +384,34 @@ class TibberHome:
             }
           }
         }
-        ''' % self.home_id)
+        """
+            % self.home_id
+        )
         price_info_temp = await self._tibber_control.execute(query)
         if not price_info_temp:
             _LOGGER.error("Could not find price info.")
             return
         self._price_info = {}
-        for key in ['current', 'today', 'tomorrow']:
+        for key in ["current", "today", "tomorrow"]:
             try:
-                home = price_info_temp['viewer']['home']
-                current_subscription = home['currentSubscription']
-                price_info = current_subscription['priceInfo'][key]
+                home = price_info_temp["viewer"]["home"]
+                current_subscription = home["currentSubscription"]
+                price_info = current_subscription["priceInfo"][key]
             except (KeyError, TypeError):
                 _LOGGER.error("Could not find price info for %s.", key)
                 continue
-            if key == 'current':
+            if key == "current":
                 self._current_price_info = price_info
                 continue
             for data in price_info:
-                self._price_info[data.get('startsAt')] = data.get('total')
+                self._price_info[data.get("startsAt")] = data.get("total")
 
     @property
     def current_price_total(self):
         """Get current price total."""
         if not self._current_price_info:
             return None
-        return self._current_price_info.get('total')
+        return self._current_price_info.get("total")
 
     @property
     def current_price_info(self):
@@ -414,16 +432,16 @@ class TibberHome:
     def has_active_subscription(self):
         """Return home id."""
         try:
-            sub = self.info['viewer']['home']['currentSubscription']['status']
+            sub = self.info["viewer"]["home"]["currentSubscription"]["status"]
         except (KeyError, TypeError):
             return False
-        return sub == 'running'
+        return sub == "running"
 
     @property
     def has_real_time_consumption(self):
         """Return home id."""
         try:
-            return self.info['viewer']['home']['features']['realTimeConsumptionEnabled']
+            return self.info["viewer"]["home"]["features"]["realTimeConsumptionEnabled"]
         except (KeyError, TypeError):
             return False
 
@@ -431,34 +449,34 @@ class TibberHome:
     def address1(self):
         """Return the home adress1."""
         try:
-            return self.info['viewer']['home']['address']['address1']
+            return self.info["viewer"]["home"]["address"]["address1"]
         except (KeyError, TypeError):
             _LOGGER.error("Could not find address1.")
-        return ''
+        return ""
 
     @property
     def consumption_unit(self):
         """Return the consumption."""
-        return 'kWh'
+        return "kWh"
 
     @property
     def currency(self):
         """Return the currency."""
         try:
-            current_subscription = self.info['viewer']['home']['currentSubscription']
-            return current_subscription['priceInfo']['current']['currency']
+            current_subscription = self.info["viewer"]["home"]["currentSubscription"]
+            return current_subscription["priceInfo"]["current"]["currency"]
         except (KeyError, TypeError, IndexError):
             _LOGGER.error("Could not find currency.")
-        return ''
+        return ""
 
     @property
     def country(self):
         """Return the country."""
         try:
-            return self.info['viewer']['home']['address']['country']
+            return self.info["viewer"]["home"]["address"]["country"]
         except (KeyError, TypeError):
             _LOGGER.error("Could not find country.")
-        return ''
+        return ""
 
     @property
     def price_unit(self):
@@ -467,8 +485,8 @@ class TibberHome:
         consumption_unit = self.consumption_unit
         if not currency or not consumption_unit:
             _LOGGER.error("Could not find price_unit.")
-            return ' '
-        return currency + '/' + consumption_unit
+            return " "
+        return currency + "/" + consumption_unit
 
     async def rt_subscribe(self, loop, async_callback):
         """Connect to Tibber and subscribe to Tibber rt subscription."""
@@ -476,7 +494,8 @@ class TibberHome:
             _LOGGER.error("Already subscribed.")
             return
         await self._tibber_control.rt_connect(loop)
-        document = gql('''
+        document = gql(
+            """
             subscription{
               liveMeasurement(homeId:"%s"){
                 timestamp
@@ -498,11 +517,14 @@ class TibberHome:
                 lastMeterProduction
             }
            }
-        ''' % self.home_id)
+        """
+            % self.home_id
+        )
         sub_query = print_ast(document)
 
-        self._subscription_id = await self._tibber_control.sub_manager.subscribe(sub_query,
-                                                                                 async_callback)
+        self._subscription_id = await self._tibber_control.sub_manager.subscribe(
+            sub_query, async_callback
+        )
 
     async def rt_unsubscribe(self):
         """Unsubscribe to Tibber rt subscription."""
@@ -514,14 +536,16 @@ class TibberHome:
     @property
     def rt_subscription_running(self):
         """Is real time subscription running."""
-        return (self._tibber_control.sub_manager is not None and
-                self._tibber_control.sub_manager.is_running and
-                self._subscription_id is not None
-                )
+        return (
+            self._tibber_control.sub_manager is not None
+            and self._tibber_control.sub_manager.is_running
+            and self._subscription_id is not None
+        )
 
     async def get_historic_data(self, n_data):
         """Get historic data."""
-        query = gql('''
+        query = gql(
+            """
                 {
                   viewer {
                     home(id: "%s") {
@@ -535,16 +559,18 @@ class TibberHome:
                     }
                   }
                 }
-          ''' % (self.home_id, n_data))
+          """
+            % (self.home_id, n_data)
+        )
         data = await self._tibber_control.execute(query)
         if not data:
             _LOGGER.error("Could not find current the data.")
             return
-        data = data['viewer']['home']['consumption']
+        data = data["viewer"]["home"]["consumption"]
         if data is None:
             self._data = []
             return
-        self._data = data['nodes']
+        self._data = data["nodes"]
 
     def sync_get_historic_data(self, n_data):
         """get_historic_data."""
