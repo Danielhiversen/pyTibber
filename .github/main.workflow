@@ -11,4 +11,8 @@ action "GitHub Action for Flake8" {
 action "The Python Action" {
   uses = "Gr1N/the-python-action@0.4.0"
   needs = ["GitHub Action for Flake8"]
+  args = "tox -e lint"
+  env = {
+    PYTHON_VERSION = "3.7"
+  }
 }
