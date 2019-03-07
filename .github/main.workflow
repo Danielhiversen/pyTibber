@@ -1,4 +1,4 @@
-workflow "on push" {
+workflow "pylint" {
   on = "push"
   resolves = ["GitHub Action for pylint"]
 }
@@ -9,7 +9,7 @@ action "GitHub Action for pylint" {
 }
 
 
-workflow "on push" {
+workflow "flake8" {
   on = "push"
   resolves = ["GitHub Action for Flake8"]
 }
