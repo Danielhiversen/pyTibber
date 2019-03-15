@@ -232,6 +232,7 @@ class TibberHome:
         self._current_price_total = None
         self._current_price_info = {}
         self._price_info = {}
+        self._level_info = {}
         self.sub_manager = None
         self.info = {}
         self._subscription_id = None
@@ -370,14 +371,17 @@ class TibberHome:
                     tax
                     total
                     startsAt
+                    level
                   }
                   today {
                     total
                     startsAt
+                    level
                   }
                   tomorrow {
                     total
                     startsAt
+                    level
                   }
                 }
               }
@@ -392,6 +396,7 @@ class TibberHome:
             _LOGGER.error("Could not find price info.")
             return
         self._price_info = {}
+        self._level_info = {}
         for key in ["current", "today", "tomorrow"]:
             try:
                 home = price_info_temp["viewer"]["home"]
@@ -405,6 +410,7 @@ class TibberHome:
                 continue
             for data in price_info:
                 self._price_info[data.get("startsAt")] = data.get("total")
+                self._level_info[data.get("startsAt")] = data.get("level")
 
     @property
     def current_price_total(self):
@@ -422,6 +428,11 @@ class TibberHome:
     def price_total(self):
         """Get dictionary with price total, key is date-time."""
         return self._price_info
+
+    @property
+    def price_level(self):
+        """Get dictionary with price level, key is date-time."""
+        return self._level_info
 
     @property
     def home_id(self):
