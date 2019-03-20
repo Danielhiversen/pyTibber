@@ -41,4 +41,4 @@ print(home.current_price_info)
 tibber_connection.sync_close_connection()
 ```
 
-The library is used as part of Home Assitant: [https://github.com/home-assistant/home-assistant/blob/dev/homeassistant/components/sensor/tibber.py](https://github.com/home-assistant/home-assistant/blob/dev/homeassistant/components/sensor/tibber.py)
+The library is used as part of Home Assitant: [https://github.com/home-assistant/home-assistant/tree/dev/homeassistant/components/tibber](https://github.com/home-assistant/home-assistant/tree/dev/homeassistant/components/tibber)
