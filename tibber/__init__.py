@@ -512,6 +512,7 @@ class TibberHome:
                 timestamp
                 power
                 powerProduction
+                accumulatedProduction
                 accumulatedConsumption
                 accumulatedCost
                 currency
