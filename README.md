@@ -10,7 +10,7 @@ Python3 library for Tibber.
 
 Read electricity price and consumption.
 
-If you have a Tibber Pulse you can see your consumption in real time.
+If you have a Tibber Pulse or Watty you can see your consumption in real time.
 
 [Buy me a coffee :)](http://paypal.me/dahoiv)
 
