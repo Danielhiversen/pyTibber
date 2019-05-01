@@ -99,7 +99,7 @@ class TestTibberWebsession(unittest.TestCase):
     def test_tibber(self):
         self.assertEqual(self.tibber.name, 'Arya Stark')
         self.assertEqual(len(self.tibber.get_homes()), 1)
-        self.assertEqual(len(self.tibber.get_homes(only_active=False)), 2)
+        self.assertEqual(len(self.tibber.get_homes(only_active=False)), 1)
 
         home = self.tibber.get_homes()[0]
         self.tibber.sync_close_connection()
