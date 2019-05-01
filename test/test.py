@@ -29,7 +29,7 @@ class TestTibber(unittest.TestCase):
 
     def test_tibber(self):
         self.assertEqual(self.tibber.name, 'Arya Stark')
-        self.assertEqual(len(self.tibber.get_homes()), 2)
+        self.assertEqual(len(self.tibber.get_homes()), 1)
 
     def test_invalid_home(self):
         home = self.tibber.get_home("INVALID_KEY")
@@ -70,12 +70,12 @@ class TestTibber(unittest.TestCase):
                 self.assertEqual(home.price_unit, ' ')
                 self.assertTrue(home.has_real_time_consumption)
 
-        self.assertEqual(k, 2)
+        self.assertEqual(k, 1)
 
     def test_update_info(self):
-        self.assertEqual(len(self.tibber.get_homes()), 2)
+        self.assertEqual(len(self.tibber.get_homes()), 1)
         self.tibber.sync_update_info()
-        self.assertEqual(len(self.tibber.get_homes()), 2)
+        self.assertEqual(len(self.tibber.get_homes()), 1)
 
 
 class TestTibberWebsession(unittest.TestCase):
@@ -98,8 +98,8 @@ class TestTibberWebsession(unittest.TestCase):
 
     def test_tibber(self):
         self.assertEqual(self.tibber.name, 'Arya Stark')
-        self.assertEqual(len(self.tibber.get_homes()), 2)
-        self.assertEqual(len(self.tibber.get_homes(only_active=False)), 2)
+        self.assertEqual(len(self.tibber.get_homes()), 1)
+        self.assertEqual(len(self.tibber.get_homes(only_active=False)), 1)
 
         home = self.tibber.get_homes()[0]
         self.tibber.sync_close_connection()
