@@ -10,7 +10,7 @@ setup(
     install_requires=['gql>=0.1.0', 'aiohttp>=3.0.6',
                       'async_timeout>=1.4.0', 'websockets>=6.0',
                       'graphql-subscription-manager>=0.2.11'],
-    version='0.10.2',
+    version='0.10.3',
     description='A python3 library to communicate with Tibber',
     long_description=long_description,
     python_requires='>=3.5.3',
