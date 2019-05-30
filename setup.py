@@ -6,7 +6,7 @@ setup(
     install_requires=['gql>=0.1.0', 'aiohttp>=3.0.6',
                       'async_timeout>=1.4.0', 'websockets>=6.0',
                       'graphql-subscription-manager>=0.3.1'],
-    version='0.11.4',
+    version='0.11.5',
     description='A python3 library to communicate with Tibber',
     python_requires='>=3.5.3',
     author='Daniel Hoyer Iversen',
