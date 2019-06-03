@@ -96,7 +96,7 @@ class Tibber:
             if retry > 0:
                 return await self._execute(document, variable_values, retry - 1)
             raise
-        except asyncio.TimeoutError as err:
+        except asyncio.TimeoutError:
             _LOGGER.error(
                 "Timed out when connecting to Tibber: %s "
             )
