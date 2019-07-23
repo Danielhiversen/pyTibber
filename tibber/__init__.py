@@ -1,9 +1,12 @@
 """Library to handle connection with Tibber API."""
 import asyncio
+import datetime as dt
 import logging
 
 import aiohttp
 import async_timeout
+import pytz
+from dateutil.parser import parse
 from gql import gql
 from graphql.language.printer import print_ast
 from graphql_subscription_manager import SubscriptionManager
@@ -22,7 +25,7 @@ class Tibber:
     # pylint: disable=too-many-instance-attributes
 
     def __init__(
-        self, access_token=DEMO_TOKEN, timeout=DEFAULT_TIMEOUT, websession=None
+        self, access_token=DEMO_TOKEN, timeout=DEFAULT_TIMEOUT, websession=None, time_zone=None
     ):
         """Initialize the Tibber connection."""
         if websession is None:
@@ -36,6 +39,7 @@ class Tibber:
             self.websession = websession
         self._timeout = timeout
         self._access_token = access_token
+        self.time_zone = time_zone or pytz.utc
         self._name = None
         self._home_ids = []
         self._all_home_ids = []
@@ -96,8 +100,10 @@ class Tibber:
             if retry > 0:
                 return await self._execute(document, variable_values, retry - 1)
             raise
-        except asyncio.TimeoutError:
-            _LOGGER.error("Timed out when connecting to Tibber: %s ")
+        except asyncio.TimeoutError as err:
+            _LOGGER.error(
+                "Timed out when connecting to Tibber: %s ", err
+            )
             if retry > 0:
                 return await self._execute(document, variable_values, retry - 1)
             raise
@@ -235,6 +241,7 @@ class TibberHome:
         self.info = {}
         self._subscription_id = None
         self._data = None
+        self.last_data_timestamp = None
 
     def sync_update_info(self):
         """Update current price info."""
@@ -583,11 +590,64 @@ class TibberHome:
         self._data = data["nodes"]
 
     def sync_get_historic_data(self, n_data):
-        """get_historic_data."""
+        """get historic data."""
         loop = asyncio.get_event_loop()
         task = loop.create_task(self.get_historic_data(n_data))
         loop.run_until_complete(task)
         return self._data
+
+    def current_price_data(self):
+        """get current price."""
+        now = dt.datetime.now(self._tibber_control.time_zone)
+        for key, price_total in self.price_total.items():
+            price_time = parse(key).astimezone(self._tibber_control.time_zone)
+            price_total = round(price_total, 3)
+            time_diff = (now - price_time).total_seconds() / 60
+            if (not self.last_data_timestamp or
+                    price_time > self.last_data_timestamp):
+                self.last_data_timestamp = price_time
+            if 0 <= time_diff < 60:
+                return price_total, self.price_level[key], price_time
+
+    def current_attributes(self):
+        """get current attributes."""
+        max_price = 0
+        min_price = 10000
+        sum_price = 0
+        off_peak_1 = 0
+        peak = 0
+        off_peak_2 = 0
+        num1 = 0
+        num0 = 0
+        num2 = 0
+        num = 0
+        now = dt.datetime.now(self._tibber_control.time_zone)
+        for key, price_total in self.price_total.items():
+            price_time = parse(key).astimezone(self._tibber_control.time_zone)
+            price_total = round(price_total, 3)
+            if now.date() == price_time.date():
+                max_price = max(max_price, price_total)
+                min_price = min(min_price, price_total)
+                if price_time.hour < 8:
+                    off_peak_1 += price_total
+                    num1 += 1
+                elif price_time.hour < 20:
+                    peak += price_total
+                    num0 += 1
+                else:
+                    off_peak_2 += price_total
+                    num2 += 1
+                num += 1
+                sum_price += price_total
+
+        attr = {}
+        attr['max_price'] = max_price
+        attr['avg_price'] = round(sum_price / num, 3) if num > 0 else 0
+        attr['min_price'] = min_price
+        attr['off_peak_1'] = round(off_peak_1 / num1, 3) if num1 > 0 else 0
+        attr['peak'] = round(peak / num0, 3) if num0 > 0 else 0
+        attr['off_peak_2'] = round(off_peak_2 / num2, 3) if num2 > 0 else 0
+        return attr
 
 
 class InvalidLogin(Exception):
