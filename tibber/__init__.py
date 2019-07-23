@@ -25,7 +25,11 @@ class Tibber:
     # pylint: disable=too-many-instance-attributes
 
     def __init__(
-        self, access_token=DEMO_TOKEN, timeout=DEFAULT_TIMEOUT, websession=None, time_zone=None
+        self,
+        access_token=DEMO_TOKEN,
+        timeout=DEFAULT_TIMEOUT,
+        websession=None,
+        time_zone=None,
     ):
         """Initialize the Tibber connection."""
         if websession is None:
@@ -101,9 +105,7 @@ class Tibber:
                 return await self._execute(document, variable_values, retry - 1)
             raise
         except asyncio.TimeoutError as err:
-            _LOGGER.error(
-                "Timed out when connecting to Tibber: %s ", err
-            )
+            _LOGGER.error("Timed out when connecting to Tibber: %s ", err)
             if retry > 0:
                 return await self._execute(document, variable_values, retry - 1)
             raise
@@ -603,14 +605,15 @@ class TibberHome:
             price_time = parse(key).astimezone(self._tibber_control.time_zone)
             price_total = round(price_total, 3)
             time_diff = (now - price_time).total_seconds() / 60
-            if (not self.last_data_timestamp or
-                    price_time > self.last_data_timestamp):
+            if not self.last_data_timestamp or price_time > self.last_data_timestamp:
                 self.last_data_timestamp = price_time
             if 0 <= time_diff < 60:
                 return price_total, self.price_level[key], price_time
+        return None, None, None
 
     def current_attributes(self):
         """get current attributes."""
+        # pylint: disable=too-many-locals
         max_price = 0
         min_price = 10000
         sum_price = 0
@@ -641,12 +644,12 @@ class TibberHome:
                 sum_price += price_total
 
         attr = {}
-        attr['max_price'] = max_price
-        attr['avg_price'] = round(sum_price / num, 3) if num > 0 else 0
-        attr['min_price'] = min_price
-        attr['off_peak_1'] = round(off_peak_1 / num1, 3) if num1 > 0 else 0
-        attr['peak'] = round(peak / num0, 3) if num0 > 0 else 0
-        attr['off_peak_2'] = round(off_peak_2 / num2, 3) if num2 > 0 else 0
+        attr["max_price"] = max_price
+        attr["avg_price"] = round(sum_price / num, 3) if num > 0 else 0
+        attr["min_price"] = min_price
+        attr["off_peak_1"] = round(off_peak_1 / num1, 3) if num1 > 0 else 0
+        attr["peak"] = round(peak / num0, 3) if num0 > 0 else 0
+        attr["off_peak_2"] = round(off_peak_2 / num2, 3) if num2 > 0 else 0
         return attr
 
 
