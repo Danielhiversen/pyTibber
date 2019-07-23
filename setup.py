@@ -10,6 +10,7 @@ setup(
         "websockets>=6.0",
         "graphql-subscription-manager>=0.3.1",
         "pytz",
+        "python-dateutil",
     ],
     version="0.11.5",
     description="A python3 library to communicate with Tibber",
