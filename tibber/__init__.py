@@ -7,8 +7,6 @@ import aiohttp
 import async_timeout
 import pytz
 from dateutil.parser import parse
-from gql import gql
-from graphql.language.printer import print_ast
 from graphql_subscription_manager import SubscriptionManager
 
 DEFAULT_TIMEOUT = 10
@@ -84,8 +82,7 @@ class Tibber:
 
     async def _execute(self, document, variable_values=None, retry=2):
         """Execute gql."""
-        query_str = print_ast(document)
-        payload = {"query": query_str, "variables": variable_values or {}}
+        payload = {"query": document, "variables": variable_values or {}}
 
         post_args = {
             "headers": {"Authorization": "Bearer " + self._access_token},
@@ -122,8 +119,7 @@ class Tibber:
 
     async def update_info(self, *_):
         """Update home info async."""
-        query = gql(
-            """
+        query =  """
         {
           viewer {
             name
@@ -136,7 +132,6 @@ class Tibber:
           }
         }
         """
-        )
 
         res = await self._execute(query)
         if res is None:
@@ -197,8 +192,7 @@ class Tibber:
 
     async def send_notification(self, title, message):
         """Send notification."""
-        query = gql(
-            """
+        query = """
         mutation{
           sendPushNotification(input: {
             title: "%s",
@@ -208,9 +202,7 @@ class Tibber:
             pushedToNumberOfDevices
           }
         }
-        """
-            % (title, message)
-        )
+        """ % (title, message)
 
         res = await self.execute(query)
         if not res:
@@ -253,8 +245,7 @@ class TibberHome:
 
     async def update_info(self):
         """Update current price info async."""
-        query = gql(
-            """
+        query = """
         {
           viewer {
             home(id: "%s") {
@@ -310,9 +301,8 @@ class TibberHome:
                 }
               }
             }
-        """
-            % self._home_id
-        )
+        """ % self._home_id
+
         self.info = await self._tibber_control.execute(query)
 
     def sync_update_current_price_info(self):
@@ -323,8 +313,7 @@ class TibberHome:
 
     async def update_current_price_info(self):
         """Update current price info async."""
-        query = gql(
-            """
+        query = """
         {
           viewer {
             home(id: "%s") {
@@ -341,9 +330,7 @@ class TibberHome:
             }
           }
         }
-        """
-            % self.home_id
-        )
+        """ % self.home_id
         price_info_temp = await self._tibber_control.execute(query)
         if not price_info_temp:
             _LOGGER.error("Could not find current price info.")
@@ -366,8 +353,7 @@ class TibberHome:
 
     async def update_price_info(self):
         """Update price info async."""
-        query = gql(
-            """
+        query = """
         {
           viewer {
             home(id: "%s") {
@@ -395,9 +381,7 @@ class TibberHome:
             }
           }
         }
-        """
-            % self.home_id
-        )
+        """  % self.home_id
         price_info_temp = await self._tibber_control.execute(query)
         if not price_info_temp:
             _LOGGER.error("Could not find price info.")
@@ -512,8 +496,7 @@ class TibberHome:
             _LOGGER.error("Already subscribed.")
             return
         await self._tibber_control.rt_connect(loop)
-        document = gql(
-            """
+        document = """
             subscription{
               liveMeasurement(homeId:"%s"){
                 timestamp
@@ -536,13 +519,10 @@ class TibberHome:
                 lastMeterProduction
             }
            }
-        """
-            % self.home_id
-        )
-        sub_query = print_ast(document)
+        """ % self.home_id
 
         self._subscription_id = await self._tibber_control.sub_manager.subscribe(
-            sub_query, async_callback
+            document, async_callback
         )
 
     async def rt_unsubscribe(self):
@@ -563,8 +543,7 @@ class TibberHome:
 
     async def get_historic_data(self, n_data):
         """Get historic data."""
-        query = gql(
-            """
+        query = """
                 {
                   viewer {
                     home(id: "%s") {
@@ -578,9 +557,7 @@ class TibberHome:
                     }
                   }
                 }
-          """
-            % (self.home_id, n_data)
-        )
+          """  % (self.home_id, n_data)
         data = await self._tibber_control.execute(query)
         if not data:
             _LOGGER.error("Could not find current the data.")
