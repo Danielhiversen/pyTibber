@@ -119,7 +119,7 @@ class Tibber:
 
     async def update_info(self, *_):
         """Update home info async."""
-        query =  """
+        query = """
         {
           viewer {
             name
@@ -381,7 +381,7 @@ class TibberHome:
             }
           }
         }
-        """  % self.home_id
+        """ % self.home_id
         price_info_temp = await self._tibber_control.execute(query)
         if not price_info_temp:
             _LOGGER.error("Could not find price info.")
@@ -557,7 +557,7 @@ class TibberHome:
                     }
                   }
                 }
-          """  % (self.home_id, n_data)
+          """ % (self.home_id, n_data)
         data = await self._tibber_control.execute(query)
         if not data:
             _LOGGER.error("Could not find current the data.")
