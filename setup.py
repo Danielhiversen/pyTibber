@@ -4,7 +4,6 @@ setup(
     name="pyTibber",
     packages=["tibber"],
     install_requires=[
-        "gql>=0.1.0",
         "aiohttp>=3.0.6",
         "async_timeout>=1.4.0",
         "websockets>=6.0",
