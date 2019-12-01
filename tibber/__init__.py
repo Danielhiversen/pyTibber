@@ -202,7 +202,10 @@ class Tibber:
             pushedToNumberOfDevices
           }
         }
-        """ % (title, message)
+        """ % (
+            title,
+            message,
+        )
 
         res = await self.execute(query)
         if not res:
@@ -245,7 +248,8 @@ class TibberHome:
 
     async def update_info(self):
         """Update current price info async."""
-        query = """
+        query = (
+            """
         {
           viewer {
             home(id: "%s") {
@@ -301,7 +305,9 @@ class TibberHome:
                 }
               }
             }
-        """ % self._home_id
+        """
+            % self._home_id
+        )
 
         self.info = await self._tibber_control.execute(query)
 
@@ -313,7 +319,8 @@ class TibberHome:
 
     async def update_current_price_info(self):
         """Update current price info async."""
-        query = """
+        query = (
+            """
         {
           viewer {
             home(id: "%s") {
@@ -330,7 +337,9 @@ class TibberHome:
             }
           }
         }
-        """ % self.home_id
+        """
+            % self.home_id
+        )
         price_info_temp = await self._tibber_control.execute(query)
         if not price_info_temp:
             _LOGGER.error("Could not find current price info.")
@@ -353,7 +362,8 @@ class TibberHome:
 
     async def update_price_info(self):
         """Update price info async."""
-        query = """
+        query = (
+            """
         {
           viewer {
             home(id: "%s") {
@@ -381,7 +391,9 @@ class TibberHome:
             }
           }
         }
-        """ % self.home_id
+        """
+            % self.home_id
+        )
         price_info_temp = await self._tibber_control.execute(query)
         if not price_info_temp:
             _LOGGER.error("Could not find price info.")
@@ -496,7 +508,8 @@ class TibberHome:
             _LOGGER.error("Already subscribed.")
             return
         await self._tibber_control.rt_connect(loop)
-        document = """
+        document = (
+            """
             subscription{
               liveMeasurement(homeId:"%s"){
                 timestamp
@@ -519,7 +532,9 @@ class TibberHome:
                 lastMeterProduction
             }
            }
-        """ % self.home_id
+        """
+            % self.home_id
+        )
 
         self._subscription_id = await self._tibber_control.sub_manager.subscribe(
             document, async_callback
@@ -557,7 +572,10 @@ class TibberHome:
                     }
                   }
                 }
-          """ % (self.home_id, n_data)
+          """ % (
+            self.home_id,
+            n_data,
+        )
         data = await self._tibber_control.execute(query)
         if not data:
             _LOGGER.error("Could not find current the data.")
