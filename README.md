@@ -26,7 +26,8 @@ pip3 install pyTibber
 
 ```python
 import tibber
-tibber_connection = tibber.Tibber()  # access_token=YOUR_TOKEN
+access_token = tibber.DEMO_TOKEN
+tibber_connection = tibber.Tibber(access_token)
 tibber_connection.sync_update_info()
 print(tibber_connection.name)
 
