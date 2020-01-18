@@ -9,6 +9,8 @@ import pytz
 from dateutil.parser import parse
 from graphql_subscription_manager import SubscriptionManager
 
+from .const import RESOLUTION_HOURLY
+
 DEFAULT_TIMEOUT = 10
 DEMO_TOKEN = "d1007ead2dc84a2b82f0de19451c5fb22112f7ae11d19bf2bedb224a003ff74a"
 API_ENDPOINT = "https://api.tibber.com/v1-beta/gql"
@@ -556,13 +558,13 @@ class TibberHome:
             and self._subscription_id is not None
         )
 
-    async def get_historic_data(self, n_data):
+    async def get_historic_data(self, n_data, resolution=RESOLUTION_HOURLY):
         """Get historic data."""
         query = """
                 {
                   viewer {
                     home(id: "%s") {
-                      consumption(resolution: HOURLY, last: %s) {
+                      consumption(resolution: %s, last: %s) {
                         nodes {
                           from
                           totalCost
@@ -574,6 +576,7 @@ class TibberHome:
                 }
           """ % (
             self.home_id,
+            resolution,
             n_data,
         )
         data = await self._tibber_control.execute(query)
@@ -586,10 +589,10 @@ class TibberHome:
             return
         self._data = data["nodes"]
 
-    def sync_get_historic_data(self, n_data):
+    def sync_get_historic_data(self, n_data, resolution=RESOLUTION_HOURLY):
         """get historic data."""
         loop = asyncio.get_event_loop()
-        task = loop.create_task(self.get_historic_data(n_data))
+        task = loop.create_task(self.get_historic_data(n_data, resolution))
         loop.run_until_complete(task)
         return self._data
 
