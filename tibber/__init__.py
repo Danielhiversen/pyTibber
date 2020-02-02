@@ -532,6 +532,7 @@ class TibberHome:
                 currentPhase3
                 lastMeterConsumption
                 lastMeterProduction
+                signalStrength
             }
            }
         """
