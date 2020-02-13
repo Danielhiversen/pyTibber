@@ -6,23 +6,19 @@ matrix:
     env: TOXENV=py35
   - python: '3.6'
     env: TOXENV=py36
-  - python: "3.7"
+  - python: '3.7'
     env: TOXENV=py37
     dist: xenial
-  - python: 'nightly'
+  - python: nightly
     env: TOXENV=py37
-  - python: '3.8-dev'
+  - python: 3.8-dev
     env: TOXENV=py38
     dist: xenial
-
   - python: '3.6'
     env: TOXENV=lint
-
   allow_failures:
-  - python: 'nightly'
-  - python: '3.8-dev'
-
-
+  - python: nightly
+  - python: 3.8-dev
 cache:
   directories:
   - "$HOME/.cache/pip"
@@ -35,10 +31,9 @@ deploy:
   provider: pypi
   user: dahoiv
   password:
-    secure: q/3NQ0fplbH9pcwzmqlfBv+65OECnXq+Pc/4nLdse8ekTPTm0wlkWpJySt1pxmNkaHgnlIIWg/cdvJ46LZ0EL+rUfBxqCfUBZil2arPGUTu4qddwb0S3j330O7R28XIbQhGRqvjtAeWUBfrOA5GZxg4WEozzrzQVhiXGNTXKGKStzjqJKf3rzzbPeiFwe3w68G8IS9gfSJX2zYMkvEQeMxr3JMp2S8VUn9ay1r1JCAiUCTWIBb82ZeHAXCj/lewT3kQdyAtQip/dVagzf/vqh87ItiVXAjksZII4wjII8InxRLnYY63ybn0vedOioGTJ6aAREzrlosE0uNBcbz4n4Am4CBMqEl1L2N0wZfzzNHZFdw7PaCAGcZBXvIqhSGFgrT6WxvttU9tSw5YcETV5Un1cKQXz+t10fGFlI3RlJERWziTJX1tIohFX+53V10xPp4yFtc41m+lZEBtR6WqO4+yPtn7Dl+pEvD4ewghBGPRDFZ90YzlhcJKafbl74ZzFneWvMuq7cHv5T1aoa2c+6ZSxeCaMOnuoIuQ/eHsMVIELgpLyOAkcQGNbYoMe8SYew69ZtQ5yYORyPUNKPJLQ59t8LfJPFP0FFl3LetoVlYLoo9BrdJ589D2BVlze90dblQAe2NU7aX3+wTyvn0gv+14O17PH1fIVw/L4W4Y3LD4=
+    secure: TT40X+DW61ZmKii1tCqFZfiP0ll7ImiVE2V8IHIcOJdCvbQ5y47FDEV/1LxGcXQ3yDtXwJgXFBAN57igS9W0ncG7GtFKHW7dIJphZP3Cr41o+zQQlibwd2d4iZSW650Muy3Y7vLOGGedfc52SKFqgzivuGdoebrTgueuYZBDBBWk7QDuw2qbGp2DdKJF7Ay/RHb1i4AqloruOSAEZSNIZY8SBpN4ZZBfU80msNyeIXZ2WenEHYmi7CwDnF0u/VGVMTMq3zNHuqW9LhVwFELHIrMjR87uIU8G87Oo+q0ckboN3Q2o2hjjDF8SkzlLfRvhnqgENaY4FgPF7DLNKC/eNY498KK1gsSAreGeTFA98uC+FaSBAZ/yuhiU1oTaWEvcU/j7/SZaIM75jC3wkDv7kUPeDAgiDT2SkZL5G9xOUBclttSfJjAJlvKvwZpTe1ursIdComE0xpGjU9BbnuD8Wyo9EOweHi7pePYXBn2e/rE93SHJqSnsJ6xVNnXc3QzeCJfjxN5qT3zJLMDuj6U9xwuGR4BGUMWRrfAUW3hv/PjXsAwjdjSYt07H7J+PM5B+NjeLEFGJC0qo6ugP6+CgRA7apnHifbm6or6Lm9qyKTqVT5UhHMqBC9mUG+kZD/PG0X+5C4Hvq+pTYv6zzrjmhGzKmC5muFGI5zPCpJ/8OaA=
   on:
     tags: true
     repo: Danielhiversen/pyTibber
     condition: "$TOXENV = py35"
     branch: master
-
