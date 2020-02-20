@@ -527,9 +527,9 @@ class TibberHome:
                 voltagePhase1
                 voltagePhase2
                 voltagePhase3
-                currentPhase1
-                currentPhase2
-                currentPhase3
+                currentL1
+                currentL2
+                currentL3
                 lastMeterConsumption
                 lastMeterProduction
                 signalStrength
