@@ -649,6 +649,16 @@ class TibberHome:
         attr["off_peak_1"] = round(off_peak_1 / num1, 3) if num1 > 0 else 0
         attr["peak"] = round(peak / num0, 3) if num0 > 0 else 0
         attr["off_peak_2"] = round(off_peak_2 / num2, 3) if num2 > 0 else 0
+        if 'glitre' in self.info["viewer"]["home"]["meteringPointData"]["gridCompany"].lower():
+            now = now.astimezone(pytz.timezone("Europe/Oslo"))
+            if 10 <= now.month or now.month <= 3:
+                grid_price = 49.70 / 100
+            else:
+                grid_price = 47.45 / 100
+            if 11 <= now.month or now.month <= 3 and 22 <= now.hour or now.hour <= 7:
+                grid_price -= 14 / 100
+            attr["grid_price"] = round(grid_price, 3)
+
         return attr
 
 
