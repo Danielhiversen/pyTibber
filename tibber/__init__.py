@@ -11,7 +11,7 @@ from graphql_subscription_manager import SubscriptionManager
 
 from .const import RESOLUTION_HOURLY
 
-DEFAULT_TIMEOUT = 20
+DEFAULT_TIMEOUT = 10
 DEMO_TOKEN = "d1007ead2dc84a2b82f0de19451c5fb22112f7ae11d19bf2bedb224a003ff74a"
 API_ENDPOINT = "https://api.tibber.com/v1-beta/gql"
 SUB_ENDPOINT = "wss://api.tibber.com/v1-beta/gql/subscriptions"
@@ -99,14 +99,14 @@ class Tibber:
                 return None
             result = await resp.json()
         except aiohttp.ClientError as err:
+            if retry > 0:
+                return await self._execute(document, variable_values, retry - 1)
             _LOGGER.error("Error connecting to Tibber: %s ", err, exc_info=True)
-            if retry > 0:
-                return await self._execute(document, variable_values, retry - 1)
             raise
-        except asyncio.TimeoutError as err:
-            _LOGGER.error("Timed out when connecting to Tibber: %s ", err)
+        except asyncio.TimeoutError:
             if retry > 0:
                 return await self._execute(document, variable_values, retry - 1)
+            _LOGGER.error("Timed out when connecting to Tibber")
             raise
         errors = result.get("errors")
         if errors:
