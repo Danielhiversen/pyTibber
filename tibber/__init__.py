@@ -569,6 +569,7 @@ class TibberHome:
                         nodes {
                           from
                           totalCost
+                          cost
                           consumption
                         }
                       }
