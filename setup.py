@@ -11,7 +11,7 @@ setup(
         "pytz",
         "python-dateutil",
     ],
-    version="0.13.4",
+    version="0.13.5",
     description="A python3 library to communicate with Tibber",
     python_requires=">=3.5.3",
     author="Daniel Hoyer Iversen",
