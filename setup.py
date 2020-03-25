@@ -7,7 +7,7 @@ setup(
         "aiohttp>=3.0.6",
         "async_timeout>=1.4.0",
         "websockets>=6.0",
-        "graphql-subscription-manager>=0.3.3",
+        "graphql-subscription-manager>=0.3.4",
         "pytz",
         "python-dateutil",
     ],
