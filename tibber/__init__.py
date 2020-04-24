@@ -45,6 +45,7 @@ class Tibber:
         self._access_token = access_token
         self.time_zone = time_zone or pytz.utc
         self._name = None
+        self._user_id = None
         self._home_ids = []
         self._all_home_ids = []
         self._homes = {}
@@ -125,11 +126,12 @@ class Tibber:
         {
           viewer {
             name
+            userId
             homes {
+              id
               subscriptions {
                 status
               }
-              id
             }
           }
         }
@@ -151,6 +153,8 @@ class Tibber:
         if not viewer:
             return
         self._name = viewer.get("name")
+        self._user_id = viewer.get("userId")
+
         homes = viewer.get("homes", [])
         self._home_ids = []
         for _home in homes:
@@ -162,6 +166,11 @@ class Tibber:
                 if not home_id or status != "running":
                     continue
             self._home_ids += [home_id]
+
+    @property
+    def user_id(self):
+        """Return user id of user."""
+        return self._user_id
 
     @property
     def name(self):
