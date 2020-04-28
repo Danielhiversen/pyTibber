@@ -565,7 +565,6 @@ class TibberHome:
         return (
             self._tibber_control.sub_manager is not None
             and self._tibber_control.sub_manager.is_running
-            and self._subscription_id is not None
         )
 
     async def get_historic_data(self, n_data, resolution=RESOLUTION_HOURLY):
