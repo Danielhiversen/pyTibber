@@ -460,7 +460,7 @@ class TibberHome:
             sub = self.info["viewer"]["home"]["currentSubscription"]["status"]
         except (KeyError, TypeError):
             return False
-        return sub in ["running", "awaiting market"]
+        return sub in ["running", "awaiting market", "awaiting time restriction"]
 
     @property
     def has_real_time_consumption(self):
