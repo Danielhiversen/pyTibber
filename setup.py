@@ -14,7 +14,7 @@ setup(
     version="0.15.2",
     description="A python3 library to communicate with Tibber",
     python_requires=">=3.5.3",
-    author="Daniel Hoyer",
+    author="Daniel Hjelseth Hoyer",
     author_email="mail@dahoiv.net",
     url="https://github.com/Danielhiversen/pyTibber",
     license="MIT",
