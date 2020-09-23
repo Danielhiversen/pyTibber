@@ -1,0 +1,35 @@
+name: Black Code Formatter
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 0 * * *"
+
+jobs:
+  validate:
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: actions/checkout@v1
+      - name: black
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        uses: lgeiger/black-action@master
+        with:
+            args: .
+      - name: Check for modified files
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        id: git-check
+        run: echo ::set-output name=modified::$(if git diff-index --quiet HEAD --; then echo "false"; else echo "true"; fi)
+      - name: Push changes
+        if: github.event.pull_request.head.repo.full_name == github.repository && steps.git-check.outputs.modified == 'true'
+        run: |
+            git config --global user.name 'Daniel Hoyer'
+            git config --global user.email 'mail@dahoiv.net'
+            git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/$GITHUB_REPOSITORY
+            git checkout $GITHUB_HEAD_REF
+            git commit -am "fixup! Format Python code with black"
+            git push
+      - name: Flake8 Code Linter
+        uses: jonasrk/flake8-action@master
+        with: 
+          args: "--max-line-length=120 "
