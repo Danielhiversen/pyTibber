@@ -5,12 +5,11 @@ Tests for pyTibber
 import asyncio
 import os
 import sys
-import time
 import unittest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../")))
-import aiohttp
-import tibber
+import aiohttp  # noqa: E402
+import tibber  # noqa: E402
 
 
 class TestTibber(unittest.TestCase):
