@@ -687,6 +687,7 @@ class TibberHome:
             self._data = []
             return
         self._data = data["nodes"]
+        return self._data
 
     def sync_get_historic_data(self, n_data, resolution=RESOLUTION_HOURLY):
         """get historic data."""
