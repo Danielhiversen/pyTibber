@@ -1,0 +1,35 @@
+name: Code checker
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 4 * * *"
+
+jobs:
+  validate:
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: actions/checkout@v2
+      - name: Setup Python
+        uses: actions/setup-python@v1
+        with:
+          python-version: 3.7
+
+      - uses: actions/cache@v2
+        with:
+          path: ~/.cache/pip
+          key: ${{ hashFiles('requirements.txt') }}
+      - name: Install depencency
+        run: |
+            pip install -r requirements.txt
+            pip install dlint flake8 flake8-bandit flake8-bugbear flake8-deprecated flake8-executable isort pylint
+      - name: Flake8 Code Linter
+        run: |
+            flake8 tibber/ --max-line-length=120 
+      - name: isort
+        run: |
+            isort **/*.py
+      - name: Pylint Code Linter
+        run: |
+            pylint --disable=C,R  --enable=unidiomatic-typecheck  tibber
