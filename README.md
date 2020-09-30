@@ -7,7 +7,7 @@
 [![Language grade: Python](https://img.shields.io/lgtm/grade/python/g/Danielhiversen/pyTibber.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/Danielhiversen/pyTibber/context:python)
 
 
-Python3 library for Tibber.
+Python3 library for [Tibber](https://tibber.com/).
 
 Read electricity price and consumption.
 
