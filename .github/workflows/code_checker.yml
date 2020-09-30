@@ -19,10 +19,10 @@ jobs:
       - uses: actions/cache@v2
         with:
           path: ~/.cache/pip
-          key: ${{ hashFiles('requirements.txt') }}
+          key: pip_cache
       - name: Install depencency
         run: |
-            pip install -r requirements.txt
+            pip install gql aiohttp async_timeout graphql-subscription-manager
             pip install dlint flake8 flake8-bandit flake8-bugbear flake8-deprecated flake8-executable isort pylint
       - name: Flake8 Code Linter
         run: |
@@ -32,4 +32,4 @@ jobs:
             isort **/*.py
       - name: Pylint Code Linter
         run: |
-            pylint --disable=C,R  --enable=unidiomatic-typecheck  tibber
+            pylint tibber
