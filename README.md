@@ -7,7 +7,7 @@
 [![Language grade: Python](https://img.shields.io/lgtm/grade/python/g/Danielhiversen/pyTibber.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/Danielhiversen/pyTibber/context:python)
 
 
-Python3 library for Tibber.
+Python3 library for [Tibber](https://tibber.com/).
 
 Read electricity price and consumption.
 
@@ -44,3 +44,5 @@ tibber_connection.sync_close_connection()
 ```
 
 The library is used as part of Home Assitant: [https://github.com/home-assistant/home-assistant/tree/dev/homeassistant/components/tibber](https://github.com/home-assistant/home-assistant/tree/dev/homeassistant/components/tibber)
+
+An example of how to subscribe to realtime data (Pulse/Watty): https://github.com/home-assistant/core/blob/fca071742dd9b0827497ced9cb607f4373d0fada/homeassistant/components/tibber/sensor.py#L179

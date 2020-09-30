@@ -11,7 +11,7 @@ from graphql_subscription_manager import SubscriptionManager
 
 from .const import RESOLUTION_HOURLY
 
-DEFAULT_TIMEOUT = 10
+DEFAULT_TIMEOUT = 15
 DEMO_TOKEN = "d1007ead2dc84a2b82f0de19451c5fb22112f7ae11d19bf2bedb224a003ff74a"
 API_ENDPOINT = "https://api.tibber.com/v1-beta/gql"
 SUB_ENDPOINT = "wss://api.tibber.com/v1-beta/gql/subscriptions"
@@ -105,8 +105,6 @@ class Tibber:
             _LOGGER.error("Error connecting to Tibber: %s ", err, exc_info=True)
             raise
         except asyncio.TimeoutError:
-            if retry > 0:
-                return await self._execute(document, variable_values, retry - 1)
             _LOGGER.error("Timed out when connecting to Tibber")
             raise
         errors = result.get("errors")
@@ -193,7 +191,7 @@ class Tibber:
         return [self.get_home(home_id) for home_id in self.get_home_ids(only_active)]
 
     def get_home(self, home_id):
-        """Retun an instance of TibberHome for given home id."""
+        """Return an instance of TibberHome for given home id."""
         if home_id not in self._all_home_ids:
             _LOGGER.error("Could not find any Tibber home with id: %s", home_id)
             return None
@@ -322,6 +320,94 @@ class TibberHome:
 
         self.info = await self._tibber_control.execute(query)
 
+    async def update_info_and_price_info(self):
+        """Update current price info async."""
+        query = (
+            """
+        {
+          viewer {
+            home(id: "%s") {
+              currentSubscription {
+                priceInfo {
+                  current {
+                    energy
+                    tax
+                    total
+                    startsAt
+                    level
+                  }
+                  today {
+                    total
+                    startsAt
+                    level
+                  }
+                  tomorrow {
+                    total
+                    startsAt
+                    level
+                  }
+                }
+              }
+              appNickname
+              features {
+                realTimeConsumptionEnabled
+              }
+              currentSubscription {
+                status
+              }
+              address {
+                address1
+                address2
+                address3
+                city
+                postalCode
+                country
+                latitude
+                longitude
+              }
+              meteringPointData {
+                consumptionEan
+                energyTaxType
+                estimatedAnnualConsumption
+                gridCompany
+                productionEan
+                vatType
+              }
+              owner {
+                name
+                isCompany
+                language
+                contactInfo {
+                  email
+                  mobile
+                }
+              }
+              timeZone
+              subscriptions {
+                id
+                status
+                validFrom
+                validTo
+                statusReason
+              }
+              currentSubscription {
+                priceInfo {
+                  current {
+                    currency
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        """
+            % self._home_id
+        )
+
+        self.info = await self._tibber_control.execute(query)
+        self._process_price_info(self.info)
+
     def sync_update_current_price_info(self):
         """Update current price info."""
         loop = asyncio.get_event_loop()
@@ -405,24 +491,27 @@ class TibberHome:
         """
             % self.home_id
         )
-        price_info_temp = await self._tibber_control.execute(query)
-        if not price_info_temp:
+        price_info = await self._tibber_control.execute(query)
+        self._process_price_info(price_info)
+
+    def _process_price_info(self, price_info):
+        if not price_info:
             _LOGGER.error("Could not find price info.")
             return
         self._price_info = {}
         self._level_info = {}
         for key in ["current", "today", "tomorrow"]:
             try:
-                home = price_info_temp["viewer"]["home"]
+                home = price_info["viewer"]["home"]
                 current_subscription = home["currentSubscription"]
-                price_info = current_subscription["priceInfo"][key]
+                price_info_k = current_subscription["priceInfo"][key]
             except (KeyError, TypeError):
                 _LOGGER.error("Could not find price info for %s.", key)
                 continue
             if key == "current":
-                self._current_price_info = price_info
+                self._current_price_info = price_info_k
                 continue
-            for data in price_info:
+            for data in price_info_k:
                 self._price_info[data.get("startsAt")] = data.get("total")
                 self._level_info[data.get("startsAt")] = data.get("level")
 
@@ -598,6 +687,7 @@ class TibberHome:
             self._data = []
             return
         self._data = data["nodes"]
+        return self._data
 
     def sync_get_historic_data(self, n_data, resolution=RESOLUTION_HOURLY):
         """get historic data."""
@@ -609,15 +699,15 @@ class TibberHome:
     def current_price_data(self):
         """get current price."""
         now = dt.datetime.now(self._tibber_control.time_zone)
+        res = None, None, None
         for key, price_total in self.price_total.items():
             price_time = parse(key).astimezone(self._tibber_control.time_zone)
-            price_total = round(price_total, 3)
             time_diff = (now - price_time).total_seconds() / 60
             if not self.last_data_timestamp or price_time > self.last_data_timestamp:
                 self.last_data_timestamp = price_time
             if 0 <= time_diff < 60:
-                return price_total, self.price_level[key], price_time
-        return None, None, None
+                res = round(price_total, 3), self.price_level[key], price_time
+        return res
 
     def current_attributes(self):
         """get current attributes."""
@@ -658,10 +748,10 @@ class TibberHome:
         attr["off_peak_1"] = round(off_peak_1 / num1, 3) if num1 > 0 else 0
         attr["peak"] = round(peak / num0, 3) if num0 > 0 else 0
         attr["off_peak_2"] = round(off_peak_2 / num2, 3) if num2 > 0 else 0
-        if (
-            "glitre"
-            in self.info["viewer"]["home"]["meteringPointData"]["gridCompany"].lower()
-        ):
+        grid_company = self.info["viewer"]["home"]["meteringPointData"].get(
+            "gridCompany", ""
+        )
+        if grid_company and "glitre" in grid_company.lower():
             now = now.astimezone(pytz.timezone("Europe/Oslo"))
             if now.month >= 10 or now.month <= 3:
                 grid_price = 49.70 / 100
