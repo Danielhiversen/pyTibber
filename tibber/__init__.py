@@ -35,7 +35,7 @@ class Tibber:
         if websession is None:
 
             async def _create_session():
-                return aiohttp.ClientSession()
+                return aiohttp.ClientSession(headers={aiohttp.hdrs.USER_AGENT: 'pyTibber'})
 
             loop = asyncio.get_event_loop()
             self.websession = loop.run_until_complete(_create_session())
