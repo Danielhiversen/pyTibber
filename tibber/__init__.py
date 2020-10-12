@@ -93,6 +93,14 @@ class Tibber:
             "headers": {"Authorization": "Bearer " + self._access_token},
             "data": payload,
         }
+        try:
+            user_agent = self.websession._default_headers.get(  # pylint: disable=protected-access
+                aiohttp.hdrs.USER_AGENT, ""
+            )  # will be fixed by aiohttp 4.0
+            if "pyTibber" not in user_agent:
+                post_args["headers"][aiohttp.hdrs.USER_AGENT] = f"{user_agent}/pyTibber"
+        except Exception:  # pylint: disable=broad-except
+            pass
 
         try:
             with async_timeout.timeout(self._timeout):
