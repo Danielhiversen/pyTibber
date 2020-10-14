@@ -9,7 +9,7 @@ import pytz
 from dateutil.parser import parse
 from graphql_subscription_manager import SubscriptionManager
 
-from .const import RESOLUTION_HOURLY
+from .const import __version__, RESOLUTION_HOURLY
 
 DEFAULT_TIMEOUT = 15
 DEMO_TOKEN = "d1007ead2dc84a2b82f0de19451c5fb22112f7ae11d19bf2bedb224a003ff74a"
@@ -98,7 +98,9 @@ class Tibber:
                 aiohttp.hdrs.USER_AGENT, ""
             )  # will be fixed by aiohttp 4.0
             if "pyTibber" not in user_agent:
-                post_args["headers"][aiohttp.hdrs.USER_AGENT] = f"{user_agent}/pyTibber"
+                post_args["headers"][
+                    aiohttp.hdrs.USER_AGENT
+                ] = f"{user_agent}/pyTibber{__version__}"
         except Exception:  # pylint: disable=broad-except
             pass
 
