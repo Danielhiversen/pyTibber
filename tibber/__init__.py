@@ -98,7 +98,9 @@ class Tibber:
                 aiohttp.hdrs.USER_AGENT, ""
             )  # will be fixed by aiohttp 4.0
             if "pyTibber" not in user_agent:
-                post_args["headers"][aiohttp.hdrs.USER_AGENT] = f"{user_agent}/pyTibber{__version__}"
+                post_args["headers"][
+                    aiohttp.hdrs.USER_AGENT
+                ] = f"{user_agent}/pyTibber{__version__}"
         except Exception:  # pylint: disable=broad-except
             pass
 
