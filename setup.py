@@ -1,5 +1,10 @@
 from setuptools import setup
 
+
+consts = {}
+with open(os.path.join('pysmartapp', 'const.py'), 'r') as fp:
+    exec(fp.read(), consts)
+
 setup(
     name="pyTibber",
     packages=["tibber"],
@@ -10,7 +15,7 @@ setup(
         "pytz",
         "python-dateutil",
     ],
-    version="0.15.7",
+    version=consts['__version__']
     description="A python3 library to communicate with Tibber",
     python_requires=">=3.5.3",
     author="Daniel Hjelseth Hoyer",
