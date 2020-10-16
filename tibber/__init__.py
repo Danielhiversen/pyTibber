@@ -36,7 +36,7 @@ class Tibber:
 
             async def _create_session():
                 return aiohttp.ClientSession(
-                    headers={aiohttp.hdrs.USER_AGENT: "pyTibber"}
+                    headers={aiohttp.hdrs.USER_AGENT: f"pyTibber/{__version__}"}
                 )
 
             loop = asyncio.get_event_loop()
@@ -100,7 +100,7 @@ class Tibber:
             if "pyTibber" not in user_agent:
                 post_args["headers"][
                     aiohttp.hdrs.USER_AGENT
-                ] = f"{user_agent}/pyTibber{__version__}"
+                ] = f"{user_agent} pyTibber/{__version__}"
         except Exception:  # pylint: disable=broad-except
             pass
 
