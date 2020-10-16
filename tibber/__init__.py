@@ -9,7 +9,7 @@ import pytz
 from dateutil.parser import parse
 from graphql_subscription_manager import SubscriptionManager
 
-from .const import __version__, RESOLUTION_HOURLY
+from .const import RESOLUTION_HOURLY, __version__
 
 DEFAULT_TIMEOUT = 15
 DEMO_TOKEN = "d1007ead2dc84a2b82f0de19451c5fb22112f7ae11d19bf2bedb224a003ff74a"
@@ -214,16 +214,16 @@ class Tibber:
     async def send_notification(self, title, message):
         """Send notification."""
         query = """
-        mutation{
-          sendPushNotification(input: {
-            title: "%s",
-            message: "%s",
-          }){
+        mutation{{
+          sendPushNotification(input: {{
+            title: "{}",
+            message: "{}",
+          }}){{
             successful
             pushedToNumberOfDevices
-          }
-        }
-        """ % (
+          }}
+        }}
+        """.format(
             title,
             message,
         )
@@ -671,21 +671,21 @@ class TibberHome:
     async def get_historic_data(self, n_data, resolution=RESOLUTION_HOURLY):
         """Get historic data."""
         query = """
-                {
-                  viewer {
-                    home(id: "%s") {
-                      consumption(resolution: %s, last: %s) {
-                        nodes {
+                {{
+                  viewer {{
+                    home(id: "{}") {{
+                      consumption(resolution: {}, last: {}) {{
+                        nodes {{
                           from
                           totalCost
                           cost
                           consumption
-                        }
-                      }
-                    }
-                  }
-                }
-          """ % (
+                        }}
+                      }}
+                    }}
+                  }}
+                }}
+          """.format(
             self.home_id,
             resolution,
             n_data,
