@@ -9,7 +9,9 @@
 
 Python3 library for [Tibber](https://tibber.com/).
 
-Read electricity price and consumption.
+Get electricity price and consumption.
+
+If you use this link to signup for Tibber, you get 50 euro to buy smart home products in the Tibber store: https://invite.tibber.com/6fd7a447 
 
 If you have a Tibber Pulse or Watty you can see your consumption in real time.
 
