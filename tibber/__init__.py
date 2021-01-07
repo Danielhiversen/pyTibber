@@ -766,11 +766,13 @@ class TibberHome:
         if grid_company and "glitre" in grid_company.lower():
             now = now.astimezone(pytz.timezone("Europe/Oslo"))
             if now.month >= 10 or now.month <= 3:
-                grid_price = 49.70 / 100
+                grid_price = 45.99 / 100
             else:
-                grid_price = 47.45 / 100
+                grid_price = 43.74 / 100
             if (now.month >= 11 or now.month <= 3) and (now.hour >= 22 or now.hour < 6):
-                grid_price -= 14 / 100
+                grid_price -= 12 / 100
+            if (now.month >= 4 and now.month <= 10) and (now.hour >= 22 or now.hour < 6):
+                grid_price -= 2.5 / 100
             attr["grid_price"] = round(grid_price, 3)
 
         return attr
