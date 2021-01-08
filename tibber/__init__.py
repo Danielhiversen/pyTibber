@@ -771,7 +771,9 @@ class TibberHome:
                 grid_price = 43.74 / 100
             if (now.month >= 11 or now.month <= 3) and (now.hour >= 22 or now.hour < 6):
                 grid_price -= 12 / 100
-            if (now.month >= 4 and now.month <= 10) and (now.hour >= 22 or now.hour < 6):
+            if (now.month >= 4 and now.month <= 10) and (
+                now.hour >= 22 or now.hour < 6
+            ):
                 grid_price -= 2.5 / 100
             attr["grid_price"] = round(grid_price, 3)
 
