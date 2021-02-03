@@ -692,7 +692,7 @@ class TibberHome:
         )
         data = await self._tibber_control.execute(query)
         if not data:
-            _LOGGER.error("Could not find current the data.")
+            _LOGGER.error("Could not find the data.")
             return
         data = data["viewer"]["home"]["consumption"]
         if data is None:
