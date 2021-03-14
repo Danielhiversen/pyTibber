@@ -643,6 +643,8 @@ class TibberHome:
                 lastMeterConsumption
                 lastMeterProduction
                 signalStrength
+                accumulatedConsumptionLastHour
+                accumulatedProductionLastHour
             }
            }
         """
