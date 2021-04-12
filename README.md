@@ -45,7 +45,39 @@ print(home.current_price_info)
 tibber_connection.sync_close_connection()
 ```
 
+
+
+An example of how to subscribe to realtime data (Pulse/Watty):
+
+```python
+import asyncio
+
+import aiohttp
+import tibber
+
+ACCESS_TOKEN = tibber.DEMO_TOKEN
+
+
+async def _callback(pkg):
+    data = pkg.get("data")
+    if data is None:
+        return
+    print(data.get("liveMeasurement"))
+
+
+async def run():
+    async with aiohttp.ClientSession() as session:
+        tibber_connection = tibber.Tibber(ACCESS_TOKEN, websession=session)
+        await tibber_connection.update_info()
+        home = tibber_connection.get_homes()[0]
+    await home.rt_subscribe(asyncio.get_event_loop(), _callback)
+
+    while True:
+        await asyncio.sleep(10)
+
+
+if __name__ == '__main__':
+    loop = asyncio.run(run())
+```
+
 The library is used as part of Home Assitant: [https://github.com/home-assistant/home-assistant/tree/dev/homeassistant/components/tibber](https://github.com/home-assistant/home-assistant/tree/dev/homeassistant/components/tibber)
-
-An example of how to subscribe to realtime data (Pulse/Watty): https://github.com/home-assistant/core/blob/fca071742dd9b0827497ced9cb607f4373d0fada/homeassistant/components/tibber/sensor.py#L179
-
