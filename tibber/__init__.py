@@ -21,6 +21,7 @@ _LOGGER = logging.getLogger(__name__)
 
 class Tibber:
     """Class to communicate with the Tibber api."""
+
     # pylint: disable=too-many-instance-attributes
 
     def __init__(
@@ -770,7 +771,7 @@ class TibberHome:
                 grid_price = 41.86 / 100
             else:
                 grid_price = 39.99 / 100
-            if (now.hour >= 22 or now.hour < 6):
+            if now.hour >= 22 or now.hour < 6:
                 grid_price -= 12 / 100
             attr["grid_price"] = round(grid_price, 3)
 
