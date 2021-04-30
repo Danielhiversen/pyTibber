@@ -18,12 +18,12 @@ class TestTibber(unittest.TestCase):
     """
 
     def setUp(self):  # pylint: disable=invalid-name
-        """ things to be run when tests are started. """
+        """things to be run when tests are started."""
         self.tibber = tibber.Tibber()
         self.tibber.sync_update_info()
 
     def tearDown(self):  # pylint: disable=invalid-name
-        """ Stop stuff we started. """
+        """Stop stuff we started."""
         self.tibber.sync_close_connection()
 
     def test_tibber(self):
@@ -91,7 +91,7 @@ class TestTibberWebsession(unittest.TestCase):
     """
 
     def setUp(self):  # pylint: disable=invalid-name
-        """ things to be run when tests are started. """
+        """things to be run when tests are started."""
 
         async def _create_session():
             return aiohttp.ClientSession()
@@ -102,7 +102,7 @@ class TestTibberWebsession(unittest.TestCase):
         self.tibber.sync_update_info()
 
     def tearDown(self):  # pylint: disable=invalid-name
-        """ Stop stuff we started. """
+        """Stop stuff we started."""
         self.tibber.sync_close_connection()
 
     def test_tibber(self):
@@ -127,12 +127,12 @@ class TestTibberInvalidToken(unittest.TestCase):
     """
 
     def setUp(self):  # pylint: disable=invalid-name
-        """ things to be run when tests are started. """
+        """things to be run when tests are started."""
         self.tibber = tibber.Tibber(access_token="INVALID_TOKEN")
         self.assertRaises(tibber.InvalidLogin, self.tibber.sync_update_info)
 
     def tearDown(self):  # pylint: disable=invalid-name
-        """ Stop stuff we started. """
+        """Stop stuff we started."""
         self.tibber.sync_close_connection()
 
     def test_tibber(self):
@@ -155,14 +155,14 @@ class TestTibberPrivateToken(unittest.TestCase):
     """
 
     def setUp(self):  # pylint: disable=invalid-name
-        """ things to be run when tests are started. """
+        """things to be run when tests are started."""
         self.tibber = tibber.Tibber(
             access_token="d11a43897efa4cf478afd659d6c8b7117da9e33b38232fd454b0e9f28af98012"
         )
         self.tibber.sync_update_info()
 
     def tearDown(self):  # pylint: disable=invalid-name
-        """ Stop stuff we started. """
+        """Stop stuff we started."""
         self.tibber.sync_close_connection()
 
     def test_tibber(self):
