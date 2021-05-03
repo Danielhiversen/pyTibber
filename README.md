@@ -46,6 +46,7 @@ tibber_connection.sync_close_connection()
 ```
 
 
+## Example realtime data:
 
 An example of how to subscribe to realtime data (Pulse/Watty):
 
