@@ -63,12 +63,12 @@ class Tibber:
         task = loop.create_task(self.close_connection())
         loop.run_until_complete(task)
 
-    async def rt_connect(self, loop):
+    async def rt_connect(self):
         """Start subscription manager for real time data."""
         if self.sub_manager is not None:
             return
         self.sub_manager = SubscriptionManager(
-            loop, "token={}".format(self._access_token), SUB_ENDPOINT
+            "token={}".format(self._access_token), SUB_ENDPOINT
         )
         self.sub_manager.start()
 
@@ -615,12 +615,12 @@ class TibberHome:
             return " "
         return currency + "/" + consumption_unit
 
-    async def rt_subscribe(self, loop, async_callback):
+    async def rt_subscribe(self, async_callback):
         """Connect to Tibber and subscribe to Tibber rt subscription."""
         if self._subscription_id is not None:
             _LOGGER.error("Already subscribed.")
             return
-        await self._tibber_control.rt_connect(loop)
+        await self._tibber_control.rt_connect()
         document = (
             """
             subscription{
