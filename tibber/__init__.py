@@ -646,6 +646,8 @@ class TibberHome:
                 signalStrength
                 accumulatedConsumptionLastHour
                 accumulatedProductionLastHour
+                powerFactor
+                powerReactive
             }
            }
         """
