@@ -39,7 +39,7 @@ class Tibber:
                     headers={aiohttp.hdrs.USER_AGENT: f"pyTibber/{__version__}"}
                 )
 
-            loop = asyncio.get_running_loop()
+            loop = asyncio.get_event_loop()
             self.websession = loop.run_until_complete(_create_session())
         else:
             self.websession = websession
