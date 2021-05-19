@@ -1,0 +1,48 @@
+name: Code checker
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 4 * * *"
+
+jobs:
+  validate:
+    runs-on: "ubuntu-latest"
+    strategy:
+      matrix:
+        python-version:
+          - "3.7"
+          - "3.8"
+          - "3.9"
+          - "3.10-dev"
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: actions/cache@v2
+        with:
+          path: ~/.cache/pip
+          key: pip_cache
+      - name: Install depencency
+        run: |
+            pip install gql aiohttp async_timeout graphql-subscription-manager pytz python-dateutil
+            pip install dlint flake8 flake8-bandit flake8-bugbear flake8-deprecated flake8-executable isort pylint pytest pytest-cov
+      - name: Flake8 Code Linter
+        run: |
+            flake8 tibber/ --max-line-length=120  --extend-ignore=S105,S110
+      - name: isort
+        run: |
+            isort **/*.py
+      - name: Pylint Code Linter
+        run: |
+            pylint tibber
+      - name: Pytest
+        run: |
+            py.test --cov=tibber --cov=tibber test/test.py > pytest-coverage.txt
+      - name: Comment coverage
+        if: ${{ matrix.python-version == '3.9' }}
+        uses: coroo/pytest-coverage-commentator@v1.0.2
