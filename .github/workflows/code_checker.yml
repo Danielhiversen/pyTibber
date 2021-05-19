@@ -23,7 +23,7 @@ jobs:
       - name: Install depencency
         run: |
             pip install gql aiohttp async_timeout graphql-subscription-manager pytz python-dateutil
-            pip install dlint flake8 flake8-bandit flake8-bugbear flake8-deprecated flake8-executable isort pylint
+            pip install dlint flake8 flake8-bandit flake8-bugbear flake8-deprecated flake8-executable isort pylint pytest pytest-cov
       - name: Flake8 Code Linter
         run: |
             flake8 tibber/ --max-line-length=120  --extend-ignore=S105,S110
@@ -33,3 +33,6 @@ jobs:
       - name: Pylint Code Linter
         run: |
             pylint tibber
+      - name: Pytest
+        run: |
+            py.test --cov=tibber --cov-report= {posargs} test/test.py
