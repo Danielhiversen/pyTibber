@@ -26,7 +26,7 @@ jobs:
             pip install dlint flake8 flake8-bandit flake8-bugbear flake8-deprecated flake8-executable isort pylint
       - name: Flake8 Code Linter
         run: |
-            flake8 tibber/ --max-line-length=120 
+            flake8 tibber/ --max-line-length=120  --extend-ignore=S105,S110
       - name: isort
         run: |
             isort **/*.py
