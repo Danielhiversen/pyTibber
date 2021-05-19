@@ -22,7 +22,7 @@ jobs:
           key: pip_cache
       - name: Install depencency
         run: |
-            pip install gql aiohttp async_timeout graphql-subscription-manager
+            pip install gql aiohttp async_timeout graphql-subscription-manager pytz dateutil
             pip install dlint flake8 flake8-bandit flake8-bugbear flake8-deprecated flake8-executable isort pylint
       - name: Flake8 Code Linter
         run: |
