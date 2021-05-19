@@ -35,4 +35,6 @@ jobs:
             pylint tibber
       - name: Pytest
         run: |
-            py.test --cov=tibber --cov-report= {posargs} test/test.py
+            py.test --cov=tibber --cov-report=app test/test.py > pytest-coverage.txt
+      - name: Comment coverage
+        uses: coroo/pytest-coverage-commentator@v1.0.2
