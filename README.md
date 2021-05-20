@@ -70,15 +70,14 @@ async def run():
     async with aiohttp.ClientSession() as session:
         tibber_connection = tibber.Tibber(ACCESS_TOKEN, websession=session)
         await tibber_connection.update_info()
-        home = tibber_connection.get_homes()[0]
+    home = tibber_connection.get_homes()[0]
     await home.rt_subscribe(_callback)
-
-    while True:
-        await asyncio.sleep(10)
 
 
 if __name__ == '__main__':
-    asyncio.run(run())
+    loop = asyncio.get_event_loop()
+    asyncio.ensure_future(run())
+    loop.run_forever()
 ```
 
 The library is used as part of Home Assitant: [https://github.com/home-assistant/home-assistant/tree/dev/homeassistant/components/tibber](https://github.com/home-assistant/home-assistant/tree/dev/homeassistant/components/tibber)
