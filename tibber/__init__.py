@@ -631,6 +631,7 @@ class TibberHome:
                 accumulatedProduction
                 accumulatedConsumption
                 accumulatedCost
+                accumulatedReward
                 currency
                 minPower
                 averagePower
