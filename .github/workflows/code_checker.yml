@@ -42,7 +42,4 @@ jobs:
             pylint tibber
       - name: Pytest
         run: |
-            py.test --cov=tibber --cov=tibber test/test.py > pytest-coverage.txt
-      - name: Comment coverage
-        if: ${{ matrix.python-version == '3.9' }}
-        uses: coroo/pytest-coverage-commentator@v1.0.2
+            py.test --cov=tibber --cov=tibber test/test.py
