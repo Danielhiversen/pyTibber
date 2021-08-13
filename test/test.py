@@ -71,7 +71,7 @@ class TestTibber(unittest.TestCase):
                     self.assertTrue(isinstance(home.price_total[key], (float, int)))
             else:
                 k += 1
-                self.assertEqual(home.home_id, "68e6938b-91a6-4199-a0d4-f24c22be87bb")
+                self.assertEqual(home.home_id, "cc83e83e-8cbf-4595-9bf7-c3cf192f7d9c")
                 self.assertEqual(home.address1, "Winterfell")
                 self.assertEqual(home.country, "NO")
                 self.assertEqual(home.price_unit, " ")
