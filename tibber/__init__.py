@@ -68,7 +68,7 @@ class Tibber:
         if self.sub_manager is not None:
             return
         self.sub_manager = SubscriptionManager(
-            "token={}".format(self._access_token), SUB_ENDPOINT
+            f"token={self._access_token}", SUB_ENDPOINT
         )
         self.sub_manager.start()
 
@@ -214,6 +214,7 @@ class Tibber:
 
     async def send_notification(self, title, message):
         """Send notification."""
+        # pylint: disable=consider-using-f-string)
         query = """
         mutation{{
           sendPushNotification(input: {{
@@ -270,6 +271,7 @@ class TibberHome:
 
     async def update_info(self):
         """Update current price info async."""
+        # pylint: disable=consider-using-f-string)
         query = (
             """
         {
@@ -335,6 +337,7 @@ class TibberHome:
 
     async def update_info_and_price_info(self):
         """Update current price info async."""
+        # pylint: disable=consider-using-f-string)
         query = (
             """
         {
@@ -429,6 +432,7 @@ class TibberHome:
 
     async def update_current_price_info(self):
         """Update current price info async."""
+        # pylint: disable=consider-using-f-string)
         query = (
             """
         {
@@ -472,6 +476,7 @@ class TibberHome:
 
     async def update_price_info(self):
         """Update price info async."""
+        # pylint: disable=consider-using-f-string)
         query = (
             """
         {
@@ -621,6 +626,7 @@ class TibberHome:
             _LOGGER.error("Already subscribed.")
             return
         await self._tibber_control.rt_connect()
+        # pylint: disable=consider-using-f-string)
         document = (
             """
             subscription{
@@ -676,6 +682,7 @@ class TibberHome:
 
     async def get_historic_data(self, n_data, resolution=RESOLUTION_HOURLY):
         """Get historic data."""
+        # pylint: disable=consider-using-f-string)
         query = """
                 {{
                   viewer {{
