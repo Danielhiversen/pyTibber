@@ -264,10 +264,10 @@ class TibberHome:
         self._tibber_control = tibber_control
         self._home_id = home_id
         self._current_price_info: dict[str, dict] = {}
-        self._price_info = {}
-        self._level_info = {}
+        self._price_info: dict[dt.datetime, str] = {}
+        self._level_info: dict[dt.datetime, str] = {}
         self.sub_manager = None
-        self.info = {}
+        self.info: dict[str, Any] | None = {}
         self._subscription_id = None
         self._data = None
         self.last_data_timestamp = None
@@ -674,7 +674,7 @@ class TibberHome:
             document, async_callback
         )
 
-    async def rt_unsubscribe(self):
+    async def rt_unsubscribe(self) -> None:
         """Unsubscribe to Tibber rt subscription."""
         if self._subscription_id is None:
             _LOGGER.error("Not subscribed.")
@@ -682,7 +682,7 @@ class TibberHome:
         await self._tibber_control.sub_manager.unsubscribe(self._subscription_id)
 
     @property
-    def rt_subscription_running(self):
+    def rt_subscription_running(self) -> bool:
         """Is real time subscription running."""
         return (
             self._tibber_control.sub_manager is not None
@@ -723,14 +723,14 @@ class TibberHome:
         self._data = data["nodes"]
         return self._data
 
-    def sync_get_historic_data(self, n_data, resolution=RESOLUTION_HOURLY):
+    def sync_get_historic_data(self, n_data: int, resolution: str = RESOLUTION_HOURLY):
         """get historic data."""
         loop = asyncio.get_event_loop()
         task = loop.create_task(self.get_historic_data(n_data, resolution))
         loop.run_until_complete(task)
         return self._data
 
-    def current_price_data(self):
+    def current_price_data(self) -> float:
         """get current price."""
         now = dt.datetime.now(self._tibber_control.time_zone)
         res = None, None, None
@@ -743,7 +743,7 @@ class TibberHome:
                 res = round(price_total, 3), self.price_level[key], price_time
         return res
 
-    def current_attributes(self):
+    def current_attributes(self) -> dict[str, Any]:
         """get current attributes."""
         # pylint: disable=too-many-locals
         max_price = 0
