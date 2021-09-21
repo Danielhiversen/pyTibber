@@ -1,7 +1,11 @@
 """Library to handle connection with Tibber API."""
+from __future__ import annotations
+
 import asyncio
+import datetime
 import datetime as dt
 import logging
+from typing import Any, Callable
 
 import aiohttp
 import async_timeout
@@ -26,15 +30,15 @@ class Tibber:
 
     def __init__(
         self,
-        access_token=DEMO_TOKEN,
-        timeout=DEFAULT_TIMEOUT,
-        websession=None,
-        time_zone=None,
-    ):
+        access_token: str = DEMO_TOKEN,
+        timeout: int = DEFAULT_TIMEOUT,
+        websession: aiohttp.ClientSession | None = None,
+        time_zone: dt.tzinfo | None = None,
+    ) -> None:
         """Initialize the Tibber connection."""
         if websession is None:
 
-            async def _create_session():
+            async def _create_session() -> aiohttp.ClientSession:
                 return aiohttp.ClientSession(
                     headers={aiohttp.hdrs.USER_AGENT: f"pyTibber/{__version__}"}
                 )
@@ -48,22 +52,22 @@ class Tibber:
         self.time_zone = time_zone or pytz.utc
         self._name = None
         self._user_id = None
-        self._home_ids = []
-        self._all_home_ids = []
-        self._homes = {}
-        self.sub_manager = None
+        self._home_ids: list[str] = []
+        self._all_home_ids: list[str] = []
+        self._homes: dict[str, TibberHome] = {}
+        self.sub_manager: SubscriptionManager | None = None
 
-    async def close_connection(self):
+    async def close_connection(self) -> None:
         """Close the Tibber connection."""
         await self.websession.close()
 
-    def sync_close_connection(self):
+    def sync_close_connection(self) -> None:
         """Close the Tibber connection."""
         loop = asyncio.get_event_loop()
         task = loop.create_task(self.close_connection())
         loop.run_until_complete(task)
 
-    async def rt_connect(self):
+    async def rt_connect(self) -> None:
         """Start subscription manager for real time data."""
         if self.sub_manager is not None:
             return
@@ -72,20 +76,27 @@ class Tibber:
         )
         self.sub_manager.start()
 
-    async def rt_disconnect(self):
+    async def rt_disconnect(self) -> None:
         """Stop subscription manager."""
         if self.sub_manager is None:
             return
         await self.sub_manager.stop()
 
-    async def execute(self, document, variable_values=None):
+    async def execute(
+        self, document: str, variable_values: dict[str, Any] | None = None
+    ) -> dict[str, Any] | None:
         """Execute gql."""
         res = await self._execute(document, variable_values)
         if res is None:
             return None
         return res.get("data")
 
-    async def _execute(self, document, variable_values=None, retry=2):
+    async def _execute(
+        self,
+        document: str,
+        variable_values: dict[str, Any] | None = None,
+        retry: int = 2,
+    ) -> dict[str, Any] | None:
         """Execute gql."""
         payload = {"query": document, "variables": variable_values or {}}
 
@@ -124,13 +135,13 @@ class Tibber:
             _LOGGER.error("Received non-compatible response %s", errors)
         return result
 
-    def sync_update_info(self, *_):
+    def sync_update_info(self, *_: Any) -> None:
         """Update home info."""
         loop = asyncio.get_event_loop()
         task = loop.create_task(self.update_info())
         loop.run_until_complete(task)
 
-    async def update_info(self, *_):
+    async def update_info(self, *_: Any) -> None:
         """Update home info async."""
         query = """
         {
@@ -179,31 +190,31 @@ class Tibber:
             self._home_ids += [home_id]
 
     @property
-    def user_id(self):
+    def user_id(self) -> str | None:
         """Return user id of user."""
         return self._user_id
 
     @property
-    def name(self):
+    def name(self) -> str | None:
         """Return name of user."""
         return self._name
 
     @property
-    def home_ids(self):
+    def home_ids(self) -> list[str]:
         """Return list of home ids."""
         return self.get_home_ids(only_active=True)
 
-    def get_home_ids(self, only_active=True):
+    def get_home_ids(self, only_active: bool = True) -> list[str]:
         """Return list of home ids."""
         if only_active:
             return self._home_ids
         return self._all_home_ids
 
-    def get_homes(self, only_active=True):
+    def get_homes(self, only_active: bool = True) -> list[TibberHome]:
         """Return list of Tibber homes."""
-        return [self.get_home(home_id) for home_id in self.get_home_ids(only_active)]
+        return [TibberHome(home_id, self) for home_id in self.get_home_ids(only_active)]
 
-    def get_home(self, home_id):
+    def get_home(self, home_id) -> TibberHome | None:
         """Return an instance of TibberHome for given home id."""
         if home_id not in self._all_home_ids:
             _LOGGER.error("Could not find any Tibber home with id: %s", home_id)
@@ -212,7 +223,7 @@ class Tibber:
             self._homes[home_id] = TibberHome(home_id, self)
         return self._homes[home_id]
 
-    async def send_notification(self, title, message):
+    async def send_notification(self, title: str, message: str) -> bool:
         """Send notification."""
         # pylint: disable=consider-using-f-string)
         query = """
@@ -249,12 +260,11 @@ class TibberHome:
 
     # pylint: disable=too-many-instance-attributes, too-many-public-methods
 
-    def __init__(self, home_id, tibber_control):
+    def __init__(self, home_id: str, tibber_control: Tibber):
         """Initialize the Tibber home class."""
         self._tibber_control = tibber_control
         self._home_id = home_id
-        self._current_price_total = None
-        self._current_price_info = {}
+        self._current_price_info: dict[str, dict] = {}
         self._price_info = {}
         self._level_info = {}
         self.sub_manager = None
@@ -263,13 +273,13 @@ class TibberHome:
         self._data = None
         self.last_data_timestamp = None
 
-    def sync_update_info(self):
+    def sync_update_info(self) -> None:
         """Update current price info."""
         loop = asyncio.get_event_loop()
         task = loop.create_task(self.update_info())
         loop.run_until_complete(task)
 
-    async def update_info(self):
+    async def update_info(self) -> None:
         """Update current price info async."""
         # pylint: disable=consider-using-f-string)
         query = (
@@ -335,7 +345,7 @@ class TibberHome:
 
         self.info = await self._tibber_control.execute(query)
 
-    async def update_info_and_price_info(self):
+    async def update_info_and_price_info(self) -> None:
         """Update current price info async."""
         # pylint: disable=consider-using-f-string)
         query = (
@@ -424,13 +434,13 @@ class TibberHome:
         self.info = await self._tibber_control.execute(query)
         self._process_price_info(self.info)
 
-    def sync_update_current_price_info(self):
+    def sync_update_current_price_info(self) -> None:
         """Update current price info."""
         loop = asyncio.get_event_loop()
         task = loop.create_task(self.update_current_price_info())
         loop.run_until_complete(task)
 
-    async def update_current_price_info(self):
+    async def update_current_price_info(self) -> None:
         """Update current price info async."""
         # pylint: disable=consider-using-f-string)
         query = (
@@ -468,13 +478,13 @@ class TibberHome:
         if price_info:
             self._current_price_info = price_info
 
-    def sync_update_price_info(self):
+    def sync_update_price_info(self) -> None:
         """Update current price info."""
         loop = asyncio.get_event_loop()
         task = loop.create_task(self.update_price_info())
         loop.run_until_complete(task)
 
-    async def update_price_info(self):
+    async def update_price_info(self) -> None:
         """Update price info async."""
         # pylint: disable=consider-using-f-string)
         query = (
@@ -512,7 +522,7 @@ class TibberHome:
         price_info = await self._tibber_control.execute(query)
         self._process_price_info(price_info)
 
-    def _process_price_info(self, price_info):
+    def _process_price_info(self, price_info: dict[str, dict]) -> None:
         if not price_info:
             _LOGGER.error("Could not find price info.")
             return
@@ -534,34 +544,34 @@ class TibberHome:
                 self._level_info[data.get("startsAt")] = data.get("level")
 
     @property
-    def current_price_total(self):
+    def current_price_total(self) -> str | None:
         """Get current price total."""
         if not self._current_price_info:
             return None
         return self._current_price_info.get("total")
 
     @property
-    def current_price_info(self):
+    def current_price_info(self) -> dict[str, dict]:
         """Get current price info."""
         return self._current_price_info
 
     @property
-    def price_total(self):
+    def price_total(self) -> dict[datetime.datetime, float]:
         """Get dictionary with price total, key is date-time."""
         return self._price_info
 
     @property
-    def price_level(self):
+    def price_level(self) -> dict[datetime.datetime, str]:
         """Get dictionary with price level, key is date-time."""
         return self._level_info
 
     @property
-    def home_id(self):
+    def home_id(self) -> str:
         """Return home id."""
         return self._home_id
 
     @property
-    def has_active_subscription(self):
+    def has_active_subscription(self) -> bool:
         """Return home id."""
         try:
             sub = self.info["viewer"]["home"]["currentSubscription"]["status"]
@@ -570,7 +580,7 @@ class TibberHome:
         return sub in ["running", "awaiting market", "awaiting time restriction"]
 
     @property
-    def has_real_time_consumption(self):
+    def has_real_time_consumption(self) -> bool:
         """Return home id."""
         try:
             return self.info["viewer"]["home"]["features"]["realTimeConsumptionEnabled"]
@@ -578,7 +588,7 @@ class TibberHome:
             return False
 
     @property
-    def address1(self):
+    def address1(self) -> str:
         """Return the home adress1."""
         try:
             return self.info["viewer"]["home"]["address"]["address1"]
@@ -587,12 +597,12 @@ class TibberHome:
         return ""
 
     @property
-    def consumption_unit(self):
+    def consumption_unit(self) -> str:
         """Return the consumption."""
         return "kWh"
 
     @property
-    def currency(self):
+    def currency(self) -> str:
         """Return the currency."""
         try:
             current_subscription = self.info["viewer"]["home"]["currentSubscription"]
@@ -602,7 +612,7 @@ class TibberHome:
         return ""
 
     @property
-    def country(self):
+    def country(self) -> str:
         """Return the country."""
         try:
             return self.info["viewer"]["home"]["address"]["country"]
@@ -611,7 +621,7 @@ class TibberHome:
         return ""
 
     @property
-    def price_unit(self):
+    def price_unit(self) -> str:
         """Return the price unit."""
         currency = self.currency
         consumption_unit = self.consumption_unit
@@ -620,7 +630,7 @@ class TibberHome:
             return " "
         return currency + "/" + consumption_unit
 
-    async def rt_subscribe(self, async_callback):
+    async def rt_subscribe(self, async_callback: Callable) -> None:
         """Connect to Tibber and subscribe to Tibber rt subscription."""
         if self._subscription_id is not None:
             _LOGGER.error("Already subscribed.")
