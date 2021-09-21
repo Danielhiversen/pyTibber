@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import datetime
 import datetime as dt
 import logging
 from typing import Any, Callable
@@ -556,12 +555,12 @@ class TibberHome:
         return self._current_price_info
 
     @property
-    def price_total(self) -> dict[datetime.datetime, float]:
+    def price_total(self) -> dict[dt.datetime, float]:
         """Get dictionary with price total, key is date-time."""
         return self._price_info
 
     @property
-    def price_level(self) -> dict[datetime.datetime, str]:
+    def price_level(self) -> dict[dt.datetime, str]:
         """Get dictionary with price level, key is date-time."""
         return self._level_info
 
