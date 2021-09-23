@@ -13,6 +13,14 @@ import tibber  # noqa: E402
 
 
 @pytest.mark.asyncio
+async def test_tibber_no_session():
+    tibber_connection = tibber.Tibber()
+    await tibber_connection.update_info()
+
+    assert tibber_connection.name == "Arya Stark"
+
+
+@pytest.mark.asyncio
 async def test_tibber():
     async with aiohttp.ClientSession() as session:
         tibber_connection = tibber.Tibber(websession=session)

@@ -33,14 +33,9 @@ class Tibber:
     ):
         """Initialize the Tibber connection."""
         if websession is None:
-
-            async def _create_session():
-                return aiohttp.ClientSession(
-                    headers={aiohttp.hdrs.USER_AGENT: f"pyTibber/{__version__}"}
-                )
-
-            loop = asyncio.get_event_loop()
-            self.websession = loop.run_until_complete(_create_session())
+            self.websession = aiohttp.ClientSession(
+                headers={aiohttp.hdrs.USER_AGENT: f"pyTibber/{__version__}"}
+            )
         else:
             self.websession = websession
         self._timeout = timeout
@@ -56,12 +51,6 @@ class Tibber:
     async def close_connection(self):
         """Close the Tibber connection."""
         await self.websession.close()
-
-    def sync_close_connection(self):
-        """Close the Tibber connection."""
-        loop = asyncio.get_event_loop()
-        task = loop.create_task(self.close_connection())
-        loop.run_until_complete(task)
 
     async def rt_connect(self):
         """Start subscription manager for real time data."""
@@ -123,12 +112,6 @@ class Tibber:
         if errors:
             _LOGGER.error("Received non-compatible response %s", errors)
         return result
-
-    def sync_update_info(self, *_):
-        """Update home info."""
-        loop = asyncio.get_event_loop()
-        task = loop.create_task(self.update_info())
-        loop.run_until_complete(task)
 
     async def update_info(self, *_):
         """Update home info async."""
@@ -262,12 +245,6 @@ class TibberHome:
         self._subscription_id = None
         self._data = None
         self.last_data_timestamp = None
-
-    def sync_update_info(self):
-        """Update current price info."""
-        loop = asyncio.get_event_loop()
-        task = loop.create_task(self.update_info())
-        loop.run_until_complete(task)
 
     async def update_info(self):
         """Update current price info async."""
@@ -424,12 +401,6 @@ class TibberHome:
         self.info = await self._tibber_control.execute(query)
         self._process_price_info(self.info)
 
-    def sync_update_current_price_info(self):
-        """Update current price info."""
-        loop = asyncio.get_event_loop()
-        task = loop.create_task(self.update_current_price_info())
-        loop.run_until_complete(task)
-
     async def update_current_price_info(self):
         """Update current price info async."""
         # pylint: disable=consider-using-f-string)
@@ -467,12 +438,6 @@ class TibberHome:
             return
         if price_info:
             self._current_price_info = price_info
-
-    def sync_update_price_info(self):
-        """Update current price info."""
-        loop = asyncio.get_event_loop()
-        task = loop.create_task(self.update_price_info())
-        loop.run_until_complete(task)
 
     async def update_price_info(self):
         """Update price info async."""
@@ -712,13 +677,6 @@ class TibberHome:
             self._data = []
             return
         self._data = data["nodes"]
-        return self._data
-
-    def sync_get_historic_data(self, n_data, resolution=RESOLUTION_HOURLY):
-        """get historic data."""
-        loop = asyncio.get_event_loop()
-        task = loop.create_task(self.get_historic_data(n_data, resolution))
-        loop.run_until_complete(task)
         return self._data
 
     def current_price_data(self):
