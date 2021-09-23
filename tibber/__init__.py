@@ -521,7 +521,7 @@ class TibberHome:
         price_info = await self._tibber_control.execute(query)
         self._process_price_info(price_info)
 
-    def _process_price_info(self, price_info: dict[str, dict]) -> None:
+    def _process_price_info(self, price_info: dict[str, dict] | None) -> None:
         if not price_info:
             _LOGGER.error("Could not find price info.")
             return
@@ -543,7 +543,7 @@ class TibberHome:
                 self._level_info[data.get("startsAt")] = data.get("level")
 
     @property
-    def current_price_total(self) -> str | None:
+    def current_price_total(self) -> dict | None:
         """Get current price total."""
         if not self._current_price_info:
             return None
@@ -555,7 +555,7 @@ class TibberHome:
         return self._current_price_info
 
     @property
-    def price_total(self) -> dict[dt.datetime, float]:
+    def price_total(self) -> dict[dt.datetime, str]:
         """Get dictionary with price total, key is date-time."""
         return self._price_info
 
