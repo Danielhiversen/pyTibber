@@ -240,7 +240,6 @@ class TibberHome:
         self._current_price_info = {}
         self._price_info = {}
         self._level_info = {}
-        self.sub_manager = None
         self.info = {}
         self._subscription_id = None
         self._data = None
