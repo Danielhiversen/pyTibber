@@ -31,18 +31,17 @@ pip3 install pyTibber
 import tibber
 access_token = tibber.DEMO_TOKEN
 tibber_connection = tibber.Tibber(access_token)
-tibber_connection.sync_update_info()
+await tibber_connection.update_info()
 print(tibber_connection.name)
 
 home = tibber_connection.get_homes()[0]
-home.sync_update_info()
+await home.update_info()
 print(home.address1)
 
-home.sync_update_price_info()
-
+await home.update_price_info()
 print(home.current_price_info)
 
-tibber_connection.sync_close_connection()
+await tibber_connection.close_connection()
 ```
 
 
