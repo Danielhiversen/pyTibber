@@ -47,6 +47,7 @@ class Tibber:
         self._all_home_ids = []
         self._homes = {}
         self.sub_manager = None
+        self.user_agent = "pyTibber"
 
     async def close_connection(self):
         """Close the Tibber connection."""
@@ -89,7 +90,7 @@ class Tibber:
             if "pyTibber" not in user_agent:
                 post_args["headers"][
                     aiohttp.hdrs.USER_AGENT
-                ] = f"{user_agent} pyTibber/{__version__}"
+                ] = f"{user_agent} {self.user_agent}/{__version__}"
         except Exception:  # pylint: disable=broad-except
             pass
 
