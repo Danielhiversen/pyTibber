@@ -596,30 +596,28 @@ class TibberHome:
             """
             subscription{
               liveMeasurement(homeId:"%s"){
-                timestamp
-                power
-                powerProduction
-                accumulatedProduction
                 accumulatedConsumption
                 accumulatedCost
+                accumulatedProduction
+                accumulatedProductionLastHour
                 accumulatedReward
-                currency
-                minPower
                 averagePower
-                maxPower
-                voltagePhase1
-                voltagePhase2
-                voltagePhase3
+                currency
                 currentL1
                 currentL2
                 currentL3
                 lastMeterConsumption
                 lastMeterProduction
-                signalStrength
-                accumulatedConsumptionLastHour
-                accumulatedProductionLastHour
+                maxPower
+                minPower
+                power
                 powerFactor
+                powerProduction
                 powerReactive
+                signalStrength
+                voltagePhase1
+                voltagePhase2
+                voltagePhase3
             }
            }
         """
