@@ -95,7 +95,7 @@ class Tibber:
             pass
 
         try:
-            with async_timeout.timeout(self._timeout):
+            async with async_timeout.timeout(self._timeout):
                 resp = await self.websession.post(API_ENDPOINT, **post_args)
             if resp.status != 200:
                 _LOGGER.error("Error connecting to Tibber, resp code: %s", resp.status)
