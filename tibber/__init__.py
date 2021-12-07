@@ -5,9 +5,9 @@ import logging
 
 import aiohttp
 import async_timeout
-import pytz
 from dateutil.parser import parse
 from graphql_subscription_manager import SubscriptionManager
+import pytz
 
 from .const import RESOLUTION_HOURLY, __version__
 
@@ -245,6 +245,9 @@ class TibberHome:
         self._subscription_id = None
         self._data = None
         self.last_data_timestamp = None
+        self._rt_power = []
+        self._month_hour_max_month_hour_cons = 0
+        self._month_hour_max_month_hour = None
 
     async def update_info(self):
         """Update current price info async."""
@@ -315,11 +318,18 @@ class TibberHome:
     async def update_info_and_price_info(self):
         """Update current price info async."""
         # pylint: disable=consider-using-f-string)
-        query = (
-            """
+        now = dt.datetime.now()
+        n_hours = now.hour + now.day * 24
+        query = """
         {
           viewer {
             home(id: "%s") {
+              consumption(resolution: HOURLY, last: %s) {
+                nodes {
+                  from
+                  consumption
+                }
+              }
               currentSubscription {
                 priceInfo {
                   current {
@@ -381,7 +391,6 @@ class TibberHome:
                 status
                 validFrom
                 validTo
-                statusReason
               }
               currentSubscription {
                 priceInfo {
@@ -393,13 +402,14 @@ class TibberHome:
             }
           }
         }
-
-        """
-            % self._home_id
+        """ % (
+            self._home_id,
+            n_hours,
         )
 
         self.info = await self._tibber_control.execute(query)
         self._process_price_info(self.info)
+        self._process_consumption_info(self.info)
 
     async def update_current_price_info(self):
         """Update current price info async."""
@@ -498,6 +508,25 @@ class TibberHome:
                 self._price_info[data.get("startsAt")] = data.get("total")
                 self._level_info[data.get("startsAt")] = data.get("level")
 
+    def _process_consumption_info(self, consumption_info):
+        if not consumption_info:
+            _LOGGER.error("Could not find consumption info.")
+            return
+        now = dt.datetime.now()
+        _month_hour_max_month_hour_cons = 0
+        _month_hour_max_month_hour = None
+        for node in consumption_info["viewer"]["home"]["consumption"]["nodes"]:
+            _time = parse(node["from"])
+            if (
+                _time.month == now.month
+                and node.get("consumption") is not None
+                and node["consumption"] > _month_hour_max_month_hour_cons
+            ):
+                _month_hour_max_month_hour_cons = node["consumption"]
+                _month_hour_max_month_hour = _time
+        self._month_hour_max_month_hour_cons = _month_hour_max_month_hour_cons
+        self._month_hour_max_month_hour = _month_hour_max_month_hour
+
     @property
     def current_price_total(self):
         """Get current price total."""
@@ -585,7 +614,7 @@ class TibberHome:
             return " "
         return currency + "/" + consumption_unit
 
-    async def rt_subscribe(self, async_callback):
+    async def rt_subscribe(self, callback):
         """Connect to Tibber and subscribe to Tibber rt subscription."""
         if self._subscription_id is not None:
             _LOGGER.error("Already subscribed.")
@@ -597,6 +626,7 @@ class TibberHome:
             subscription{
               liveMeasurement(homeId:"%s"){
                 accumulatedConsumption
+                accumulatedConsumptionLastHour
                 accumulatedCost
                 accumulatedProduction
                 accumulatedProductionLastHour
@@ -615,6 +645,7 @@ class TibberHome:
                 powerProduction
                 powerReactive
                 signalStrength
+                timestamp
                 voltagePhase1
                 voltagePhase2
                 voltagePhase3
@@ -624,8 +655,51 @@ class TibberHome:
             % self.home_id
         )
 
+        def callback_add_extra_data(data):
+            """Add estimated hourly consumption."""
+            _time = parse(data["data"]["liveMeasurement"]["timestamp"]).astimezone(
+                self._tibber_control.time_zone
+            )
+            self._rt_power.append(
+                (_time, data["data"]["liveMeasurement"]["power"] / 1000)
+            )
+            while self._rt_power and self._rt_power[0][0] < _time - dt.timedelta(
+                minutes=5
+            ):
+                self._rt_power.pop(0)
+            power = sum([p[1] for p in self._rt_power]) / len(self._rt_power)
+            current_hour = data["data"]["liveMeasurement"][
+                "accumulatedConsumptionLastHour"
+            ]
+            if current_hour is not None:
+                est_cons = round(
+                    current_hour
+                    + power * (3600 - (_time.minute * 60 + _time.second)) / 3600,
+                    3,
+                )
+                data["data"]["liveMeasurement"]["estimatedHourConsumption"] = est_cons
+
+                if (
+                    data["data"]["liveMeasurement"]["accumulatedConsumptionLastHour"]
+                    > self._month_hour_max_month_hour_cons
+                ):
+                    self._month_hour_max_month_hour_cons = data["data"]["liveMeasurement"][
+                        "accumulatedConsumptionLastHour"
+                    ]
+                    self._month_hour_max_month_hour = _time.replace(
+                        minute=0, second=0, microsecond=0
+                    )
+                data["data"]["liveMeasurement"][
+                    "maxHourConsumptionCurrentMonth"
+                ] = self._month_hour_max_month_hour_cons
+                data["data"]["liveMeasurement"][
+                    "maxHourCurrentMonth"
+                ] = self._month_hour_max_month_hour
+
+            callback(data)
+
         self._subscription_id = await self._tibber_control.sub_manager.subscribe(
-            document, async_callback
+            document, callback_add_extra_data
         )
 
     async def rt_unsubscribe(self):
@@ -680,15 +754,14 @@ class TibberHome:
     def current_price_data(self):
         """get current price."""
         now = dt.datetime.now(self._tibber_control.time_zone)
-        res = None, None, None
         for key, price_total in self.price_total.items():
             price_time = parse(key).astimezone(self._tibber_control.time_zone)
             time_diff = (now - price_time).total_seconds() / 60
             if not self.last_data_timestamp or price_time > self.last_data_timestamp:
                 self.last_data_timestamp = price_time
             if 0 <= time_diff < 60:
-                res = round(price_total, 3), self.price_level[key], price_time
-        return res
+                return round(price_total, 3), self.price_level[key], price_time
+        return None, None, None
 
     def current_attributes(self):
         """get current attributes."""
