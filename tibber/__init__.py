@@ -319,7 +319,7 @@ class TibberHome:
         """Update current price info async."""
         # pylint: disable=consider-using-f-string)
         now = dt.datetime.now()
-        n_hours = now.hour + now.day * 24
+        n_hours = now.hour + (now.day - 1) * 24
         query = """
         {
           viewer {
@@ -672,29 +672,25 @@ class TibberHome:
                 "accumulatedConsumptionLastHour"
             ]
             if current_hour is not None:
-                est_cons = round(
+                data["data"]["liveMeasurement"]["estimatedHourConsumption"] = round(
                     current_hour
                     + power * (3600 - (_time.minute * 60 + _time.second)) / 3600,
                     3,
                 )
-                data["data"]["liveMeasurement"]["estimatedHourConsumption"] = est_cons
 
-                if (
-                    data["data"]["liveMeasurement"]["accumulatedConsumptionLastHour"]
-                    > self._month_hour_max_month_hour_cons
-                ):
+                if  current_hour > self._month_hour_max_month_hour_cons:
                     self._month_hour_max_month_hour_cons = data["data"]["liveMeasurement"][
                         "accumulatedConsumptionLastHour"
                     ]
                     self._month_hour_max_month_hour = _time.replace(
                         minute=0, second=0, microsecond=0
                     )
-                data["data"]["liveMeasurement"][
-                    "maxHourConsumptionCurrentMonth"
-                ] = self._month_hour_max_month_hour_cons
-                data["data"]["liveMeasurement"][
-                    "maxHourCurrentMonth"
-                ] = self._month_hour_max_month_hour
+            data["data"]["liveMeasurement"][
+                "maxHourConsumptionCurrentMonth"
+            ] = self._month_hour_max_month_hour_cons
+            data["data"]["liveMeasurement"][
+                "maxHourCurrentMonth"
+            ] = self._month_hour_max_month_hour
 
             callback(data)
 
