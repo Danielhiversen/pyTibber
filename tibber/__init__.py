@@ -678,10 +678,10 @@ class TibberHome:
                     3,
                 )
 
-                if  current_hour > self._month_hour_max_month_hour_cons:
-                    self._month_hour_max_month_hour_cons = data["data"]["liveMeasurement"][
-                        "accumulatedConsumptionLastHour"
-                    ]
+                if current_hour > self._month_hour_max_month_hour_cons:
+                    self._month_hour_max_month_hour_cons = data["data"][
+                        "liveMeasurement"
+                    ]["accumulatedConsumptionLastHour"]
                     self._month_hour_max_month_hour = _time.replace(
                         minute=0, second=0, microsecond=0
                     )
