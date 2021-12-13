@@ -1,449 +1,778 @@
-"""Support for Tibber sensors."""
-from __future__ import annotations
-
+"""Library to handle connection with Tibber API."""
 import asyncio
-from datetime import timedelta
+import datetime as dt
 import logging
-from random import randrange
 
 import aiohttp
+import async_timeout
+import pytz
+from dateutil.parser import parse
+from graphql_subscription_manager import SubscriptionManager
 
-from homeassistant.components.sensor import (
-    SensorDeviceClass,
-    SensorEntity,
-    SensorEntityDescription,
-    SensorStateClass,
-)
-from homeassistant.const import (
-    ELECTRIC_CURRENT_AMPERE,
-    ELECTRIC_POTENTIAL_VOLT,
-    ENERGY_KILO_WATT_HOUR,
-    ENTITY_CATEGORY_DIAGNOSTIC,
-    EVENT_HOMEASSISTANT_STOP,
-    PERCENTAGE,
-    POWER_WATT,
-    SIGNAL_STRENGTH_DECIBELS,
-)
-from homeassistant.core import callback
-from homeassistant.exceptions import PlatformNotReady
-from homeassistant.helpers import update_coordinator
-from homeassistant.helpers.device_registry import async_get as async_get_dev_reg
-from homeassistant.helpers.entity import DeviceInfo
-from homeassistant.helpers.entity_registry import async_get as async_get_entity_reg
-from homeassistant.util import Throttle, dt as dt_util
+from .const import RESOLUTION_HOURLY, __version__
 
-from .const import DOMAIN as TIBBER_DOMAIN, MANUFACTURER
+DEFAULT_TIMEOUT = 15
+DEMO_TOKEN = "476c477d8a039529478ebd690d35ddd80e3308ffc49b59c65b142321aee963a4"
+API_ENDPOINT = "https://api.tibber.com/v1-beta/gql"
+SUB_ENDPOINT = "wss://api.tibber.com/v1-beta/gql/subscriptions"
 
 _LOGGER = logging.getLogger(__name__)
 
-ICON = "mdi:currency-usd"
-SCAN_INTERVAL = timedelta(minutes=1)
-MIN_TIME_BETWEEN_UPDATES = timedelta(minutes=5)
-PARALLEL_UPDATES = 0
 
+class Tibber:
+    """Class to communicate with the Tibber api."""
 
-RT_SENSORS: tuple[SensorEntityDescription, ...] = (
-    SensorEntityDescription(
-        key="averagePower",
-        name="average power",
-        device_class=SensorDeviceClass.POWER,
-        native_unit_of_measurement=POWER_WATT,
-    ),
-    SensorEntityDescription(
-        key="power",
-        name="power",
-        device_class=SensorDeviceClass.POWER,
-        state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=POWER_WATT,
-    ),
-    SensorEntityDescription(
-        key="powerProduction",
-        name="power production",
-        device_class=SensorDeviceClass.POWER,
-        state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=POWER_WATT,
-    ),
-    SensorEntityDescription(
-        key="minPower",
-        name="min power",
-        device_class=SensorDeviceClass.POWER,
-        native_unit_of_measurement=POWER_WATT,
-    ),
-    SensorEntityDescription(
-        key="maxPower",
-        name="max power",
-        device_class=SensorDeviceClass.POWER,
-        native_unit_of_measurement=POWER_WATT,
-    ),
-    SensorEntityDescription(
-        key="accumulatedConsumption",
-        name="accumulated consumption",
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement=ENERGY_KILO_WATT_HOUR,
-        state_class=SensorStateClass.TOTAL,
-    ),
-    SensorEntityDescription(
-        key="accumulatedConsumptionLastHour",
-        name="accumulated consumption current hour",
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement=ENERGY_KILO_WATT_HOUR,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-    ),
-    SensorEntityDescription(
-        key="estimatedHourConsumption",
-        name="Estimated consumption current hour",
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement=ENERGY_KILO_WATT_HOUR,
-    ),
-    SensorEntityDescription(
-        key="accumulatedProduction",
-        name="accumulated production",
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement=ENERGY_KILO_WATT_HOUR,
-        state_class=SensorStateClass.TOTAL,
-    ),
-    SensorEntityDescription(
-        key="accumulatedProductionLastHour",
-        name="accumulated production current hour",
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement=ENERGY_KILO_WATT_HOUR,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-    ),
-    SensorEntityDescription(
-        key="lastMeterConsumption",
-        name="last meter consumption",
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement=ENERGY_KILO_WATT_HOUR,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-    ),
-    SensorEntityDescription(
-        key="lastMeterProduction",
-        name="last meter production",
-        device_class=SensorDeviceClass.ENERGY,
-        native_unit_of_measurement=ENERGY_KILO_WATT_HOUR,
-        state_class=SensorStateClass.TOTAL_INCREASING,
-    ),
-    SensorEntityDescription(
-        key="voltagePhase1",
-        name="voltage phase1",
-        device_class=SensorDeviceClass.VOLTAGE,
-        native_unit_of_measurement=ELECTRIC_POTENTIAL_VOLT,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="voltagePhase2",
-        name="voltage phase2",
-        device_class=SensorDeviceClass.VOLTAGE,
-        native_unit_of_measurement=ELECTRIC_POTENTIAL_VOLT,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="voltagePhase3",
-        name="voltage phase3",
-        device_class=SensorDeviceClass.VOLTAGE,
-        native_unit_of_measurement=ELECTRIC_POTENTIAL_VOLT,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="currentL1",
-        name="current L1",
-        device_class=SensorDeviceClass.CURRENT,
-        native_unit_of_measurement=ELECTRIC_CURRENT_AMPERE,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="currentL2",
-        name="current L2",
-        device_class=SensorDeviceClass.CURRENT,
-        native_unit_of_measurement=ELECTRIC_CURRENT_AMPERE,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="currentL3",
-        name="current L3",
-        device_class=SensorDeviceClass.CURRENT,
-        native_unit_of_measurement=ELECTRIC_CURRENT_AMPERE,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="signalStrength",
-        name="signal strength",
-        device_class=SensorDeviceClass.SIGNAL_STRENGTH,
-        native_unit_of_measurement=SIGNAL_STRENGTH_DECIBELS,
-        state_class=SensorStateClass.MEASUREMENT,
-        entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
-    ),
-    SensorEntityDescription(
-        key="accumulatedReward",
-        name="accumulated reward",
-        device_class=SensorDeviceClass.MONETARY,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="accumulatedCost",
-        name="accumulated cost",
-        device_class=SensorDeviceClass.MONETARY,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-    SensorEntityDescription(
-        key="powerFactor",
-        name="power factor",
-        device_class=SensorDeviceClass.POWER_FACTOR,
-        native_unit_of_measurement=PERCENTAGE,
-        state_class=SensorStateClass.MEASUREMENT,
-    ),
-)
-
-
-async def async_setup_entry(hass, entry, async_add_entities):
-    """Set up the Tibber sensor."""
-
-    tibber_connection = hass.data.get(TIBBER_DOMAIN)
-
-    entity_registry = async_get_entity_reg(hass)
-    device_registry = async_get_dev_reg(hass)
-
-    entities = []
-    for home in tibber_connection.get_homes(only_active=False):
-        try:
-            await home.update_info()
-        except asyncio.TimeoutError as err:
-            _LOGGER.error("Timeout connecting to Tibber home: %s ", err)
-            raise PlatformNotReady() from err
-        except aiohttp.ClientError as err:
-            _LOGGER.error("Error connecting to Tibber home: %s ", err)
-            raise PlatformNotReady() from err
-
-        if home.has_active_subscription:
-            entities.append(TibberSensorElPrice(home))
-        if home.has_real_time_consumption:
-            await home.rt_subscribe(
-                TibberRtDataCoordinator(
-                    async_add_entities, home, hass
-                ).async_set_updated_data
-            )
-
-        # migrate
-        old_id = home.info["viewer"]["home"]["meteringPointData"]["consumptionEan"]
-        if old_id is None:
-            continue
-
-        # migrate to new device ids
-        old_entity_id = entity_registry.async_get_entity_id(
-            "sensor", TIBBER_DOMAIN, old_id
-        )
-        if old_entity_id is not None:
-            entity_registry.async_update_entity(
-                old_entity_id, new_unique_id=home.home_id
-            )
-
-        # migrate to new device ids
-        device_entry = device_registry.async_get_device({(TIBBER_DOMAIN, old_id)})
-        if device_entry and entry.entry_id in device_entry.config_entries:
-            device_registry.async_update_device(
-                device_entry.id, new_identifiers={(TIBBER_DOMAIN, home.home_id)}
-            )
-
-    async_add_entities(entities, True)
-
-
-class TibberSensor(SensorEntity):
-    """Representation of a generic Tibber sensor."""
-
-    def __init__(self, *args, tibber_home, **kwargs):
-        """Initialize the sensor."""
-        super().__init__(*args, **kwargs)
-        self._tibber_home = tibber_home
-        self._home_name = tibber_home.info["viewer"]["home"]["appNickname"]
-        if self._home_name is None:
-            self._home_name = tibber_home.info["viewer"]["home"]["address"].get(
-                "address1", ""
-            )
-        self._device_name = None
-        self._model = None
-
-    @property
-    def device_info(self):
-        """Return the device_info of the device."""
-        device_info = DeviceInfo(
-            identifiers={(TIBBER_DOMAIN, self._tibber_home.home_id)},
-            name=self._device_name,
-            manufacturer=MANUFACTURER,
-        )
-        if self._model is not None:
-            device_info["model"] = self._model
-        return device_info
-
-
-class TibberSensorElPrice(TibberSensor):
-    """Representation of a Tibber sensor for el price."""
-
-    def __init__(self, tibber_home):
-        """Initialize the sensor."""
-        super().__init__(tibber_home=tibber_home)
-        self._last_updated = None
-        self._spread_load_constant = randrange(5000)
-
-        self._attr_available = False
-        self._attr_extra_state_attributes = {
-            "app_nickname": None,
-            "grid_company": None,
-            "estimated_annual_consumption": None,
-            "price_level": None,
-            "max_price": None,
-            "avg_price": None,
-            "min_price": None,
-            "off_peak_1": None,
-            "peak": None,
-            "off_peak_2": None,
-        }
-        self._attr_icon = ICON
-        self._attr_name = f"Electricity price {self._home_name}"
-        self._attr_unique_id = self._tibber_home.home_id
-        self._model = "Price Sensor"
-
-        self._device_name = self._attr_name
-
-    async def async_update(self):
-        """Get the latest data and updates the states."""
-        now = dt_util.now()
-        if (
-            not self._tibber_home.last_data_timestamp
-            or (self._tibber_home.last_data_timestamp - now).total_seconds()
-            < 5 * 3600 + self._spread_load_constant
-            or not self.available
-        ):
-            _LOGGER.debug("Asking for new data")
-            await self._fetch_data()
-        elif (
-            self._tibber_home.current_price_total
-            and self._last_updated
-            and self._last_updated.hour == now.hour
-            and self._tibber_home.last_data_timestamp
-        ):
-            return
-
-        res = self._tibber_home.current_price_data()
-        self._attr_native_value, price_level, self._last_updated = res
-        self._attr_extra_state_attributes["price_level"] = price_level
-
-        attrs = self._tibber_home.current_attributes()
-        self._attr_extra_state_attributes.update(attrs)
-        self._attr_available = self._attr_native_value is not None
-        self._attr_native_unit_of_measurement = self._tibber_home.price_unit
-
-    @Throttle(MIN_TIME_BETWEEN_UPDATES)
-    async def _fetch_data(self):
-        _LOGGER.debug("Fetching data")
-        try:
-            await self._tibber_home.update_info_and_price_info()
-        except (asyncio.TimeoutError, aiohttp.ClientError):
-            return
-        data = self._tibber_home.info["viewer"]["home"]
-        self._attr_extra_state_attributes["app_nickname"] = data["appNickname"]
-        self._attr_extra_state_attributes["grid_company"] = data["meteringPointData"][
-            "gridCompany"
-        ]
-        self._attr_extra_state_attributes["estimated_annual_consumption"] = data[
-            "meteringPointData"
-        ]["estimatedAnnualConsumption"]
-
-
-class TibberSensorRT(TibberSensor, update_coordinator.CoordinatorEntity):
-    """Representation of a Tibber sensor for real time consumption."""
+    # pylint: disable=too-many-instance-attributes
 
     def __init__(
         self,
-        tibber_home,
-        description: SensorEntityDescription,
-        initial_state,
-        coordinator: TibberRtDataCoordinator,
+        access_token=DEMO_TOKEN,
+        timeout=DEFAULT_TIMEOUT,
+        websession=None,
+        time_zone=None,
     ):
-        """Initialize the sensor."""
-        super().__init__(coordinator=coordinator, tibber_home=tibber_home)
-        self.entity_description = description
-        self._model = "Tibber Pulse"
-        self._device_name = f"{self._model} {self._home_name}"
+        """Initialize the Tibber connection."""
+        if websession is None:
+            self.websession = aiohttp.ClientSession(
+                headers={aiohttp.hdrs.USER_AGENT: f"pyTibber/{__version__}"}
+            )
+        else:
+            self.websession = websession
+        self._timeout = timeout
+        self._access_token = access_token
+        self.time_zone = time_zone or pytz.utc
+        self._name = None
+        self._user_id = None
+        self._home_ids = []
+        self._all_home_ids = []
+        self._homes = {}
+        self.sub_manager = None
+        self.user_agent = "pyTibber"
 
-        self._attr_name = f"{description.name} {self._home_name}"
-        self._attr_native_value = initial_state
-        self._attr_unique_id = f"{self._tibber_home.home_id}_rt_{description.name}"
+    async def close_connection(self):
+        """Close the Tibber connection."""
+        await self.websession.close()
 
-        if description.key in ("accumulatedCost", "accumulatedReward"):
-            self._attr_native_unit_of_measurement = tibber_home.currency
+    async def rt_connect(self):
+        """Start subscription manager for real time data."""
+        if self.sub_manager is not None:
+            return
+        self.sub_manager = SubscriptionManager(
+            f"token={self._access_token}", SUB_ENDPOINT
+        )
+        self.sub_manager.start()
+
+    async def rt_disconnect(self):
+        """Stop subscription manager."""
+        if self.sub_manager is None:
+            return
+        await self.sub_manager.stop()
+
+    async def execute(self, document, variable_values=None):
+        """Execute gql."""
+        res = await self._execute(document, variable_values)
+        if res is None:
+            return None
+        return res.get("data")
+
+    async def _execute(self, document, variable_values=None, retry=2):
+        """Execute gql."""
+        payload = {"query": document, "variables": variable_values or {}}
+
+        post_args = {
+            "headers": {"Authorization": "Bearer " + self._access_token},
+            "data": payload,
+        }
+        try:
+            user_agent = self.websession._default_headers.get(  # pylint: disable=protected-access
+                aiohttp.hdrs.USER_AGENT, ""
+            )  # will be fixed by aiohttp 4.0
+            if "pyTibber" not in user_agent:
+                post_args["headers"][
+                    aiohttp.hdrs.USER_AGENT
+                ] = f"{user_agent} {self.user_agent}/{__version__}"
+        except Exception:  # pylint: disable=broad-except
+            pass
+
+        try:
+            async with async_timeout.timeout(self._timeout):
+                resp = await self.websession.post(API_ENDPOINT, **post_args)
+            if resp.status != 200:
+                _LOGGER.error("Error connecting to Tibber, resp code: %s", resp.status)
+                return None
+            result = await resp.json()
+        except aiohttp.ClientError as err:
+            if retry > 0:
+                return await self._execute(document, variable_values, retry - 1)
+            _LOGGER.error("Error connecting to Tibber: %s ", err, exc_info=True)
+            raise
+        except asyncio.TimeoutError:
+            _LOGGER.error("Timed out when connecting to Tibber")
+            raise
+        errors = result.get("errors")
+        if errors:
+            _LOGGER.error("Received non-compatible response %s", errors)
+        return result
+
+    async def update_info(self, *_):
+        """Update home info async."""
+        query = """
+        {
+          viewer {
+            name
+            userId
+            homes {
+              id
+              subscriptions {
+                status
+              }
+            }
+          }
+        }
+        """
+
+        res = await self._execute(query)
+        if res is None:
+            return
+        errors = res.get("errors", [])
+        if errors:
+            msg = errors[0].get("message", "failed to login")
+            _LOGGER.error(msg)
+            raise InvalidLogin(msg)
+
+        data = res.get("data")
+        if not data:
+            return
+        viewer = data.get("viewer")
+        if not viewer:
+            return
+        self._name = viewer.get("name")
+        self._user_id = viewer.get("userId")
+
+        homes = viewer.get("homes", [])
+        self._home_ids = []
+        for _home in homes:
+            home_id = _home.get("id")
+            self._all_home_ids += [home_id]
+            subs = _home.get("subscriptions")
+            if not subs:
+                continue
+            status = subs[0].get("status", "ended").lower()
+            if not home_id or status != "running":
+                continue
+            self._home_ids += [home_id]
 
     @property
-    def available(self):
-        """Return True if entity is available."""
-        return self._tibber_home.rt_subscription_running
+    def user_id(self):
+        """Return user id of user."""
+        return self._user_id
 
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        if not (live_measurement := self.coordinator.get_live_measurement()):  # type: ignore[attr-defined]
-            return
-        state = live_measurement.get(self.entity_description.key)
-        if state is None:
-            return
-        if self.entity_description.key == "powerFactor":
-            state *= 100.0
-        self._attr_native_value = state
-        self.async_write_ha_state()
+    @property
+    def name(self):
+        """Return name of user."""
+        return self._name
 
+    @property
+    def home_ids(self):
+        """Return list of home ids."""
+        return self.get_home_ids(only_active=True)
 
-class TibberRtDataCoordinator(update_coordinator.DataUpdateCoordinator):
-    """Handle Tibber realtime data."""
+    def get_home_ids(self, only_active=True):
+        """Return list of home ids."""
+        if only_active:
+            return self._home_ids
+        return self._all_home_ids
 
-    def __init__(self, async_add_entities, tibber_home, hass):
-        """Initialize the data handler."""
-        self._async_add_entities = async_add_entities
-        self._tibber_home = tibber_home
-        self.hass = hass
-        self._added_sensors = set()
-        super().__init__(
-            hass,
-            _LOGGER,
-            name=tibber_home.info["viewer"]["home"]["address"].get(
-                "address1", "Tibber"
-            ),
-        )
+    def get_homes(self, only_active=True):
+        """Return list of Tibber homes."""
+        return [self.get_home(home_id) for home_id in self.get_home_ids(only_active)]
 
-        self._async_remove_device_updates_handler = self.async_add_listener(
-            self._add_sensors
-        )
-        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, self._handle_ha_stop)
-
-    @callback
-    def _handle_ha_stop(self, _event) -> None:
-        """Handle Home Assistant stopping."""
-        self._async_remove_device_updates_handler()
-
-    @callback
-    def _add_sensors(self):
-        """Add sensor."""
-        if not (live_measurement := self.get_live_measurement()):
-            return
-
-        new_entities = []
-        for sensor_description in RT_SENSORS:
-            if sensor_description.key in self._added_sensors:
-                continue
-            state = live_measurement.get(sensor_description.key)
-            if state is None:
-                continue
-            entity = TibberSensorRT(
-                self._tibber_home,
-                sensor_description,
-                state,
-                self,
-            )
-            new_entities.append(entity)
-            self._added_sensors.add(sensor_description.key)
-        if new_entities:
-            self._async_add_entities(new_entities)
-
-    def get_live_measurement(self):
-        """Get live measurement data."""
-        if errors := self.data.get("errors"):
-            _LOGGER.error(errors[0])
+    def get_home(self, home_id):
+        """Return an instance of TibberHome for given home id."""
+        if home_id not in self._all_home_ids:
+            _LOGGER.error("Could not find any Tibber home with id: %s", home_id)
             return None
-        return self.data.get("data", {}).get("liveMeasurement")
+        if home_id not in self._homes.keys():
+            self._homes[home_id] = TibberHome(home_id, self)
+        return self._homes[home_id]
+
+    async def send_notification(self, title, message):
+        """Send notification."""
+        # pylint: disable=consider-using-f-string)
+        query = """
+        mutation{{
+          sendPushNotification(input: {{
+            title: "{}",
+            message: "{}",
+          }}){{
+            successful
+            pushedToNumberOfDevices
+          }}
+        }}
+        """.format(
+            title,
+            message,
+        )
+
+        res = await self.execute(query)
+        if not res:
+            return False
+        noti = res.get("sendPushNotification", {})
+        successful = noti.get("successful", False)
+        pushed_to_number_of_devices = noti.get("pushedToNumberOfDevices", 0)
+        _LOGGER.debug(
+            "send_notification: status %s, send to %s devices",
+            successful,
+            pushed_to_number_of_devices,
+        )
+        return successful
+
+
+class TibberHome:
+    """Instance of Tibber home."""
+
+    # pylint: disable=too-many-instance-attributes, too-many-public-methods
+
+    def __init__(self, home_id, tibber_control):
+        """Initialize the Tibber home class."""
+        self._tibber_control = tibber_control
+        self._home_id = home_id
+        self._current_price_total = None
+        self._current_price_info = {}
+        self._price_info = {}
+        self._level_info = {}
+        self._rt_power = []
+        self.info = {}
+        self._subscription_id = None
+        self._data = None
+        self.last_data_timestamp = None
+
+    async def update_info(self):
+        """Update current price info async."""
+        # pylint: disable=consider-using-f-string)
+        query = (
+            """
+        {
+          viewer {
+            home(id: "%s") {
+              appNickname
+              features {
+                  realTimeConsumptionEnabled
+                }
+              currentSubscription {
+                status
+              }
+              address {
+                address1
+                address2
+                address3
+                city
+                postalCode
+                country
+                latitude
+                longitude
+              }
+              meteringPointData {
+                consumptionEan
+                energyTaxType
+                estimatedAnnualConsumption
+                gridCompany
+                productionEan
+                vatType
+              }
+              owner {
+                name
+                isCompany
+                language
+                contactInfo {
+                  email
+                  mobile
+                }
+              }
+              timeZone
+              subscriptions {
+                id
+                status
+                validFrom
+                validTo
+                statusReason
+              }
+             currentSubscription {
+                    priceInfo {
+                      current {
+                        currency
+                      }
+                    }
+                  }
+                }
+              }
+            }
+        """
+            % self._home_id
+        )
+
+        self.info = await self._tibber_control.execute(query)
+
+    async def update_info_and_price_info(self):
+        """Update current price info async."""
+        # pylint: disable=consider-using-f-string)
+        query = (
+            """
+        {
+          viewer {
+            home(id: "%s") {
+              currentSubscription {
+                priceInfo {
+                  current {
+                    energy
+                    tax
+                    total
+                    startsAt
+                    level
+                  }
+                  today {
+                    total
+                    startsAt
+                    level
+                  }
+                  tomorrow {
+                    total
+                    startsAt
+                    level
+                  }
+                }
+              }
+              appNickname
+              features {
+                realTimeConsumptionEnabled
+              }
+              currentSubscription {
+                status
+              }
+              address {
+                address1
+                address2
+                address3
+                city
+                postalCode
+                country
+                latitude
+                longitude
+              }
+              meteringPointData {
+                consumptionEan
+                energyTaxType
+                estimatedAnnualConsumption
+                gridCompany
+                productionEan
+                vatType
+              }
+              owner {
+                name
+                isCompany
+                language
+                contactInfo {
+                  email
+                  mobile
+                }
+              }
+              timeZone
+              subscriptions {
+                id
+                status
+                validFrom
+                validTo
+                statusReason
+              }
+              currentSubscription {
+                priceInfo {
+                  current {
+                    currency
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        """
+            % self._home_id
+        )
+
+        self.info = await self._tibber_control.execute(query)
+        self._process_price_info(self.info)
+
+    async def update_current_price_info(self):
+        """Update current price info async."""
+        # pylint: disable=consider-using-f-string)
+        query = (
+            """
+        {
+          viewer {
+            home(id: "%s") {
+              currentSubscription {
+                priceInfo {
+                  current {
+                    energy
+                    tax
+                    total
+                    startsAt
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+            % self.home_id
+        )
+        price_info_temp = await self._tibber_control.execute(query)
+        if not price_info_temp:
+            _LOGGER.error("Could not find current price info.")
+            return
+        try:
+            home = price_info_temp["viewer"]["home"]
+            current_subscription = home["currentSubscription"]
+            price_info = current_subscription["priceInfo"]["current"]
+        except (KeyError, TypeError):
+            _LOGGER.error("Could not find current price info.")
+            return
+        if price_info:
+            self._current_price_info = price_info
+
+    async def update_price_info(self):
+        """Update price info async."""
+        # pylint: disable=consider-using-f-string)
+        query = (
+            """
+        {
+          viewer {
+            home(id: "%s") {
+              currentSubscription {
+                priceInfo {
+                  current {
+                    energy
+                    tax
+                    total
+                    startsAt
+                    level
+                  }
+                  today {
+                    total
+                    startsAt
+                    level
+                  }
+                  tomorrow {
+                    total
+                    startsAt
+                    level
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+            % self.home_id
+        )
+        price_info = await self._tibber_control.execute(query)
+        self._process_price_info(price_info)
+
+    def _process_price_info(self, price_info):
+        if not price_info:
+            _LOGGER.error("Could not find price info.")
+            return
+        self._price_info = {}
+        self._level_info = {}
+        for key in ["current", "today", "tomorrow"]:
+            try:
+                home = price_info["viewer"]["home"]
+                current_subscription = home["currentSubscription"]
+                price_info_k = current_subscription["priceInfo"][key]
+            except (KeyError, TypeError):
+                _LOGGER.error("Could not find price info for %s.", key)
+                continue
+            if key == "current":
+                self._current_price_info = price_info_k
+                continue
+            for data in price_info_k:
+                self._price_info[data.get("startsAt")] = data.get("total")
+                self._level_info[data.get("startsAt")] = data.get("level")
+
+    @property
+    def current_price_total(self):
+        """Get current price total."""
+        if not self._current_price_info:
+            return None
+        return self._current_price_info.get("total")
+
+    @property
+    def current_price_info(self):
+        """Get current price info."""
+        return self._current_price_info
+
+    @property
+    def price_total(self):
+        """Get dictionary with price total, key is date-time."""
+        return self._price_info
+
+    @property
+    def price_level(self):
+        """Get dictionary with price level, key is date-time."""
+        return self._level_info
+
+    @property
+    def home_id(self):
+        """Return home id."""
+        return self._home_id
+
+    @property
+    def has_active_subscription(self):
+        """Return home id."""
+        try:
+            sub = self.info["viewer"]["home"]["currentSubscription"]["status"]
+        except (KeyError, TypeError):
+            return False
+        return sub in ["running", "awaiting market", "awaiting time restriction"]
+
+    @property
+    def has_real_time_consumption(self):
+        """Return home id."""
+        try:
+            return self.info["viewer"]["home"]["features"]["realTimeConsumptionEnabled"]
+        except (KeyError, TypeError):
+            return False
+
+    @property
+    def address1(self):
+        """Return the home adress1."""
+        try:
+            return self.info["viewer"]["home"]["address"]["address1"]
+        except (KeyError, TypeError):
+            _LOGGER.error("Could not find address1.")
+        return ""
+
+    @property
+    def consumption_unit(self):
+        """Return the consumption."""
+        return "kWh"
+
+    @property
+    def currency(self):
+        """Return the currency."""
+        try:
+            current_subscription = self.info["viewer"]["home"]["currentSubscription"]
+            return current_subscription["priceInfo"]["current"]["currency"]
+        except (KeyError, TypeError, IndexError):
+            _LOGGER.error("Could not find currency.")
+        return ""
+
+    @property
+    def country(self):
+        """Return the country."""
+        try:
+            return self.info["viewer"]["home"]["address"]["country"]
+        except (KeyError, TypeError):
+            _LOGGER.error("Could not find country.")
+        return ""
+
+    @property
+    def price_unit(self):
+        """Return the price unit."""
+        currency = self.currency
+        consumption_unit = self.consumption_unit
+        if not currency or not consumption_unit:
+            _LOGGER.error("Could not find price_unit.")
+            return " "
+        return currency + "/" + consumption_unit
+
+    async def rt_subscribe(self, callback):
+        """Connect to Tibber and subscribe to Tibber rt subscription."""
+        if self._subscription_id is not None:
+            _LOGGER.error("Already subscribed.")
+            return
+        await self._tibber_control.rt_connect()
+        # pylint: disable=consider-using-f-string)
+        document = (
+            """
+            subscription{
+              liveMeasurement(homeId:"%s"){
+                accumulatedConsumption
+                accumulatedConsumptionLastHour
+                accumulatedCost
+                accumulatedProduction
+                accumulatedProductionLastHour
+                accumulatedReward
+                averagePower
+                currency
+                currentL1
+                currentL2
+                currentL3
+                lastMeterConsumption
+                lastMeterProduction
+                maxPower
+                minPower
+                power
+                powerFactor
+                powerProduction
+                powerReactive
+                signalStrength
+                timestamp
+                voltagePhase1
+                voltagePhase2
+                voltagePhase3
+            }
+           }
+        """
+            % self.home_id
+        )
+
+
+        def callback_add_extra_data(data):
+            """Add estimated hourly consumption."""
+            _time = parse(data["data"]["liveMeasurement"]["timestamp"]).astimezone(
+                self._tibber_control.time_zone
+            )
+            self._rt_power.append(
+                (_time, data["data"]["liveMeasurement"]["power"] / 1000)
+            )
+            while self._rt_power and self._rt_power[0][0] < _time - dt.timedelta(
+                minutes=5
+            ):
+                self._rt_power.pop(0)
+            current_hour = data["data"]["liveMeasurement"][
+                "accumulatedConsumptionLastHour"
+            ]
+            if current_hour is not None:
+                power = sum([p[1] for p in self._rt_power]) / len(self._rt_power)
+                data["data"]["liveMeasurement"]["estimatedHourConsumption"] = round(
+                    current_hour
+                    + power * (3600 - (_time.minute * 60 + _time.second)) / 3600,
+                    3,
+                )
+
+            callback(data)
+
+        self._subscription_id = await self._tibber_control.sub_manager.subscribe(
+            document, callback_add_extra_data
+        )
+
+    async def rt_unsubscribe(self):
+        """Unsubscribe to Tibber rt subscription."""
+        if self._subscription_id is None:
+            _LOGGER.error("Not subscribed.")
+            return
+        await self._tibber_control.sub_manager.unsubscribe(self._subscription_id)
+
+    @property
+    def rt_subscription_running(self):
+        """Is real time subscription running."""
+        return (
+            self._tibber_control.sub_manager is not None
+            and self._tibber_control.sub_manager.is_running
+        )
+
+    async def get_historic_data(self, n_data, resolution=RESOLUTION_HOURLY):
+        """Get historic data."""
+        # pylint: disable=consider-using-f-string)
+        query = """
+                {{
+                  viewer {{
+                    home(id: "{}") {{
+                      consumption(resolution: {}, last: {}) {{
+                        nodes {{
+                          from
+                          totalCost
+                          cost
+                          consumption
+                        }}
+                      }}
+                    }}
+                  }}
+                }}
+          """.format(
+            self.home_id,
+            resolution,
+            n_data,
+        )
+        data = await self._tibber_control.execute(query)
+        if not data:
+            _LOGGER.error("Could not find the data.")
+            return
+        data = data["viewer"]["home"]["consumption"]
+        if data is None:
+            self._data = []
+            return
+        self._data = data["nodes"]
+        return self._data
+
+    def current_price_data(self):
+        """get current price."""
+        now = dt.datetime.now(self._tibber_control.time_zone)
+        res = None, None, None
+        for key, price_total in self.price_total.items():
+            price_time = parse(key).astimezone(self._tibber_control.time_zone)
+            time_diff = (now - price_time).total_seconds() / 60
+            if not self.last_data_timestamp or price_time > self.last_data_timestamp:
+                self.last_data_timestamp = price_time
+            if 0 <= time_diff < 60:
+                res = round(price_total, 3), self.price_level[key], price_time
+        return res
+
+    def current_attributes(self):
+        """get current attributes."""
+        # pylint: disable=too-many-locals
+        max_price = 0
+        min_price = 10000
+        sum_price = 0
+        off_peak_1 = 0
+        peak = 0
+        off_peak_2 = 0
+        num1 = 0
+        num0 = 0
+        num2 = 0
+        num = 0
+        now = dt.datetime.now(self._tibber_control.time_zone)
+        for key, price_total in self.price_total.items():
+            price_time = parse(key).astimezone(self._tibber_control.time_zone)
+            price_total = round(price_total, 3)
+            if now.date() == price_time.date():
+                max_price = max(max_price, price_total)
+                min_price = min(min_price, price_total)
+                if price_time.hour < 8:
+                    off_peak_1 += price_total
+                    num1 += 1
+                elif price_time.hour < 20:
+                    peak += price_total
+                    num0 += 1
+                else:
+                    off_peak_2 += price_total
+                    num2 += 1
+                num += 1
+                sum_price += price_total
+
+        attr = {}
+        attr["max_price"] = max_price
+        attr["avg_price"] = round(sum_price / num, 3) if num > 0 else 0
+        attr["min_price"] = min_price
+        attr["off_peak_1"] = round(off_peak_1 / num1, 3) if num1 > 0 else 0
+        attr["peak"] = round(peak / num0, 3) if num0 > 0 else 0
+        attr["off_peak_2"] = round(off_peak_2 / num2, 3) if num2 > 0 else 0
+        grid_company = self.info["viewer"]["home"]["meteringPointData"].get(
+            "gridCompany", ""
+        )
+        if grid_company and "glitre" in grid_company.lower():
+            now = now.astimezone(pytz.timezone("Europe/Oslo"))
+            if now.month >= 10 or now.month <= 3:
+                grid_price = 44.99 / 100
+            else:
+                grid_price = 43.11 / 100
+            if now.hour >= 22 or now.hour < 6:
+                grid_price -= 12 / 100
+            attr["grid_price"] = round(grid_price, 3)
+
+        return attr
+
+
+class InvalidLogin(Exception):
+    """Invalid login exception."""
