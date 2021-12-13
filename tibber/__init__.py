@@ -234,6 +234,7 @@ class Tibber:
             tasks.append(home.fetch_conumption_data())
         await asyncio.gather(*tasks)
 
+
 class TibberHome:
     """Instance of Tibber home."""
 
@@ -264,7 +265,12 @@ class TibberHome:
         # pylint: disable=consider-using-f-string)
         now = dt.datetime.utcnow().astimezone(dt.timezone.utc)
         if self.last_cons_data_timestamp is not None:
-            print(self.last_cons_data_timestamp, now, now - self.last_cons_data_timestamp, self.has_real_time_consumption)
+            print(
+                self.last_cons_data_timestamp,
+                now,
+                now - self.last_cons_data_timestamp,
+                self.has_real_time_consumption,
+            )
 
             if self.has_real_time_consumption:
                 if (now - self.last_cons_data_timestamp) < dt.timedelta(hours=1):
@@ -274,7 +280,9 @@ class TibberHome:
                     return
         n_hours = now.hour + now.day * 24
 
-        consumption = await self.get_historic_data(n_hours, resolution=RESOLUTION_HOURLY)
+        consumption = await self.get_historic_data(
+            n_hours, resolution=RESOLUTION_HOURLY
+        )
 
         if not consumption:
             _LOGGER.error("Could not find consumption info.")
@@ -289,7 +297,10 @@ class TibberHome:
             if _time.month != now.month or _time.year != now.year:
                 continue
 
-            if self.last_cons_data_timestamp is None or _time + dt.timedelta(hours=1) > self.last_cons_data_timestamp:
+            if (
+                self.last_cons_data_timestamp is None
+                or _time + dt.timedelta(hours=1) > self.last_cons_data_timestamp
+            ):
                 self.last_cons_data_timestamp = _time + dt.timedelta(hours=1)
             if (
                 node.get("consumption") is not None
@@ -304,9 +315,12 @@ class TibberHome:
         self.month_cost = _month_cost
         self.month_hour_max_month_cons = _month_hour_max_month_hour_cons
         self.month_hour_max_month_time = _month_hour_max_month_hour
-        print(self.month_hour_max_month_cons, self.month_hour_max_month_time, self.last_cons_data_timestamp)
+        print(
+            self.month_hour_max_month_cons,
+            self.month_hour_max_month_time,
+            self.last_cons_data_timestamp,
+        )
         self.hourly_consumption_data = consumption
-
 
     async def update_info(self):
         """Update current price info async."""
