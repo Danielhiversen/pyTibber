@@ -253,9 +253,9 @@ class TibberHome:
         self._data = None
         self.last_data_timestamp = None
 
-        self.month_cons = 0
-        self.month_cost = 0
-        self.peak_hour = 0
+        self.month_cons = None
+        self.month_cost = None
+        self.peak_hour = None
         self.peak_hour_time = None
         self.last_cons_data_timestamp = None
         self.hourly_consumption_data = []
