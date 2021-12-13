@@ -265,13 +265,6 @@ class TibberHome:
         # pylint: disable=consider-using-f-string)
         now = dt.datetime.utcnow().astimezone(dt.timezone.utc)
         if self.last_cons_data_timestamp is not None:
-            print(
-                self.last_cons_data_timestamp,
-                now,
-                now - self.last_cons_data_timestamp,
-                self.has_real_time_consumption,
-            )
-
             if self.has_real_time_consumption:
                 if (now - self.last_cons_data_timestamp) < dt.timedelta(hours=1):
                     return
@@ -315,11 +308,6 @@ class TibberHome:
         self.month_cost = _month_cost
         self.month_hour_max_month_cons = _month_hour_max_month_hour_cons
         self.month_hour_max_month_time = _month_hour_max_month_hour
-        print(
-            self.month_hour_max_month_cons,
-            self.month_hour_max_month_time,
-            self.last_cons_data_timestamp,
-        )
         self.hourly_consumption_data = consumption
 
     async def update_info(self):
