@@ -234,7 +234,6 @@ class Tibber:
             tasks.append(home.fetch_conumption_data())
         await asyncio.gather(*tasks)
 
-
 class TibberHome:
     """Instance of Tibber home."""
 
@@ -273,9 +272,7 @@ class TibberHome:
                     return
         n_hours = now.hour + now.day * 24
 
-        consumption = await self.get_historic_data(
-            n_hours, resolution=RESOLUTION_HOURLY
-        )
+        consumption = await self.get_historic_data(n_hours, resolution=RESOLUTION_HOURLY)
 
         if not consumption:
             _LOGGER.error("Could not find consumption info.")
@@ -292,10 +289,7 @@ class TibberHome:
             if node.get("consumption") is None:
                 continue
 
-            if (
-                self.last_cons_data_timestamp is None
-                or _time + dt.timedelta(hours=1) > self.last_cons_data_timestamp
-            ):
+            if self.last_cons_data_timestamp is None or _time + dt.timedelta(hours=1) > self.last_cons_data_timestamp:
                 self.last_cons_data_timestamp = _time + dt.timedelta(hours=1)
             if node["consumption"] > _month_hour_max_month_hour_cons:
                 _month_hour_max_month_hour_cons = node["consumption"]
@@ -307,7 +301,7 @@ class TibberHome:
 
         self.month_cons = round(_month_cons, 2)
         self.month_cost = round(_month_cost, 2)
-        self.peak_hour = round(_month_hour_max_month_hour_cons)
+        self.peak_hour = round(_month_hour_max_month_hour_cons, 2)
         self.peak_hour_time = _month_hour_max_month_hour
         self.hourly_consumption_data = consumption
 
