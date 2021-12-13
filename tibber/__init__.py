@@ -627,7 +627,6 @@ class TibberHome:
             % self.home_id
         )
 
-
         def callback_add_extra_data(data):
             """Add estimated hourly consumption."""
             _time = parse(data["data"]["liveMeasurement"]["timestamp"]).astimezone(
