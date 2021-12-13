@@ -234,7 +234,6 @@ class Tibber:
             tasks.append(home.fetch_conumption_data())
         await asyncio.gather(*tasks)
 
-
 class TibberHome:
     """Instance of Tibber home."""
 
@@ -255,8 +254,8 @@ class TibberHome:
 
         self.month_cons = 0
         self.month_cost = 0
-        self.month_hour_max_month_cons = 0
-        self.month_hour_max_month_time = None
+        self.peak_hour = 0
+        self.peak_hour_time = None
         self.last_cons_data_timestamp = None
         self.hourly_consumption_data = []
 
@@ -273,9 +272,7 @@ class TibberHome:
                     return
         n_hours = now.hour + now.day * 24
 
-        consumption = await self.get_historic_data(
-            n_hours, resolution=RESOLUTION_HOURLY
-        )
+        consumption = await self.get_historic_data(n_hours, resolution=RESOLUTION_HOURLY)
 
         if not consumption:
             _LOGGER.error("Could not find consumption info.")
@@ -289,25 +286,23 @@ class TibberHome:
             _time = parse(node["from"])
             if _time.month != now.month or _time.year != now.year:
                 continue
+            if node.get("consumption") is None:
+                continue
 
-            if (
-                self.last_cons_data_timestamp is None
-                or _time + dt.timedelta(hours=1) > self.last_cons_data_timestamp
-            ):
+            if self.last_cons_data_timestamp is None or _time + dt.timedelta(hours=1) > self.last_cons_data_timestamp:
                 self.last_cons_data_timestamp = _time + dt.timedelta(hours=1)
-            if (
-                node.get("consumption") is not None
-                and node["consumption"] > _month_hour_max_month_hour_cons
-            ):
+            if node["consumption"] > _month_hour_max_month_hour_cons:
                 _month_hour_max_month_hour_cons = node["consumption"]
                 _month_hour_max_month_hour = _time
-            _month_cons += node.get("consumption", 0)
-            _month_cost += node.get("cost", 0)
+            _month_cons += node["consumption"]
 
-        self.month_cons = _month_cons
-        self.month_cost = _month_cost
-        self.month_hour_max_month_cons = _month_hour_max_month_hour_cons
-        self.month_hour_max_month_time = _month_hour_max_month_hour
+            if node.get("cost") is not None:
+                _month_cost += node["cost"]
+
+        self.month_cons = round(_month_cons, 2)
+        self.month_cost = round(_month_cost, 2)
+        self.peak_hour = round(_month_hour_max_month_hour_cons)
+        self.peak_hour_time = _month_hour_max_month_hour
         self.hourly_consumption_data = consumption
 
     async def update_info(self):
