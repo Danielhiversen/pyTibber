@@ -597,6 +597,7 @@ class TibberHome:
             subscription{
               liveMeasurement(homeId:"%s"){
                 accumulatedConsumption
+                accumulatedConsumptionLastHour
                 accumulatedCost
                 accumulatedProduction
                 accumulatedProductionLastHour
@@ -615,6 +616,7 @@ class TibberHome:
                 powerProduction
                 powerReactive
                 signalStrength
+                timestamp
                 voltagePhase1
                 voltagePhase2
                 voltagePhase3
