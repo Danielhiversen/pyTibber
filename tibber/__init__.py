@@ -192,7 +192,7 @@ class Tibber:
         if home_id not in self._all_home_ids:
             _LOGGER.error("Could not find any Tibber home with id: %s", home_id)
             return None
-        if home_id not in self._homes.keys():
+        if home_id not in self._homes:
             self._homes[home_id] = TibberHome(home_id, self)
         return self._homes[home_id]
 
