@@ -264,13 +264,8 @@ class TibberHome:
         """Update consumption info async."""
         # pylint: disable=consider-using-f-string)
         now = dt.datetime.utcnow().astimezone(dt.timezone.utc)
-        if self.last_cons_data_timestamp is not None:
-            if self.has_real_time_consumption:
-                if (now - self.last_cons_data_timestamp) < dt.timedelta(hours=1):
-                    return
-            else:
-                if (now - self.last_cons_data_timestamp) < dt.timedelta(hours=24):
-                    return
+        if self.last_cons_data_timestamp is not None and (now - self.last_cons_data_timestamp) < dt.timedelta(hours=24):
+            return
         n_hours = now.hour + now.day * 24
 
         consumption = await self.get_historic_data(
