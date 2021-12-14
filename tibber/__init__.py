@@ -227,6 +227,13 @@ class Tibber:
         )
         return successful
 
+    async def fetch_conumption_data_active_homes(self):
+        """Fetch consumption data for active homes."""
+        tasks = []
+        for home in self.get_homes(only_active=True):
+            tasks.append(home.fetch_conumption_data())
+        await asyncio.gather(*tasks)
+
 
 class TibberHome:
     """Instance of Tibber home."""
@@ -245,6 +252,61 @@ class TibberHome:
         self._subscription_id = None
         self._data = None
         self.last_data_timestamp = None
+
+        self.month_cons = None
+        self.month_cost = None
+        self.peak_hour = None
+        self.peak_hour_time = None
+        self.last_cons_data_timestamp = None
+        self.hourly_consumption_data = []
+
+    async def fetch_conumption_data(self):
+        """Update consumption info async."""
+        # pylint: disable=consider-using-f-string)
+        now = dt.datetime.utcnow().astimezone(dt.timezone.utc)
+        if self.last_cons_data_timestamp is not None and (
+            now - self.last_cons_data_timestamp
+        ) < dt.timedelta(hours=24):
+            return
+        n_hours = now.hour + now.day * 24
+
+        consumption = await self.get_historic_data(
+            n_hours, resolution=RESOLUTION_HOURLY
+        )
+
+        if not consumption:
+            _LOGGER.error("Could not find consumption info.")
+            return consumption
+        now = dt.datetime.now()
+        _month_cons = 0
+        _month_cost = 0
+        _month_hour_max_month_hour_cons = 0
+        _month_hour_max_month_hour = None
+        for node in consumption:
+            _time = parse(node["from"])
+            if _time.month != now.month or _time.year != now.year:
+                continue
+            if node.get("consumption") is None:
+                continue
+
+            if (
+                self.last_cons_data_timestamp is None
+                or _time + dt.timedelta(hours=1) > self.last_cons_data_timestamp
+            ):
+                self.last_cons_data_timestamp = _time + dt.timedelta(hours=1)
+            if node["consumption"] > _month_hour_max_month_hour_cons:
+                _month_hour_max_month_hour_cons = node["consumption"]
+                _month_hour_max_month_hour = _time
+            _month_cons += node["consumption"]
+
+            if node.get("cost") is not None:
+                _month_cost += node["cost"]
+
+        self.month_cons = round(_month_cons, 2)
+        self.month_cost = round(_month_cost, 2)
+        self.peak_hour = round(_month_hour_max_month_hour_cons, 2)
+        self.peak_hour_time = _month_hour_max_month_hour
+        self.hourly_consumption_data = consumption
 
     async def update_info(self):
         """Update current price info async."""
