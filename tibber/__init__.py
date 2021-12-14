@@ -227,11 +227,11 @@ class Tibber:
         )
         return successful
 
-    async def fetch_conumption_data_active_homes(self):
+    async def fetch_consumption_data_active_homes(self):
         """Fetch consumption data for active homes."""
         tasks = []
         for home in self.get_homes(only_active=True):
-            tasks.append(home.fetch_conumption_data())
+            tasks.append(home.fetch_consumption_data())
         await asyncio.gather(*tasks)
 
 
@@ -260,7 +260,7 @@ class TibberHome:
         self.last_cons_data_timestamp = None
         self.hourly_consumption_data = []
 
-    async def fetch_conumption_data(self):
+    async def fetch_consumption_data(self):
         """Update consumption info async."""
         # pylint: disable=consider-using-f-string)
         now = dt.datetime.utcnow().astimezone(dt.timezone.utc)
