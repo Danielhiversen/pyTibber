@@ -248,6 +248,7 @@ class TibberHome:
         self._current_price_info = {}
         self._price_info = {}
         self._level_info = {}
+        self._rt_power = []
         self.info = {}
         self._subscription_id = None
         self._data = None
@@ -647,7 +648,7 @@ class TibberHome:
             return " "
         return currency + "/" + consumption_unit
 
-    async def rt_subscribe(self, async_callback):
+    async def rt_subscribe(self, callback):
         """Connect to Tibber and subscribe to Tibber rt subscription."""
         if self._subscription_id is not None:
             _LOGGER.error("Already subscribed.")
@@ -688,8 +689,33 @@ class TibberHome:
             % self.home_id
         )
 
+        def callback_add_extra_data(data):
+            """Add estimated hourly consumption."""
+            _time = parse(data["data"]["liveMeasurement"]["timestamp"]).astimezone(
+                self._tibber_control.time_zone
+            )
+            self._rt_power.append(
+                (_time, data["data"]["liveMeasurement"]["power"] / 1000)
+            )
+            while self._rt_power and self._rt_power[0][0] < _time - dt.timedelta(
+                minutes=5
+            ):
+                self._rt_power.pop(0)
+            current_hour = data["data"]["liveMeasurement"][
+                "accumulatedConsumptionLastHour"
+            ]
+            if current_hour is not None:
+                power = sum([p[1] for p in self._rt_power]) / len(self._rt_power)
+                data["data"]["liveMeasurement"]["estimatedHourConsumption"] = round(
+                    current_hour
+                    + power * (3600 - (_time.minute * 60 + _time.second)) / 3600,
+                    3,
+                )
+
+            callback(data)
+
         self._subscription_id = await self._tibber_control.sub_manager.subscribe(
-            document, async_callback
+            document, callback_add_extra_data
         )
 
     async def rt_unsubscribe(self):
