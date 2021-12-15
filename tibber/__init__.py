@@ -648,9 +648,7 @@ class TibberHome:
             pass
         if name:
             return name
-        return self.info["viewer"]["home"]["address"].get(
-                "address1", ""
-            )
+        return self.info["viewer"]["home"]["address"].get("address1", "")
 
     @property
     def price_unit(self):
