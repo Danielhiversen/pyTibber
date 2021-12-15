@@ -264,7 +264,7 @@ class TibberHome:
     async def fetch_consumption_data(self):
         """Update consumption info async."""
         # pylint: disable=consider-using-f-string)
-        now = dt.datetime.utcnow().astimezone(dt.timezone.utc)
+        now = dt.datetime.utcnow()
         if self.last_cons_data_timestamp is not None and (
             now - self.last_cons_data_timestamp
         ) < dt.timedelta(hours=24):
@@ -637,6 +637,20 @@ class TibberHome:
         except (KeyError, TypeError):
             _LOGGER.error("Could not find country.")
         return ""
+
+    @property
+    def name(self):
+        """Return the name."""
+        name = None
+        try:
+            name = self.info["viewer"]["home"]["appNickname"]
+        except (KeyError, TypeError):
+            pass
+        if name:
+            return name
+        return self.info["viewer"]["home"]["address"].get(
+                "address1", ""
+            )
 
     @property
     def price_unit(self):
