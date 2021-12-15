@@ -263,7 +263,6 @@ class TibberHome:
 
     async def fetch_consumption_data(self):
         """Update consumption info async."""
-        # pylint: disable=consider-using-f-string)
         now = dt.datetime.utcnow()
         if self.last_cons_data_timestamp is not None and (
             now - self.last_cons_data_timestamp
