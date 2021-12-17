@@ -1,6 +1,6 @@
 """Constants used by pyTibber"""
 
-__version__ = "0.21.5"
+__version__ = "0.21.6"
 
 RESOLUTION_HOURLY = "HOURLY"
 RESOLUTION_DAILY = "DAILY"
