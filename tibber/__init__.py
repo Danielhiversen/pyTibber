@@ -268,7 +268,7 @@ class TibberHome:
             now - self.last_cons_data_timestamp
         ) < dt.timedelta(hours=24):
             return
-        n_hours = now.hour + now.day * 24
+        n_hours = 30*24
 
         consumption = await self.get_historic_data(
             n_hours, resolution=RESOLUTION_HOURLY
