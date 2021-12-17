@@ -263,7 +263,7 @@ class TibberHome:
 
     async def fetch_consumption_data(self):
         """Update consumption info async."""
-        now = dt.datetime.utcnow()
+        now = dt.datetime.utcnow().replace(tzinfo=dt.timezone.utc)
         if self.last_cons_data_timestamp is not None and (
             now - self.last_cons_data_timestamp
         ) < dt.timedelta(hours=24):
