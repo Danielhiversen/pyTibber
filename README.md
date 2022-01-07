@@ -27,8 +27,9 @@ pip3 install pyTibber
 ## Example:
 
 ```python
-import tibber
 import asyncio
+
+import tibber
 
 
 async def main():
