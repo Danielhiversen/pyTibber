@@ -258,27 +258,60 @@ class TibberHome:
     async def fetch_consumption_data(self):
         """Update consumption info async."""
         now = dt.datetime.utcnow().replace(tzinfo=dt.timezone.utc)
-        if self.last_cons_data_timestamp is not None and (
-            now - self.last_cons_data_timestamp
-        ) < dt.timedelta(hours=24):
-            return
+        local_now = now.astimezone(self._tibber_control.time_zone)
         n_hours = 30 * 24
+
+        if self.hourly_consumption_data:
+            print(parse(self.hourly_consumption_data[0]["from"]), now - dt.timedelta(hours=n_hours))
+            print(parse(self.hourly_consumption_data[0]["from"]) > now - dt.timedelta(hours=n_hours))
+
+        if not self.has_real_time_consumption:
+            if self.last_cons_data_timestamp is not None and (
+                now - self.last_cons_data_timestamp
+            ) < dt.timedelta(hours=24):
+                return
+            self.hourly_consumption_data = []
+
+        else:
+            if (
+                not self.hourly_consumption_data
+                or parse(self.hourly_consumption_data[0]["from"])
+                > now - dt.timedelta(hours=n_hours)
+                or (local_now.hour < 3 and local_now.day == 1)
+            ):
+                self.hourly_consumption_data = []
+            else:
+                n_hours = max(2, int(
+                    (now - self.last_cons_data_timestamp).total_seconds() / 3600
+                ))
+        print(n_hours)
 
         consumption = await self.get_historic_data(
             n_hours, resolution=RESOLUTION_HOURLY
         )
+        if n_hours < 5:
+            print(consumption)
 
         if not consumption:
-            _LOGGER.error("Could not find consumption info.")
+            _LOGGER.error("Could not find consumption data.")
             return consumption
-        now = dt.datetime.now()
+
+        if not self.hourly_consumption_data:
+            self.hourly_consumption_data = consumption
+        else:
+            for _cons in consumption:
+                if _cons in self.hourly_consumption_data:
+                    continue
+                self.hourly_consumption_data.append(_cons)
+
         _month_cons = 0
         _month_cost = 0
         _month_hour_max_month_hour_cons = 0
         _month_hour_max_month_hour = None
-        for node in consumption:
+
+        for node in self.hourly_consumption_data:
             _time = parse(node["from"])
-            if _time.month != now.month or _time.year != now.year:
+            if _time.month != local_now.month or _time.year != local_now.year:
                 continue
             if node.get("consumption") is None:
                 continue
@@ -714,6 +747,9 @@ class TibberHome:
                     + power * (3600 - (_time.minute * 60 + _time.second)) / 3600,
                     3,
                 )
+                if self.peak_hour and current_hour > self.peak_hour:
+                    self.peak_hour = round(current_hour, 2)
+                    self.peak_hour_time = _time
 
             callback(data)
 
