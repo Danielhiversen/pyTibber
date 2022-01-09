@@ -70,8 +70,7 @@ class Tibber:
 
     async def execute(self, document, variable_values=None):
         """Execute gql."""
-        res = await self._execute(document, variable_values)
-        if res is None:
+        if res := await self._execute(document, variable_values) is None:
             return None
         return res.get("data")
 
@@ -109,8 +108,7 @@ class Tibber:
         except asyncio.TimeoutError:
             _LOGGER.error("Timed out when connecting to Tibber")
             raise
-        errors = result.get("errors")
-        if errors:
+        if errors := result.get("errors"):
             _LOGGER.error("Received non-compatible response %s", errors)
         return result
 
@@ -131,20 +129,17 @@ class Tibber:
         }
         """
 
-        res = await self._execute(query)
-        if res is None:
+        if (res := await self._execute(query)) is None:
             return
-        errors = res.get("errors", [])
-        if errors:
+        if errors := res.get("errors", []):
             msg = errors[0].get("message", "failed to login")
             _LOGGER.error(msg)
             raise InvalidLogin(msg)
 
-        data = res.get("data")
-        if not data:
+        if not (data := res.get("data")):
             return
-        viewer = data.get("viewer")
-        if not viewer:
+
+        if not (viewer := data.get("viewer")):
             return
         self._name = viewer.get("name")
         self._user_id = viewer.get("userId")
@@ -214,8 +209,7 @@ class Tibber:
             message,
         )
 
-        res = await self.execute(query)
-        if not res:
+        if not (res := await self.execute(query)):
             return False
         noti = res.get("sendPushNotification", {})
         successful = noti.get("successful", False)
@@ -615,7 +609,7 @@ class TibberHome:
 
     @property
     def consumption_unit(self):
-        """Return the consumption."""
+        """Return the consumption unit."""
         return "kWh"
 
     @property
@@ -652,12 +646,10 @@ class TibberHome:
     @property
     def price_unit(self):
         """Return the price unit."""
-        currency = self.currency
-        consumption_unit = self.consumption_unit
-        if not currency or not consumption_unit:
+        if not self.currency or not self.consumption_unit:
             _LOGGER.error("Could not find price_unit.")
             return " "
-        return currency + "/" + consumption_unit
+        return self.currency + "/" + self.consumption_unit
 
     async def rt_subscribe(self, callback):
         """Connect to Tibber and subscribe to Tibber rt subscription."""
@@ -767,8 +759,8 @@ class TibberHome:
             resolution,
             n_data,
         )
-        data = await self._tibber_control.execute(query)
-        if not data:
+
+        if not (data := await self._tibber_control.execute(query)):
             _LOGGER.error("Could not find the data.")
             return
         data = data["viewer"]["home"]["consumption"]
