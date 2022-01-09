@@ -304,6 +304,8 @@ class TibberHome:
                     continue
                 self.hourly_consumption_data.append(_cons)
 
+        print(parse(self.hourly_consumption_data[0]["from"]))
+
         _month_cons = 0
         _month_cost = 0
         _month_hour_max_month_hour_cons = 0
@@ -333,7 +335,6 @@ class TibberHome:
         self.month_cost = round(_month_cost, 2)
         self.peak_hour = round(_month_hour_max_month_hour_cons, 2)
         self.peak_hour_time = _month_hour_max_month_hour
-        self.hourly_consumption_data = consumption
 
     async def update_info(self):
         """Update current price info async."""
