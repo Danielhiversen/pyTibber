@@ -70,7 +70,7 @@ class Tibber:
 
     async def execute(self, document, variable_values=None):
         """Execute gql."""
-        if res := await self._execute(document, variable_values) is None:
+        if (res := await self._execute(document, variable_values)) is None:
             return None
         return res.get("data")
 
