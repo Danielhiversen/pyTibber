@@ -277,9 +277,9 @@ class TibberHome:
             ):
                 self.hourly_consumption_data = []
             else:
-                n_hours = max(2, int(
-                    (now - self.last_cons_data_timestamp).total_seconds() / 3600
-                ))
+                n_hours = max(
+                    2, int((now - self.last_cons_data_timestamp).total_seconds() / 3600)
+                )
 
         consumption = await self.get_historic_data(
             n_hours, resolution=RESOLUTION_HOURLY
