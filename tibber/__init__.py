@@ -261,10 +261,6 @@ class TibberHome:
         local_now = now.astimezone(self._tibber_control.time_zone)
         n_hours = 30 * 24
 
-        if self.hourly_consumption_data:
-            print(parse(self.hourly_consumption_data[0]["from"]), now - dt.timedelta(hours=n_hours))
-            print(parse(self.hourly_consumption_data[0]["from"]) > now - dt.timedelta(hours=n_hours))
-
         if not self.has_real_time_consumption:
             if self.last_cons_data_timestamp is not None and (
                 now - self.last_cons_data_timestamp
@@ -284,13 +280,10 @@ class TibberHome:
                 n_hours = max(2, int(
                     (now - self.last_cons_data_timestamp).total_seconds() / 3600
                 ))
-        print(n_hours)
 
         consumption = await self.get_historic_data(
             n_hours, resolution=RESOLUTION_HOURLY
         )
-        if n_hours < 5:
-            print(consumption)
 
         if not consumption:
             _LOGGER.error("Could not find consumption data.")
@@ -303,8 +296,6 @@ class TibberHome:
                 if _cons in self.hourly_consumption_data:
                     continue
                 self.hourly_consumption_data.append(_cons)
-
-        print(parse(self.hourly_consumption_data[0]["from"]))
 
         _month_cons = 0
         _month_cost = 0
