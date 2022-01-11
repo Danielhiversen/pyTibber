@@ -708,7 +708,7 @@ class TibberHome:
                 "accumulatedConsumptionLastHour"
             ]
             if current_hour is not None:
-                power = sum([p[1] for p in self._rt_power]) / len(self._rt_power)
+                power = sum(p[1] for p in self._rt_power) / len(self._rt_power)
                 data["data"]["liveMeasurement"]["estimatedHourConsumption"] = round(
                     current_hour
                     + power * (3600 - (_time.minute * 60 + _time.second)) / 3600,
