@@ -261,19 +261,11 @@ class TibberHome:
         local_now = now.astimezone(self._tibber_control.time_zone)
         n_hours = 30 * 24
 
-        if not self.has_real_time_consumption:
-            if self.last_cons_data_timestamp is not None and (
-                now - self.last_cons_data_timestamp
-            ) < dt.timedelta(hours=24):
-                return
-            self.hourly_consumption_data = []
-
-        else:
+        if self.has_real_time_consumption:
             if (
                 not self.hourly_consumption_data
                 or parse(self.hourly_consumption_data[0]["from"])
-                > now - dt.timedelta(hours=n_hours)
-                or (local_now.hour < 3 and local_now.day == 1)
+                > now - dt.timedelta(hours=n_hours+24)
             ):
                 self.hourly_consumption_data = []
             else:
@@ -281,6 +273,12 @@ class TibberHome:
                 if n_hours < 1:
                     return
                 n_hours = max(2, int(n_hours))
+        else:
+            if self.last_cons_data_timestamp is not None and (
+                now - self.last_cons_data_timestamp
+            ) < dt.timedelta(hours=24):
+                return
+            self.hourly_consumption_data = []
 
         consumption = await self.get_historic_data(
             n_hours, resolution=RESOLUTION_HOURLY
