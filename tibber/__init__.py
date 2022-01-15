@@ -714,8 +714,7 @@ class TibberHome:
             % self.home_id
         )
 
-        def callback_add_extra_data(data):
-            """Add estimated hourly consumption."""
+        def _add_extra_data(data):
             _time = parse(data["data"]["liveMeasurement"]["timestamp"]).astimezone(
                 self._tibber_control.time_zone
             )
@@ -723,7 +722,7 @@ class TibberHome:
                 (_time, data["data"]["liveMeasurement"]["power"] / 1000)
             )
             while self._rt_power and self._rt_power[0][0] < _time - dt.timedelta(
-                minutes=5
+                    minutes=5
             ):
                 self._rt_power.pop(0)
             current_hour = data["data"]["liveMeasurement"][
@@ -739,7 +738,14 @@ class TibberHome:
                 if self.peak_hour and current_hour > self.peak_hour:
                     self.peak_hour = round(current_hour, 2)
                     self.peak_hour_time = _time
+            return data
 
+        def callback_add_extra_data(data):
+            """Add estimated hourly consumption."""
+            try:
+                data = _add_extra_data(data)
+            except Exception:
+                pass
             callback(data)
 
         self._subscription_id = await self._tibber_control.sub_manager.subscribe(
