@@ -722,7 +722,7 @@ class TibberHome:
                 (_time, data["data"]["liveMeasurement"]["power"] / 1000)
             )
             while self._rt_power and self._rt_power[0][0] < _time - dt.timedelta(
-                minutes=5
+                    minutes=5
             ):
                 self._rt_power.pop(0)
             current_hour = data["data"]["liveMeasurement"][
@@ -744,7 +744,7 @@ class TibberHome:
             """Add estimated hourly consumption."""
             try:
                 data = _add_extra_data(data)
-            except Exception:
+            except KeyError:
                 pass
             callback(data)
 
