@@ -67,7 +67,7 @@ import tibber
 ACCESS_TOKEN = tibber.DEMO_TOKEN
 
 
-async def _callback(pkg):
+def _callback(pkg):
     data = pkg.get("data")
     if data is None:
         return
