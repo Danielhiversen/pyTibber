@@ -257,6 +257,8 @@ class TibberHome:
 
     async def fetch_consumption_data(self):
         """Update consumption info async."""
+        # pylint: disable=too-many-branches
+
         now = dt.datetime.utcnow().replace(tzinfo=dt.timezone.utc)
         local_now = now.astimezone(self._tibber_control.time_zone)
         n_hours = 30 * 24
