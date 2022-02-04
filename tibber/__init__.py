@@ -291,7 +291,11 @@ class TibberHome:
         if not self.hourly_consumption_data:
             self.hourly_consumption_data = consumption
         else:
-            self.hourly_consumption_data = [_cons for _cons in self.hourly_consumption_data if _cons not in consumption]
+            self.hourly_consumption_data = [
+                _cons
+                for _cons in self.hourly_consumption_data
+                if _cons not in consumption
+            ]
             self.hourly_consumption_data.extend(consumption)
 
         _month_cons = 0
