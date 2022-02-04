@@ -266,7 +266,7 @@ class TibberHome:
         if self.has_real_time_consumption:
             if not self.hourly_consumption_data or parse(
                 self.hourly_consumption_data[0]["from"]
-            ) > now - dt.timedelta(hours=n_hours + 24):
+            ) < now - dt.timedelta(hours=n_hours + 24):
                 self.hourly_consumption_data = []
             else:
                 n_hours = (now - self.last_cons_data_timestamp).total_seconds() / 3600
@@ -291,10 +291,8 @@ class TibberHome:
         if not self.hourly_consumption_data:
             self.hourly_consumption_data = consumption
         else:
-            for _cons in consumption:
-                if _cons in self.hourly_consumption_data:
-                    continue
-                self.hourly_consumption_data.append(_cons)
+            self.hourly_consumption_data = [_cons for _cons in self.hourly_consumption_data if _cons not in consumption]
+            self.hourly_consumption_data.extend(consumption)
 
         _month_cons = 0
         _month_cost = 0
