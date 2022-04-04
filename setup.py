@@ -12,7 +12,7 @@ setup(
     install_requires=[
         "aiohttp>=3.0.6",
         "async_timeout>=1.4.0",
-        "graphql-subscription-manager>=0.4.0",
+        "graphql-subscription-manager==0.4.3",
         "pytz",
         "python-dateutil",
     ],
