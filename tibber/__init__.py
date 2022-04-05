@@ -65,7 +65,9 @@ class Tibber:
         if self.sub_manager is not None:
             return
         self.sub_manager = SubscriptionManager(
-            {"token": self._access_token}, SUB_ENDPOINT, self.user_agent,
+            {"token": self._access_token},
+            SUB_ENDPOINT,
+            self.user_agent,
         )
         self.sub_manager.start()
 
@@ -86,9 +88,10 @@ class Tibber:
         payload = {"query": document, "variables": variable_values or {}}
 
         post_args = {
-            "headers": {"Authorization": "Bearer " + self._access_token,
-                        aiohttp.hdrs.USER_AGENT: self.user_agent,
-                        },
+            "headers": {
+                "Authorization": "Bearer " + self._access_token,
+                aiohttp.hdrs.USER_AGENT: self.user_agent,
+            },
             "data": payload,
         }
         try:
