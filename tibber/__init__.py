@@ -2,6 +2,7 @@
 import asyncio
 import datetime as dt
 import logging
+import json
 
 import aiohttp
 import async_timeout
@@ -47,7 +48,13 @@ class Tibber:
         self._all_home_ids = []
         self._homes = {}
         self.sub_manager = None
-        self.user_agent = "pyTibber"
+        try:
+            user_agent = self.websession._default_headers.get(  # pylint: disable=protected-access
+                aiohttp.hdrs.USER_AGENT, ""
+            )  # will be fixed by aiohttp 4.0
+        except Exception:  # pylint: disable=broad-except
+            user_agent = ""
+        self.user_agent = f"{user_agent} pyTibber/{__version__}"
 
     async def close_connection(self):
         """Close the Tibber connection."""
@@ -58,7 +65,7 @@ class Tibber:
         if self.sub_manager is not None:
             return
         self.sub_manager = SubscriptionManager(
-            f"token={self._access_token}", SUB_ENDPOINT
+            {"token": self._access_token}, SUB_ENDPOINT, self.user_agent,
         )
         self.sub_manager.start()
 
@@ -79,20 +86,11 @@ class Tibber:
         payload = {"query": document, "variables": variable_values or {}}
 
         post_args = {
-            "headers": {"Authorization": "Bearer " + self._access_token},
+            "headers": {"Authorization": "Bearer " + self._access_token,
+                        aiohttp.hdrs.USER_AGENT: self.user_agent,
+                        },
             "data": payload,
         }
-        try:
-            user_agent = self.websession._default_headers.get(  # pylint: disable=protected-access
-                aiohttp.hdrs.USER_AGENT, ""
-            )  # will be fixed by aiohttp 4.0
-            if "pyTibber" not in user_agent:
-                post_args["headers"][
-                    aiohttp.hdrs.USER_AGENT
-                ] = f"{user_agent} {self.user_agent}/{__version__}"
-        except Exception:  # pylint: disable=broad-except
-            pass
-
         try:
             async with async_timeout.timeout(self._timeout):
                 resp = await self.websession.post(API_ENDPOINT, **post_args)
