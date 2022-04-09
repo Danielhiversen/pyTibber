@@ -2,7 +2,6 @@
 import asyncio
 import datetime as dt
 import logging
-import json
 
 import aiohttp
 import async_timeout
