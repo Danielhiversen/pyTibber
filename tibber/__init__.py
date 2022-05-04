@@ -2,7 +2,7 @@
 import asyncio
 import datetime as dt
 import logging
-from typing import Callable, Optional, Union
+from typing import Callable, Optional
 
 import aiohttp
 import async_timeout
@@ -29,9 +29,8 @@ class Tibber:
         self,
         access_token: str = DEMO_TOKEN,
         timeout: int = DEFAULT_TIMEOUT,
-        websession: aiohttp.ClientSession = None,
-        # Union can be replaced with | format in Python 3.10 and higher
-        time_zone: dt.tzinfo = None,
+        websession: Optional[aiohttp.ClientSession] = None,
+        time_zone: Optional[dt.tzinfo] = None,
     ):
         """Initialize the Tibber connection."""
         if websession is None:
@@ -78,7 +77,9 @@ class Tibber:
             return
         await self.sub_manager.stop()
 
-    async def execute(self, document: dict, variable_values=None) -> Union[dict, None]:
+    async def execute(
+        self, document: dict, variable_values: Optional[dict] = None
+    ) -> Optional[dict]:
         """Execute gql."""
         if (res := await self._execute(document, variable_values)) is None:
             return None
@@ -86,7 +87,7 @@ class Tibber:
 
     async def _execute(
         self, document: dict, variable_values: dict = None, retry: int = 2
-    ) -> Union[dict, None]:
+    ) -> Optional[dict]:
         """Execute gql."""
         payload = {"query": document, "variables": variable_values or {}}
 
@@ -116,7 +117,7 @@ class Tibber:
             _LOGGER.error("Received non-compatible response %s", errors)
         return result
 
-    async def update_info(self, *_: Optional[None]) -> None:
+    async def update_info(self, *_) -> None:
         """Update home info async."""
         query = """
         {
@@ -186,7 +187,7 @@ class Tibber:
         """Return list of Tibber homes."""
         return [self.get_home(home_id) for home_id in self.get_home_ids(only_active)]
 
-    def get_home(self, home_id) -> TibberHome:
+    def get_home(self, home_id: str) -> TibberHome:
         """Return an instance of TibberHome for given home id."""
         if home_id not in self._all_home_ids:
             _LOGGER.error("Could not find any Tibber home with id: %s", home_id)
@@ -195,7 +196,7 @@ class Tibber:
             self._homes[home_id] = TibberHome(home_id, self)
         return self._homes[home_id]
 
-    async def send_notification(self, title, message) -> bool:
+    async def send_notification(self, title: str, message: str) -> bool:
         """Send notification."""
         # pylint: disable=consider-using-f-string)
         query = """
