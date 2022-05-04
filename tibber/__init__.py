@@ -31,7 +31,7 @@ class Tibber:
         timeout: int = DEFAULT_TIMEOUT,
         websession: aiohttp.ClientSession = None,
         # Union can be replaced with | format in Python 3.10 and higher
-        time_zone: Union[pytz.BaseTzInfo, str] = None,
+        time_zone: dt.tzinfo = None,
     ):
         """Initialize the Tibber connection."""
         if websession is None:
