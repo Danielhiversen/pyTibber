@@ -2,7 +2,7 @@
 import asyncio
 import datetime as dt
 import logging
-from typing import Callable, Optional
+from typing import Callable, Optional, Dict
 
 import aiohttp
 import async_timeout
@@ -634,12 +634,12 @@ class TibberHome:
         return self._current_price_info
 
     @property
-    def price_total(self) -> dict[dt.datetime, float]:
+    def price_total(self) -> Dict[dt.datetime, float]:
         """Get dictionary with price total, key is date-time."""
         return self._price_info
 
     @property
-    def price_level(self) -> dict[dt.datetime, str]:
+    def price_level(self) -> Dict[dt.datetime, str]:
         """Get dictionary with price level, key is date-time."""
         return self._level_info
 
