@@ -274,8 +274,8 @@ class TibberHome:
         self._home_id: str = home_id
         self._current_price_total: float = None
         self._current_price_info: Dict[str, float] = {}
-        self._price_info: Dict[str, dict] = {}
-        self._level_info: Dict[str, dict] = {}
+        self._price_info: Dict[str, float] = {}
+        self._level_info: Dict[str, str] = {}
         self._rt_power: List[dict] = []
         self.info: Dict[str, dict] = {}
         self._subscription_id: str = None
