@@ -597,7 +597,7 @@ class TibberHome:
     def _process_price_info(self, price_info: dict) -> None:
         """Processes price information retrieved from a GraphQL query.
         The information from the provided dictionary is extracted, then the
-        properties of this TibberHome object is updating with this data.
+        properties of this TibberHome object is updated with this data.
 
         :param price_info: Price info to retrieve data from.
         """
