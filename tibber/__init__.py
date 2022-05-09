@@ -2,7 +2,7 @@
 import asyncio
 import datetime as dt
 import logging
-from typing import Callable, Optional, Dict
+from typing import Callable, Optional, Dict, List, Tuple
 
 import aiohttp
 import async_timeout
@@ -44,15 +44,15 @@ class Tibber:
             )
         else:
             self.websession = websession
-        self._timeout = timeout
-        self._access_token = access_token
-        self.time_zone = time_zone or pytz.utc
-        self._name = None
-        self._user_id = None
-        self._home_ids = []
-        self._all_home_ids = []
-        self._homes = {}
-        self.sub_manager = None
+        self._timeout: int = timeout
+        self._access_token: str = access_token
+        self.time_zone: dt.tzinfo = time_zone or pytz.utc
+        self._name: str = None
+        self._user_id: str = None
+        self._home_ids: List[str] = []
+        self._all_home_ids: List[str] = []
+        self._homes: Dict[str, TibberHome] = {}
+        self.sub_manager: SubscriptionManager = None
         try:
             user_agent = self.websession._default_headers.get(  # pylint: disable=protected-access
                 aiohttp.hdrs.USER_AGENT, ""
@@ -193,21 +193,21 @@ class Tibber:
         return self._name
 
     @property
-    def home_ids(self) -> list[str]:
+    def home_ids(self) -> List[str]:
         """Return list of home ids."""
         return self.get_home_ids(only_active=True)
 
-    def get_home_ids(self, only_active=True) -> list[str]:
+    def get_home_ids(self, only_active=True) -> List[str]:
         """Return list of home ids."""
         if only_active:
             return self._home_ids
         return self._all_home_ids
 
-    def get_homes(self, only_active: bool = True) -> list["TibberHome"]:
+    def get_homes(self, only_active: bool = True) -> List["TibberHome"]:
         """Return list of Tibber homes."""
-        return [self.get_home(home_id) for home_id in self.get_home_ids(only_active)]
+        return [home for home_id in self.get_home_ids(only_active) if (home:=self.get_home(home_id))]
 
-    def get_home(self, home_id: str) -> "TibberHome":
+    def get_home(self, home_id: str) -> Optional["TibberHome"]:
         """Return an instance of TibberHome for given home id."""
         if home_id not in self._all_home_ids:
             _LOGGER.error("Could not find any Tibber home with id: %s", home_id)
@@ -270,24 +270,24 @@ class TibberHome:
         :param tibber_control: The Tibber instance associated with
             this instance of TibberHome.
         """
-        self._tibber_control = tibber_control
-        self._home_id = home_id
-        self._current_price_total = None
-        self._current_price_info = {}
-        self._price_info = {}
-        self._level_info = {}
-        self._rt_power = []
-        self.info = {}
-        self._subscription_id = None
-        self._data = None
-        self.last_data_timestamp = None
+        self._tibber_control: Tibber = tibber_control
+        self._home_id: str = home_id
+        self._current_price_total: float = None
+        self._current_price_info: Dict[str, float] = {}
+        self._price_info: Dict[str, dict] = {}
+        self._level_info: Dict[str, dict] = {}
+        self._rt_power: List[dict] = []
+        self.info: Dict[str, dict] = {}
+        self._subscription_id: str = None
+        self._data: List[dict] = None
+        self.last_data_timestamp: dt.datetime = None
 
-        self.month_cons = None
-        self.month_cost = None
-        self.peak_hour = None
-        self.peak_hour_time = None
-        self.last_cons_data_timestamp = None
-        self.hourly_consumption_data = []
+        self.month_cons: float = None
+        self.month_cost: float = None
+        self.peak_hour: float = None
+        self.peak_hour_time: dt.datetime = None
+        self.last_cons_data_timestamp: dt.datetime = None
+        self.hourly_consumption_data: List[Dict] = []
 
     async def fetch_consumption_data(self) -> None:
         """Update consumption info asynchronously."""
@@ -303,7 +303,7 @@ class TibberHome:
             ) < now - dt.timedelta(hours=n_hours + 24):
                 self.hourly_consumption_data = []
             else:
-                n_hours = (now - self.last_cons_data_timestamp).total_seconds() / 3600
+                n_hours = int((now - self.last_cons_data_timestamp).total_seconds() / 3600)
                 if n_hours < 1:
                     return
                 n_hours = max(2, int(n_hours))
@@ -320,7 +320,7 @@ class TibberHome:
 
         if not consumption:
             _LOGGER.error("Could not find consumption data.")
-            return consumption
+            return None
 
         if not self.hourly_consumption_data:
             self.hourly_consumption_data = consumption
@@ -335,7 +335,7 @@ class TibberHome:
         _month_cons = 0
         _month_cost = 0
         _month_hour_max_month_hour_cons = 0
-        _month_hour_max_month_hour = None
+        _month_hour_max_month_hour: dt.datetime = None
 
         for node in self.hourly_consumption_data:
             _time = parse(node["from"])
@@ -426,7 +426,11 @@ class TibberHome:
             % self._home_id
         )
 
-        self.info = await self._tibber_control.execute(query)
+        if (data:= await self._tibber_control.execute(query)):
+            self.info = data
+        else:
+            # TODO: Error handling? tibber_control.execute returned None.
+            return None
 
     async def update_info_and_price_info(self) -> None:
         """Update home info and all price info asynchronously."""
@@ -514,8 +518,12 @@ class TibberHome:
             % self._home_id
         )
 
-        self.info = await self._tibber_control.execute(query)
-        self._process_price_info(self.info)
+        if (data := await self._tibber_control.execute(query)):
+            self.info = data
+            self._process_price_info(self.info)
+        else:
+            # TODO: Error handling?
+            return None
 
     async def update_current_price_info(self) -> None:
         """Update just the current price info asynchronously."""
@@ -591,8 +599,12 @@ class TibberHome:
         """
             % self.home_id
         )
-        price_info = await self._tibber_control.execute(query)
-        self._process_price_info(price_info)
+        
+        if (price_info := await self._tibber_control.execute(query)):
+            self._process_price_info(price_info)
+        else:
+            # TODO: Error handling?
+            return None
 
     def _process_price_info(self, price_info: dict) -> None:
         """Processes price information retrieved from a GraphQL query.
@@ -622,7 +634,7 @@ class TibberHome:
                 self._level_info[data.get("startsAt")] = data.get("level")
 
     @property
-    def current_price_total(self) -> float:
+    def current_price_total(self) -> Optional[float]:
         """Get current price total."""
         if not self._current_price_info:
             return None
@@ -634,13 +646,13 @@ class TibberHome:
         return self._current_price_info
 
     @property
-    def price_total(self) -> Dict[dt.datetime, float]:
-        """Get dictionary with price total, key is date-time."""
+    def price_total(self) -> Dict[str, float]:
+        """Get dictionary with price total, key is date-time as a string."""
         return self._price_info
 
     @property
-    def price_level(self) -> Dict[dt.datetime, str]:
-        """Get dictionary with price level, key is date-time."""
+    def price_level(self) -> Dict[str, str]:
+        """Get dictionary with price level, key is date-time as a string."""
         return self._level_info
 
     @property
@@ -817,7 +829,7 @@ class TibberHome:
 
     async def get_historic_data(
         self, n_data: int, resolution: str = RESOLUTION_HOURLY
-    ) -> list[dict]:
+    ) -> Optional[List[dict]]:
         """Get historic data.
 
         :param n_data: The number of nodes to get from history. e.g. 5 would give 5 nodes
@@ -849,18 +861,18 @@ class TibberHome:
 
         if not (data := await self._tibber_control.execute(query)):
             _LOGGER.error("Could not find the data.")
-            return
+            return None
         data = data["viewer"]["home"]["consumption"]
         if data is None:
             self._data = []
-            return
+            return None
         self._data = data["nodes"]
         return self._data
 
-    def current_price_data(self) -> tuple[float, float, dt.datetime]:
+    def current_price_data(self) -> Tuple[float, str, dt.datetime]:
         """Get current price."""
         now = dt.datetime.now(self._tibber_control.time_zone)
-        res = None, None, None
+        res: Tuple[float, str, dt.datetime] = None, None, None
         for key, price_total in self.price_total.items():
             price_time = parse(key).astimezone(self._tibber_control.time_zone)
             time_diff = (now - price_time).total_seconds() / 60
@@ -873,16 +885,16 @@ class TibberHome:
     def current_attributes(self) -> dict:
         """Get current attributes."""
         # pylint: disable=too-many-locals
-        max_price = 0
-        min_price = 10000
-        sum_price = 0
-        off_peak_1 = 0
-        peak = 0
-        off_peak_2 = 0
-        num1 = 0
-        num0 = 0
-        num2 = 0
-        num = 0
+        max_price = 0.0
+        min_price = 10000.0
+        sum_price = 0.0
+        off_peak_1 = 0.0
+        peak = 0.0
+        off_peak_2 = 0.0
+        num1 = 0.0
+        num0 = 0.0
+        num2 = 0.0
+        num = 0.0
         now = dt.datetime.now(self._tibber_control.time_zone)
         for key, price_total in self.price_total.items():
             price_time = parse(key).astimezone(self._tibber_control.time_zone)
