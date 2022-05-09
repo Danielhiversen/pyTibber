@@ -62,13 +62,15 @@ class Tibber:
         self.user_agent = f"{user_agent} pyTibber/{__version__}"
 
     async def close_connection(self) -> None:
-        """Close the Tibber connection. This method simply closes the websession used by the object."""
+        """Close the Tibber connection.
+        This method simply closes the websession used by the object."""
         await self.websession.close()
 
     async def rt_connect(self) -> None:
         """Start the GraphQL subscription manager for real time data.
-        This method instantiates the graphql_subscription_manager.SubscriptionManager class which
-        authenticates the user with the provided access token, and then starts the SubscriptionManager.
+        This method instantiates the graphql_subscription_manager.SubscriptionManager
+        class which authenticates the user with the provided access token, and then
+        starts the SubscriptionManager.
         """
         if self.sub_manager is not None:
             return
@@ -265,7 +267,8 @@ class TibberHome:
         """Initialize the Tibber home class.
 
         :param home_id: The ID of the home.
-        :param tibber_control: The Tibber instance associated with this instance of TibberHome.
+        :param tibber_control: The Tibber instance associated with
+            this instance of TibberHome.
         """
         self._tibber_control = tibber_control
         self._home_id = home_id
@@ -553,7 +556,8 @@ class TibberHome:
             self._current_price_info = price_info
 
     async def update_price_info(self) -> None:
-        """Update the current price info, todays price info and tomorrows price info asynchronously."""
+        """Update the current price info, todays price info
+        and tomorrows price info asynchronously."""
         # pylint: disable=consider-using-f-string)
         query = (
             """
@@ -817,8 +821,9 @@ class TibberHome:
         """Get historic data.
 
         :param n_data: The number of nodes to get from history. e.g. 5 would give 5 nodes
-                     and resolution = hourly would give the 5 last hours of historic data
-        :param resolution: The resolution of the data. Can be HOURLY, DAILY, WEEKLY, MONTHLY or ANNUAL
+            and resolution = hourly would give the 5 last hours of historic data
+        :param resolution: The resolution of the data. Can be HOURLY,
+            DAILY, WEEKLY, MONTHLY or ANNUAL
         """
         # pylint: disable=consider-using-f-string)
         query = """
