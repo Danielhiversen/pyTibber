@@ -47,8 +47,8 @@ class Tibber:
         self._timeout: int = timeout
         self._access_token: str = access_token
         self.time_zone: dt.tzinfo = time_zone or pytz.utc
-        self._name: str = None
-        self._user_id: str = None
+        self._name: str = ""
+        self._user_id: str = ""
         self._home_ids: List[str] = []
         self._all_home_ids: List[str] = []
         self._homes: Dict[str, TibberHome] = {}
@@ -272,21 +272,21 @@ class TibberHome:
         """
         self._tibber_control: Tibber = tibber_control
         self._home_id: str = home_id
-        self._current_price_total: float = None
+        self._current_price_total: float = 0.0
         self._current_price_info: Dict[str, float] = {}
         self._price_info: Dict[str, float] = {}
         self._level_info: Dict[str, str] = {}
         self._rt_power: List[dict] = []
         self.info: Dict[str, dict] = {}
-        self._subscription_id: str = None
-        self._data: List[dict] = None
-        self.last_data_timestamp: dt.datetime = None
+        self._subscription_id: str = ""
+        self._data: List[dict] = []
+        self.last_data_timestamp: dt.datetime = dt.datetime.min
 
-        self.month_cons: float = None
-        self.month_cost: float = None
-        self.peak_hour: float = None
-        self.peak_hour_time: dt.datetime = None
-        self.last_cons_data_timestamp: dt.datetime = None
+        self.month_cons: float = 0.0
+        self.month_cost: float = 0.0
+        self.peak_hour: float = 0.0
+        self.peak_hour_time: dt.datetime = dt.datetime.min
+        self.last_cons_data_timestamp: dt.datetime = dt.datetime.min
         self.hourly_consumption_data: List[Dict] = []
 
     async def fetch_consumption_data(self) -> None:
@@ -335,7 +335,7 @@ class TibberHome:
         _month_cons = 0
         _month_cost = 0
         _month_hour_max_month_hour_cons = 0
-        _month_hour_max_month_hour: dt.datetime = None
+        _month_hour_max_month_hour: dt.datetime = dt.datetime.min
 
         for node in self.hourly_consumption_data:
             _time = parse(node["from"])
@@ -869,14 +869,14 @@ class TibberHome:
         self._data = data["nodes"]
         return self._data
 
-    def current_price_data(self) -> Tuple[float, str, dt.datetime]:
+    def current_price_data(self) -> Optional[Tuple[float, str, dt.datetime]]:
         """Get current price."""
         now = dt.datetime.now(self._tibber_control.time_zone)
-        res: Tuple[float, str, dt.datetime] = None, None, None
+        res: Optional[Tuple[float, str, dt.datetime]] = None
         for key, price_total in self.price_total.items():
             price_time = parse(key).astimezone(self._tibber_control.time_zone)
             time_diff = (now - price_time).total_seconds() / 60
-            if not self.last_data_timestamp or price_time > self.last_data_timestamp:
+            if price_time > self.last_data_timestamp:
                 self.last_data_timestamp = price_time
             if 0 <= time_diff < 60:
                 res = round(price_total, 3), self.price_level[key], price_time
