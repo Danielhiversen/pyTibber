@@ -205,7 +205,11 @@ class Tibber:
 
     def get_homes(self, only_active: bool = True) -> List["TibberHome"]:
         """Return list of Tibber homes."""
-        return [home for home_id in self.get_home_ids(only_active) if (home:=self.get_home(home_id))]
+        return [
+            home
+            for home_id in self.get_home_ids(only_active)
+            if (home := self.get_home(home_id))
+        ]
 
     def get_home(self, home_id: str) -> Optional["TibberHome"]:
         """Return an instance of TibberHome for given home id."""
@@ -303,7 +307,9 @@ class TibberHome:
             ) < now - dt.timedelta(hours=n_hours + 24):
                 self.hourly_consumption_data = []
             else:
-                n_hours = int((now - self.last_cons_data_timestamp).total_seconds() / 3600)
+                n_hours = int(
+                    (now - self.last_cons_data_timestamp).total_seconds() / 3600
+                )
                 if n_hours < 1:
                     return
                 n_hours = max(2, int(n_hours))
@@ -426,7 +432,7 @@ class TibberHome:
             % self._home_id
         )
 
-        if (data:= await self._tibber_control.execute(query)):
+        if data := await self._tibber_control.execute(query):
             self.info = data
         else:
             # TODO: Error handling? tibber_control.execute returned None.
@@ -518,7 +524,7 @@ class TibberHome:
             % self._home_id
         )
 
-        if (data := await self._tibber_control.execute(query)):
+        if data := await self._tibber_control.execute(query):
             self.info = data
             self._process_price_info(self.info)
         else:
@@ -599,8 +605,8 @@ class TibberHome:
         """
             % self.home_id
         )
-        
-        if (price_info := await self._tibber_control.execute(query)):
+
+        if price_info := await self._tibber_control.execute(query):
             self._process_price_info(price_info)
         else:
             # TODO: Error handling?
