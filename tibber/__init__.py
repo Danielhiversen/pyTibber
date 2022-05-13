@@ -8,7 +8,7 @@ import aiohttp
 import async_timeout
 import pytz
 from dateutil.parser import parse
-from graphql_subscription_manager import SubscriptionManager
+from graphql_subscription_manager import SubscriptionManager # type: ignore
 
 from .const import RESOLUTION_HOURLY, __version__
 
