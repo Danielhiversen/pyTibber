@@ -434,9 +434,6 @@ class TibberHome:
 
         if data := await self._tibber_control.execute(query):
             self.info = data
-        else:
-            # TODO: Error handling? tibber_control.execute returned None.
-            return None
 
     async def update_info_and_price_info(self) -> None:
         """Update home info and all price info asynchronously."""
@@ -527,9 +524,6 @@ class TibberHome:
         if data := await self._tibber_control.execute(query):
             self.info = data
             self._process_price_info(self.info)
-        else:
-            # TODO: Error handling?
-            return None
 
     async def update_current_price_info(self) -> None:
         """Update just the current price info asynchronously."""
@@ -608,9 +602,6 @@ class TibberHome:
 
         if price_info := await self._tibber_control.execute(query):
             self._process_price_info(price_info)
-        else:
-            # TODO: Error handling?
-            return None
 
     def _process_price_info(self, price_info: dict) -> None:
         """Processes price information retrieved from a GraphQL query.
