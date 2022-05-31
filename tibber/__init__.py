@@ -47,8 +47,8 @@ class Tibber:
         self._timeout: int = timeout
         self._access_token: str = access_token
         self.time_zone: dt.tzinfo = time_zone or pytz.utc
-        self._name: str = ""
-        self._user_id: str = ""
+        self._name: Optional[str] = None
+        self._user_id: Optional[str] = None
         self._home_ids: List[str] = []
         self._all_home_ids: List[str] = []
         self._homes: Dict[str, TibberHome] = {}
@@ -183,12 +183,12 @@ class Tibber:
             self._home_ids += [home_id]
 
     @property
-    def user_id(self) -> str:
+    def user_id(self) -> Optional[str]:
         """Return user id of user."""
         return self._user_id
 
     @property
-    def name(self) -> str:
+    def name(self) -> Optional[str]:
         """Return name of user."""
         return self._name
 
@@ -276,21 +276,21 @@ class TibberHome:
         """
         self._tibber_control: Tibber = tibber_control
         self._home_id: str = home_id
-        self._current_price_total: float = 0.0
+        self._current_price_total: Optional[float] = None
         self._current_price_info: Dict[str, float] = {}
         self._price_info: Dict[str, float] = {}
         self._level_info: Dict[str, str] = {}
-        self._rt_power: List[dict] = []
+        self._rt_power: List[Tuple[dt.datetime, float]] = []
         self.info: Dict[str, dict] = {}
-        self._subscription_id: str = ""
-        self._data: List[dict] = []
-        self.last_data_timestamp: dt.datetime = dt.datetime.min
+        self._subscription_id: Optional[str] = None
+        self._data: Optional[List[dict]] = None
+        self.last_data_timestamp: Optional[dt.datetime] = None
 
-        self.month_cons: float = 0.0
-        self.month_cost: float = 0.0
-        self.peak_hour: float = 0.0
-        self.peak_hour_time: dt.datetime = dt.datetime.min
-        self.last_cons_data_timestamp: dt.datetime = dt.datetime.min
+        self.month_cons: Optional[float] = None
+        self.month_cost: Optional[float] = None
+        self.peak_hour: Optional[float] = None
+        self.peak_hour_time: Optional[dt.datetime] = None
+        self.last_cons_data_timestamp: Optional[dt.datetime] = None
         self.hourly_consumption_data: List[Dict] = []
 
     async def fetch_consumption_data(self) -> None:
@@ -307,12 +307,14 @@ class TibberHome:
             ) < now - dt.timedelta(hours=n_hours + 24):
                 self.hourly_consumption_data = []
             else:
-                n_hours = int(
-                    (now - self.last_cons_data_timestamp).total_seconds() / 3600
-                )
-                if n_hours < 1:
-                    return
-                n_hours = max(2, int(n_hours))
+                # self.last_cons_data_timestamp may not be defined at this point. 
+                if self.last_cons_data_timestamp:
+                    n_hours = int(
+                        (now - self.last_cons_data_timestamp).total_seconds() / 3600
+                    )
+                    if n_hours < 1:
+                        return
+                    n_hours = max(2, int(n_hours))
         else:
             if self.last_cons_data_timestamp is not None and (
                 now - self.last_cons_data_timestamp
@@ -341,7 +343,7 @@ class TibberHome:
         _month_cons = 0
         _month_cost = 0
         _month_hour_max_month_hour_cons = 0
-        _month_hour_max_month_hour: dt.datetime = dt.datetime.min
+        _month_hour_max_month_hour: Optional[dt.datetime] = None
 
         for node in self.hourly_consumption_data:
             _time = parse(node["from"])
@@ -873,7 +875,7 @@ class TibberHome:
         for key, price_total in self.price_total.items():
             price_time = parse(key).astimezone(self._tibber_control.time_zone)
             time_diff = (now - price_time).total_seconds() / 60
-            if price_time > self.last_data_timestamp:
+            if not self.last_data_timestamp or price_time > self.last_data_timestamp:
                 self.last_data_timestamp = price_time
             if 0 <= time_diff < 60:
                 res = round(price_total, 3), self.price_level[key], price_time
