@@ -4,11 +4,12 @@ Tests for pyTibber
 """
 import os
 import sys
-import pytest
 
+import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../")))
 import aiohttp  # noqa: E402
+
 import tibber  # noqa: E402
 
 

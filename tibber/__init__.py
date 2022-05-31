@@ -2,7 +2,7 @@
 import asyncio
 import datetime as dt
 import logging
-from typing import Callable, Optional, Dict, List, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import aiohttp
 import async_timeout
