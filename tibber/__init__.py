@@ -307,9 +307,9 @@ class TibberHome:
             ) < now - dt.timedelta(hours=n_hours + 24):
                 self.hourly_consumption_data = []
             else:
-                seconds_diff = (now - self.last_cons_data_timestamp).total_seconds()
+                seconds_diff = (now - self.last_cons_data_timestamp).total_seconds()  # type: ignore[operator]
                 n_hours = int(
-                    seconds_diff / 3600  # type: ignore[operator]
+                    seconds_diff / 3600
                 )
                 if n_hours < 1:
                     return
