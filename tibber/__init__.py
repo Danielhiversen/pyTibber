@@ -308,7 +308,7 @@ class TibberHome:
                 self.hourly_consumption_data = []
             else:
                 n_hours = int(
-                    (now - self.last_cons_data_timestamp).total_seconds() / 3600 # type: ignore[operator]
+                    (now - self.last_cons_data_timestamp).total_seconds() / 3600  # type: ignore[operator]
                 )
                 if n_hours < 1:
                     return
