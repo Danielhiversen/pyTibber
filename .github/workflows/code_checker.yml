@@ -33,7 +33,7 @@ jobs:
 
       - name: Pylint Code Linter
         run: |
-            pylint tibber
+            pylint tibber --max-line-length 120
 
       - name: Pytest
         run: |
