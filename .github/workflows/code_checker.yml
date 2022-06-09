@@ -15,19 +15,16 @@ jobs:
           - "3.9"
           - "3.10"
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python-version }}
+          cache: 'pip'
 
-      - uses: actions/cache@v2
-        with:
-          path: ~/.cache/pip
-          key: pip_cache
       - name: Install depencency
         run: |
-            pip install gql aiohttp async_timeout graphql-subscription-manager pytz python-dateutil
+            pip install -r requirements.txt
             pip install dlint flake8 flake8-bugbear flake8-deprecated flake8-executable isort pylint pytest pytest-cov
       - name: Flake8 Code Linter
         run: |
