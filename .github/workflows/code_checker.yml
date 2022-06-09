@@ -15,17 +15,20 @@ jobs:
           - "3.9"
           - "3.10"
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
-      - run: pip install -r requirements.txt
+          cache: 'pip'
 
+      - name: Install depencency
+        run: |
+            pip install -r requirements.txt
+            pip install dlint flake8 flake8-bugbear flake8-deprecated flake8-executable isort pylint pytest pytest-cov pytest-asyncio
       - name: Flake8 Code Linter
         run: |
-            flake8 tibber/ --max-line-length=120  --extend-ignore=S105,S110
+            flake8 tibber/ 
 
       - name: isort
         run: |
