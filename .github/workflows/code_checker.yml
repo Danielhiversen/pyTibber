@@ -29,7 +29,6 @@ jobs:
       - name: Flake8 Code Linter
         run: |
             flake8 tibber/ 
-
       - name: isort
         run: |
             isort **/*.py
