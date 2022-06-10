@@ -41,4 +41,4 @@ jobs:
 
       - name: MyPy
         run: |
-            mypy --follow-imports silent --ignore-missing-imports tibber
+            mypy tibber
