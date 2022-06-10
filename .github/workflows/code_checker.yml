@@ -25,7 +25,7 @@ jobs:
       - name: Install depencency
         run: |
             pip install -r requirements.txt
-            pip install dlint flake8 flake8-bugbear flake8-deprecated flake8-executable isort pylint pytest pytest-cov pytest-asyncio
+            pip install dlint flake8 flake8-bugbear flake8-deprecated flake8-executable isort pylint pytest pytest-cov pytest-asyncio mypy
       - name: Flake8 Code Linter
         run: |
             flake8 tibber/ 
