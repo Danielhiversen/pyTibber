@@ -1,6 +1,6 @@
 import os
-from setuptools import setup
 
+from setuptools import setup
 
 consts = {}
 with open(os.path.join("tibber", "const.py"), "r") as fp:
