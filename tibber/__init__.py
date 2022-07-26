@@ -283,7 +283,6 @@ class TibberHome:
         self._rt_power: List[Tuple[dt.datetime, float]] = []
         self.info: Dict[str, dict] = {}
         self._subscription_id: Optional[str] = None
-        self._data: Optional[List[dict]] = None
         self.last_data_timestamp: Optional[dt.datetime] = None
 
         self.month_cons: Optional[float] = None
@@ -825,7 +824,7 @@ class TibberHome:
         )
 
     async def get_historic_data(
-        self, n_data: int, resolution: str = RESOLUTION_HOURLY
+        self, n_data: int, resolution: str = RESOLUTION_HOURLY, production: bool = False
     ) -> Optional[List[dict]]:
         """Get historic data.
 
@@ -833,18 +832,19 @@ class TibberHome:
             and resolution = hourly would give the 5 last hours of historic data
         :param resolution: The resolution of the data. Can be HOURLY,
             DAILY, WEEKLY, MONTHLY or ANNUAL
+        :param production: True to get production data instead of consumption
         """
-        # pylint: disable=consider-using-f-string)
+        cons_or_prod_str = "production" if production else "consumption"
+        # pylint: disable=consider-using-f-string
         query = """
                 {{
                   viewer {{
-                    home(id: "{}") {{
-                      consumption(resolution: {}, last: {}) {{
+                    home(id: "{0}") {{
+                      {1}(resolution: {2}, last: {3}) {{
                         nodes {{
                           from
-                          totalCost
-                          cost
-                          consumption
+                          {4}
+                          {1}
                         }}
                       }}
                     }}
@@ -852,19 +852,19 @@ class TibberHome:
                 }}
           """.format(
             self.home_id,
+            cons_or_prod_str,
             resolution,
             n_data,
+            "profit" if production else "totalCost cost",
         )
 
         if not (data := await self._tibber_control.execute(query)):
             _LOGGER.error("Could not find the data.")
             return None
-        data = data["viewer"]["home"]["consumption"]
+        data = data["viewer"]["home"][cons_or_prod_str]
         if data is None:
-            self._data = []
             return None
-        self._data = data["nodes"]
-        return self._data
+        return data["nodes"]
 
     def current_price_data(self) -> Optional[Tuple[float, str, dt.datetime]]:
         """Get current price."""
