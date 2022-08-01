@@ -19,6 +19,8 @@ SUB_ENDPOINT = "wss://api.tibber.com/v1-beta/gql/subscriptions"
 
 _LOGGER = logging.getLogger(__name__)
 
+# pylint: disable=too-many-lines
+
 
 class Tibber:
     """Class to communicate with the Tibber api."""
@@ -261,11 +263,32 @@ class Tibber:
             tasks.append(home.fetch_consumption_data())
         await asyncio.gather(*tasks)
 
+    async def fetch_production_data_active_homes(self) -> None:
+        """Fetch production data for active homes."""
+        tasks = []
+        for home in self.get_homes(only_active=True):
+            if home.has_production:
+                tasks.append(home.fetch_production_data())
+        await asyncio.gather(*tasks)
+
 
 class TibberHome:
     """Instance of Tibber home."""
 
     # pylint: disable=too-many-instance-attributes, too-many-public-methods
+
+    class HourlyData:
+        """Holds hourly data for consumption or production."""
+
+        # pylint: disable=too-few-public-methods
+        def __init__(self, production: bool = False):
+            self.is_production: bool = production
+            self.month_energy: Optional[float] = None
+            self.month_money: Optional[float] = None
+            self.peak_hour: Optional[float] = None
+            self.peak_hour_time: Optional[dt.datetime] = None
+            self.last_data_timestamp: Optional[dt.datetime] = None
+            self.data: List[Dict] = []
 
     def __init__(self, home_id: str, tibber_control: Tibber):
         """Initialize the Tibber home class.
@@ -283,90 +306,135 @@ class TibberHome:
         self._rt_power: List[Tuple[dt.datetime, float]] = []
         self.info: Dict[str, dict] = {}
         self._subscription_id: Optional[str] = None
-        self._data: Optional[List[dict]] = None
         self.last_data_timestamp: Optional[dt.datetime] = None
 
-        self.month_cons: Optional[float] = None
-        self.month_cost: Optional[float] = None
-        self.peak_hour: Optional[float] = None
-        self.peak_hour_time: Optional[dt.datetime] = None
-        self.last_cons_data_timestamp: Optional[dt.datetime] = None
-        self.hourly_consumption_data: List[Dict] = []
+        self._hourly_consumption_data: TibberHome.HourlyData = TibberHome.HourlyData()
+        self._hourly_production_data: TibberHome.HourlyData = TibberHome.HourlyData(
+            production=True
+        )
 
-    async def fetch_consumption_data(self) -> None:
-        """Update consumption info asynchronously."""
-        # pylint: disable=too-many-branches
+    async def _fetch_data(self, hourly_data: "TibberHome.HourlyData") -> None:
+        """Update hourly consumption or production data asynchronously."""
+        # pylint: disable=too-many-branches,too-many-statements,too-many-locals
 
         now = dt.datetime.utcnow().replace(tzinfo=dt.timezone.utc)
         local_now = now.astimezone(self._tibber_control.time_zone)
         n_hours = 30 * 24
 
         if self.has_real_time_consumption:
-            if not self.hourly_consumption_data or parse(
-                self.hourly_consumption_data[0]["from"]
+            if not hourly_data.data or parse(
+                hourly_data.data[0]["from"]
             ) < now - dt.timedelta(hours=n_hours + 24):
-                self.hourly_consumption_data = []
+                hourly_data.data = []
             else:
-                time_diff = now - self.last_cons_data_timestamp  # type: ignore[operator]
+                time_diff = now - hourly_data.last_data_timestamp
                 seconds_diff = time_diff.total_seconds()
                 n_hours = int(seconds_diff / 3600)
                 if n_hours < 1:
                     return
                 n_hours = max(2, int(n_hours))
         else:
-            if self.last_cons_data_timestamp is not None and (
-                now - self.last_cons_data_timestamp
+            if hourly_data.last_data_timestamp is not None and (
+                now - hourly_data.last_data_timestamp
             ) < dt.timedelta(hours=24):
                 return
-            self.hourly_consumption_data = []
+            hourly_data.data = []
 
-        consumption = await self.get_historic_data(
-            n_hours, resolution=RESOLUTION_HOURLY
+        data = await self.get_historic_data(
+            n_hours, resolution=RESOLUTION_HOURLY, production=hourly_data.is_production
         )
 
-        if not consumption:
-            _LOGGER.error("Could not find consumption data.")
+        if hourly_data.is_production:
+            direction_name = "production"
+            money_name = "profit"
+        else:
+            direction_name = "consumption"
+            money_name = "cost"
+
+        if not data:
+            _LOGGER.error("Could not find %s data.", direction_name)
             return None
 
-        if not self.hourly_consumption_data:
-            self.hourly_consumption_data = consumption
+        if not hourly_data.data:
+            hourly_data.data = data
         else:
-            self.hourly_consumption_data = [
-                _cons
-                for _cons in self.hourly_consumption_data
-                if _cons not in consumption
+            hourly_data.data = [
+                entry for entry in hourly_data.data if entry not in data
             ]
-            self.hourly_consumption_data.extend(consumption)
+            hourly_data.data.extend(data)
 
-        _month_cons = 0
-        _month_cost = 0
-        _month_hour_max_month_hour_cons = 0
+        _month_energy = 0
+        _month_money = 0
+        _month_hour_max_month_hour_energy = 0
         _month_hour_max_month_hour: Optional[dt.datetime] = None
 
-        for node in self.hourly_consumption_data:
+        for node in hourly_data.data:
             _time = parse(node["from"])
             if _time.month != local_now.month or _time.year != local_now.year:
                 continue
-            if node.get("consumption") is None:
+            if (energy := node.get(direction_name)) is None:
                 continue
 
             if (
-                self.last_cons_data_timestamp is None
-                or _time + dt.timedelta(hours=1) > self.last_cons_data_timestamp
+                hourly_data.last_data_timestamp is None
+                or _time + dt.timedelta(hours=1) > hourly_data.last_data_timestamp
             ):
-                self.last_cons_data_timestamp = _time + dt.timedelta(hours=1)
-            if node["consumption"] > _month_hour_max_month_hour_cons:
-                _month_hour_max_month_hour_cons = node["consumption"]
+                hourly_data.last_data_timestamp = _time + dt.timedelta(hours=1)
+            if energy > _month_hour_max_month_hour_energy:
+                _month_hour_max_month_hour_energy = energy
                 _month_hour_max_month_hour = _time
-            _month_cons += node["consumption"]
+            _month_energy += energy
 
-            if node.get("cost") is not None:
-                _month_cost += node["cost"]
+            if node.get(money_name) is not None:
+                _month_money += node[money_name]
 
-        self.month_cons = round(_month_cons, 2)
-        self.month_cost = round(_month_cost, 2)
-        self.peak_hour = round(_month_hour_max_month_hour_cons, 2)
-        self.peak_hour_time = _month_hour_max_month_hour
+        hourly_data.month_energy = round(_month_energy, 2)
+        hourly_data.month_money = round(_month_money, 2)
+        hourly_data.peak_hour = round(_month_hour_max_month_hour_energy, 2)
+        hourly_data.peak_hour_time = _month_hour_max_month_hour
+
+    async def fetch_consumption_data(self) -> None:
+        """Update consumption info asynchronously."""
+        return await self._fetch_data(self._hourly_consumption_data)
+
+    async def fetch_production_data(self) -> None:
+        """Update consumption info asynchronously."""
+        return await self._fetch_data(self._hourly_production_data)
+
+    @property
+    def month_cons(self) -> Optional[float]:
+        """Get consumption for current month."""
+        return self._hourly_consumption_data.month_energy
+
+    @property
+    def month_cost(self) -> Optional[float]:
+        """Get total cost for current month."""
+        return self._hourly_consumption_data.month_money
+
+    @property
+    def peak_hour(self) -> Optional[float]:
+        """Get consumption during peak hour for the current month."""
+        return self._hourly_consumption_data.peak_hour
+
+    @property
+    def peak_hour_time(self) -> Optional[dt.datetime]:
+        """Get the time for the peak consumption during the current month."""
+        return self._hourly_consumption_data.peak_hour_time
+
+    @property
+    def last_cons_data_timestamp(self) -> Optional[dt.datetime]:
+        """Get last consumption data timestampt."""
+        return self._hourly_consumption_data.last_data_timestamp
+
+    @property
+    def hourly_consumption_data(self) -> List[Dict]:
+        """Get consumption data for the last 30 days."""
+        return self._hourly_consumption_data.data
+
+    @property
+    def hourly_production_data(self) -> List[Dict]:
+        """Get production data for the last 30 days."""
+        return self._hourly_production_data.data
 
     async def update_info(self) -> None:
         """Update home info and the current price info asynchronously."""
@@ -675,6 +743,16 @@ class TibberHome:
             return False
 
     @property
+    def has_production(self) -> bool:
+        """Return true if the home has a production metering point."""
+        try:
+            return bool(
+                self.info["viewer"]["home"]["meteringPointData"]["productionEan"]
+            )
+        except (KeyError, TypeError):
+            return False
+
+    @property
     def address1(self) -> str:
         """Return the home adress1."""
         try:
@@ -792,9 +870,12 @@ class TibberHome:
                     + power * (3600 - (_time.minute * 60 + _time.second)) / 3600,
                     3,
                 )
-                if self.peak_hour and current_hour > self.peak_hour:
-                    self.peak_hour = round(current_hour, 2)
-                    self.peak_hour_time = _time
+                if (
+                    self._hourly_consumption_data.peak_hour
+                    and current_hour > self._hourly_consumption_data.peak_hour
+                ):
+                    self._hourly_consumption_data.peak_hour = round(current_hour, 2)
+                    self._hourly_consumption_data.peak_hour_time = _time
             return data
 
         def callback_add_extra_data(data: dict) -> None:
@@ -825,7 +906,7 @@ class TibberHome:
         )
 
     async def get_historic_data(
-        self, n_data: int, resolution: str = RESOLUTION_HOURLY
+        self, n_data: int, resolution: str = RESOLUTION_HOURLY, production: bool = False
     ) -> Optional[List[dict]]:
         """Get historic data.
 
@@ -833,18 +914,19 @@ class TibberHome:
             and resolution = hourly would give the 5 last hours of historic data
         :param resolution: The resolution of the data. Can be HOURLY,
             DAILY, WEEKLY, MONTHLY or ANNUAL
+        :param production: True to get production data instead of consumption
         """
-        # pylint: disable=consider-using-f-string)
+        cons_or_prod_str = "production" if production else "consumption"
+        # pylint: disable=consider-using-f-string
         query = """
                 {{
                   viewer {{
-                    home(id: "{}") {{
-                      consumption(resolution: {}, last: {}) {{
+                    home(id: "{0}") {{
+                      {1}(resolution: {2}, last: {3}) {{
                         nodes {{
                           from
-                          totalCost
-                          cost
-                          consumption
+                          {4}
+                          {1}
                         }}
                       }}
                     }}
@@ -852,19 +934,19 @@ class TibberHome:
                 }}
           """.format(
             self.home_id,
+            cons_or_prod_str,
             resolution,
             n_data,
+            "profit" if production else "totalCost cost",
         )
 
         if not (data := await self._tibber_control.execute(query)):
             _LOGGER.error("Could not find the data.")
             return None
-        data = data["viewer"]["home"]["consumption"]
+        data = data["viewer"]["home"][cons_or_prod_str]
         if data is None:
-            self._data = []
             return None
-        self._data = data["nodes"]
-        return self._data
+        return data["nodes"]
 
     def current_price_data(self) -> Optional[Tuple[float, str, dt.datetime]]:
         """Get current price."""
