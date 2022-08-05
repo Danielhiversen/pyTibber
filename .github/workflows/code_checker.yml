@@ -35,10 +35,10 @@ jobs:
       - name: Pylint Code Linter
         run: |
             pylint tibber
+      - name: MyPy
+        run: |
+            mypy tibber
       - name: Pytest
         run: |
             py.test --cov=tibber --cov=tibber test/test.py
 
-      - name: MyPy
-        run: |
-            mypy tibber

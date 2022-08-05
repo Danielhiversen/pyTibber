@@ -322,9 +322,12 @@ class TibberHome:
         n_hours = 30 * 24
 
         if self.has_real_time_consumption:
-            if not hourly_data.data or parse(
-                hourly_data.data[0]["from"]
-            ) < now - dt.timedelta(hours=n_hours + 24):
+            if (
+                not hourly_data.data
+                or hourly_data.last_data_timestamp is None
+                or parse(hourly_data.data[0]["from"])
+                < now - dt.timedelta(hours=n_hours + 24)
+            ):
                 hourly_data.data = []
             else:
                 time_diff = now - hourly_data.last_data_timestamp

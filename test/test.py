@@ -28,7 +28,7 @@ async def test_tibber():
         await tibber_connection.update_info()
 
         assert tibber_connection.name == "Arya Stark"
-        assert len(tibber_connection.get_homes()) == 1
+        assert len(tibber_connection.get_homes(only_active=False)) == 1
 
         assert tibber_connection.get_home("INVALID_KEY") is None
 
@@ -63,14 +63,11 @@ async def test_tibber():
                 assert home.home_id == "cc83e83e-8cbf-4595-9bf7-c3cf192f7d9c"
                 assert home.address1 == "Winterfell Castle 1"
                 assert home.country is None
-                assert home.price_unit == "NOK/kWh"
-                assert home.has_real_time_consumption
 
         assert k == 1
 
-        assert len(tibber_connection.get_homes()) == 1
+        assert len(tibber_connection.get_homes(only_active=False)) == 1
         await tibber_connection.update_info()
-        assert len(tibber_connection.get_homes()) == 1
 
 
 @pytest.mark.asyncio
