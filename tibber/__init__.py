@@ -205,7 +205,7 @@ class Tibber:
             return self._home_ids
         return self._all_home_ids
 
-    def get_homes(self, only_active: bool = True) -> list["TibberHome"]:
+    def get_homes(self, only_active: bool = True) -> list[TibberHome]:
         """Return list of Tibber homes."""
         return [
             home
@@ -213,7 +213,7 @@ class Tibber:
             if (home := self.get_home(home_id))
         ]
 
-    def get_home(self, home_id: str) -> Optional["TibberHome"]:
+    def get_home(self, home_id: str) -> Optional[TibberHome]:
         """Return an instance of TibberHome for given home id."""
         if home_id not in self._all_home_ids:
             _LOGGER.error("Could not find any Tibber home with id: %s", home_id)
