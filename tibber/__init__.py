@@ -2,7 +2,7 @@
 import asyncio
 import datetime as dt
 import logging
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Optional
 
 import aiohttp
 import async_timeout
@@ -51,9 +51,9 @@ class Tibber:
         self.time_zone: dt.tzinfo = time_zone or pytz.utc
         self._name: Optional[str] = None
         self._user_id: Optional[str] = None
-        self._home_ids: List[str] = []
-        self._all_home_ids: List[str] = []
-        self._homes: Dict[str, TibberHome] = {}
+        self._home_ids: list[str] = []
+        self._all_home_ids: list[str] = []
+        self._homes: dict[str, TibberHome] = {}
         self.sub_manager: SubscriptionManager = None
         try:
             user_agent = self.websession._default_headers.get(  # pylint: disable=protected-access
@@ -195,17 +195,17 @@ class Tibber:
         return self._name
 
     @property
-    def home_ids(self) -> List[str]:
+    def home_ids(self) -> list[str]:
         """Return list of home ids."""
         return self.get_home_ids(only_active=True)
 
-    def get_home_ids(self, only_active=True) -> List[str]:
+    def get_home_ids(self, only_active=True) -> list[str]:
         """Return list of home ids."""
         if only_active:
             return self._home_ids
         return self._all_home_ids
 
-    def get_homes(self, only_active: bool = True) -> List["TibberHome"]:
+    def get_homes(self, only_active: bool = True) -> list["TibberHome"]:
         """Return list of Tibber homes."""
         return [
             home
@@ -283,7 +283,7 @@ class HourlyData:
         self.peak_hour: Optional[float] = None
         self.peak_hour_time: Optional[dt.datetime] = None
         self.last_data_timestamp: Optional[dt.datetime] = None
-        self.data: List[Dict] = []
+        self.data: list[dict] = []
 
 
 class TibberHome:
@@ -301,11 +301,11 @@ class TibberHome:
         self._tibber_control: Tibber = tibber_control
         self._home_id: str = home_id
         self._current_price_total: Optional[float] = None
-        self._current_price_info: Dict[str, float] = {}
-        self._price_info: Dict[str, float] = {}
-        self._level_info: Dict[str, str] = {}
-        self._rt_power: List[Tuple[dt.datetime, float]] = []
-        self.info: Dict[str, dict] = {}
+        self._current_price_info: dict[str, float] = {}
+        self._price_info: dict[str, float] = {}
+        self._level_info: dict[str, str] = {}
+        self._rt_power: list[tuple[dt.datetime, float]] = []
+        self.info: dict[str, dict] = {}
         self._subscription_id: Optional[str] = None
         self.last_data_timestamp: Optional[dt.datetime] = None
 
@@ -431,12 +431,12 @@ class TibberHome:
         return self._hourly_consumption_data.last_data_timestamp
 
     @property
-    def hourly_consumption_data(self) -> List[Dict]:
+    def hourly_consumption_data(self) -> list[dict]:
         """Get consumption data for the last 30 days."""
         return self._hourly_consumption_data.data
 
     @property
-    def hourly_production_data(self) -> List[Dict]:
+    def hourly_production_data(self) -> list[dict]:
         """Get production data for the last 30 days."""
         return self._hourly_production_data.data
 
@@ -715,12 +715,12 @@ class TibberHome:
         return self._current_price_info
 
     @property
-    def price_total(self) -> Dict[str, float]:
+    def price_total(self) -> dict[str, float]:
         """Get dictionary with price total, key is date-time as a string."""
         return self._price_info
 
     @property
-    def price_level(self) -> Dict[str, str]:
+    def price_level(self) -> dict[str, str]:
         """Get dictionary with price level, key is date-time as a string."""
         return self._level_info
 
@@ -911,7 +911,7 @@ class TibberHome:
 
     async def get_historic_data(
         self, n_data: int, resolution: str = RESOLUTION_HOURLY, production: bool = False
-    ) -> Optional[List[dict]]:
+    ) -> Optional[list[dict]]:
         """Get historic data.
 
         :param n_data: The number of nodes to get from history. e.g. 5 would give 5 nodes
@@ -952,10 +952,10 @@ class TibberHome:
             return None
         return data["nodes"]
 
-    def current_price_data(self) -> Optional[Tuple[float, str, dt.datetime]]:
+    def current_price_data(self) -> Optional[tuple[float, str, dt.datetime]]:
         """Get current price."""
         now = dt.datetime.now(self._tibber_control.time_zone)
-        res: Optional[Tuple[float, str, dt.datetime]] = None
+        res: Optional[tuple[float, str, dt.datetime]] = None
         for key, price_total in self.price_total.items():
             price_time = parse(key).astimezone(self._tibber_control.time_zone)
             time_diff = (now - price_time).total_seconds() / 60
