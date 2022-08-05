@@ -8,7 +8,7 @@ import aiohttp
 import async_timeout
 import pytz
 from dateutil.parser import parse
-from graphql_subscription_manager import SubscriptionManager  # type: ignore
+from graphql_subscription_manager import SubscriptionManager
 
 from .const import RESOLUTION_HOURLY, __version__
 
@@ -54,7 +54,7 @@ class Tibber:
         self._home_ids: list[str] = []
         self._all_home_ids: list[str] = []
         self._homes: dict[str, TibberHome] = {}
-        self.sub_manager: SubscriptionManager = None
+        self.sub_manager: Optional[SubscriptionManager] = None
         try:
             user_agent = self.websession._default_headers.get(  # pylint: disable=protected-access
                 aiohttp.hdrs.USER_AGENT, ""
@@ -310,9 +310,7 @@ class TibberHome:
         self.last_data_timestamp: Optional[dt.datetime] = None
 
         self._hourly_consumption_data: HourlyData = HourlyData()
-        self._hourly_production_data:  HourlyData = HourlyData(
-            production=True
-        )
+        self._hourly_production_data: HourlyData = HourlyData(production=True)
 
     async def _fetch_data(self, hourly_data: HourlyData) -> None:
         """Update hourly consumption or production data asynchronously."""
@@ -890,16 +888,18 @@ class TibberHome:
                 pass
             callback(data)
 
-        self._subscription_id = await self._tibber_control.sub_manager.subscribe(
-            document, callback_add_extra_data
-        )
+        if self._tibber_control.sub_manager is not None:
+            self._subscription_id = await self._tibber_control.sub_manager.subscribe(
+                document, callback_add_extra_data
+            )
 
     async def rt_unsubscribe(self) -> None:
         """Unsubscribe to Tibber real time subscription."""
         if self._subscription_id is None:
             _LOGGER.error("Not subscribed.")
             return
-        await self._tibber_control.sub_manager.unsubscribe(self._subscription_id)
+        if self._tibber_control.sub_manager is not None:
+            await self._tibber_control.sub_manager.unsubscribe(self._subscription_id)
 
     @property
     def rt_subscription_running(self) -> bool:
