@@ -31,8 +31,8 @@ class Tibber:
         self,
         access_token: str = DEMO_TOKEN,
         timeout: int = DEFAULT_TIMEOUT,
-        websession: Optional[aiohttp.ClientSession] = None,
-        time_zone: Optional[dt.tzinfo] = None,
+        websession: aiohttp.ClientSession | None = None,
+        time_zone: dt.tzinfo | None = None,
     ):
         """Initialize the Tibber connection.
 
@@ -49,14 +49,14 @@ class Tibber:
         self._timeout: int = timeout
         self._access_token: str = access_token
         self.time_zone: dt.tzinfo = time_zone or pytz.utc
-        self._name: Optional[str] = None
-        self._user_id: Optional[str] = None
-        self._home_ids: List[str] = []
-        self._all_home_ids: List[str] = []
-        self._homes: Dict[str, TibberHome] = {}
+        self._name: str | None = None
+        self._user_id: str | None = None
+        self._home_ids: list[str] = []
+        self._all_home_ids: list[str] = []
+        self._homes: dict[str, TibberHome] = {}
         self.sub_manager: SubscriptionManager = None
         try:
-            user_agent = self.websession._default_headers.get(  # pylint: disable=protected-access
+            user_agent = self.websession._default_headers.get(
                 aiohttp.hdrs.USER_AGENT, ""
             )  # will be fixed by aiohttp 4.0
         except Exception:  # pylint: disable=broad-except
@@ -92,8 +92,8 @@ class Tibber:
         await self.sub_manager.stop()
 
     async def execute(
-        self, document: str, variable_values: Optional[dict] = None
-    ) -> Optional[dict]:
+        self, document: str, variable_values: dict | None = None
+    ) -> dict | None:
         """Execute a GraphQL query and return the data.
 
         :param document: The GraphQL query to request.
@@ -105,7 +105,7 @@ class Tibber:
 
     async def _execute(
         self, document: str, variable_values: dict = None, retry: int = 2
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Execute a GraphQL query and return the result as a dict loaded from the json response.
 
         :param document: The GraphQL query to request.
@@ -185,27 +185,27 @@ class Tibber:
             self._home_ids += [home_id]
 
     @property
-    def user_id(self) -> Optional[str]:
+    def user_id(self) -> str | None:
         """Return user id of user."""
         return self._user_id
 
     @property
-    def name(self) -> Optional[str]:
+    def name(self) -> str | None:
         """Return name of user."""
         return self._name
 
     @property
-    def home_ids(self) -> List[str]:
+    def home_ids(self) -> list[str]:
         """Return list of home ids."""
         return self.get_home_ids(only_active=True)
 
-    def get_home_ids(self, only_active=True) -> List[str]:
+    def get_home_ids(self, only_active=True) -> list[str]:
         """Return list of home ids."""
         if only_active:
             return self._home_ids
         return self._all_home_ids
 
-    def get_homes(self, only_active: bool = True) -> List["TibberHome"]:
+    def get_homes(self, only_active: bool = True) -> list["TibberHome"]:
         """Return list of Tibber homes."""
         return [
             home
@@ -272,23 +272,24 @@ class Tibber:
         await asyncio.gather(*tasks)
 
 
+class HourlyData:
+    """Holds hourly data for consumption or production."""
+
+    # pylint: disable=too-few-public-methods
+    def __init__(self, production: bool = False):
+        self.is_production: bool = production
+        self.month_energy: float | None = None
+        self.month_money: float | None = None
+        self.peak_hour: float | None = None
+        self.peak_hour_time: dt.datetime | None = None
+        self.last_data_timestamp: dt.datetime | None = None
+        self.data: list[dict] = []
+
+
 class TibberHome:
     """Instance of Tibber home."""
 
     # pylint: disable=too-many-instance-attributes, too-many-public-methods
-
-    class HourlyData:
-        """Holds hourly data for consumption or production."""
-
-        # pylint: disable=too-few-public-methods
-        def __init__(self, production: bool = False):
-            self.is_production: bool = production
-            self.month_energy: Optional[float] = None
-            self.month_money: Optional[float] = None
-            self.peak_hour: Optional[float] = None
-            self.peak_hour_time: Optional[dt.datetime] = None
-            self.last_data_timestamp: Optional[dt.datetime] = None
-            self.data: List[Dict] = []
 
     def __init__(self, home_id: str, tibber_control: Tibber):
         """Initialize the Tibber home class.
@@ -299,21 +300,21 @@ class TibberHome:
         """
         self._tibber_control: Tibber = tibber_control
         self._home_id: str = home_id
-        self._current_price_total: Optional[float] = None
-        self._current_price_info: Dict[str, float] = {}
-        self._price_info: Dict[str, float] = {}
-        self._level_info: Dict[str, str] = {}
-        self._rt_power: List[Tuple[dt.datetime, float]] = []
-        self.info: Dict[str, dict] = {}
-        self._subscription_id: Optional[str] = None
-        self.last_data_timestamp: Optional[dt.datetime] = None
+        self._current_price_total: float | None = None
+        self._current_price_info: dict[str, float] = {}
+        self._price_info: dict[str, float] = {}
+        self._level_info: dict[str, str] = {}
+        self._rt_power: list[tuple[dt.datetime, float]] = []
+        self.info: dict[str, dict] = {}
+        self._subscription_id: str | None = None
+        self.last_data_timestamp: dt.datetime | None = None
 
-        self._hourly_consumption_data: TibberHome.HourlyData = TibberHome.HourlyData()
-        self._hourly_production_data: TibberHome.HourlyData = TibberHome.HourlyData(
+        self._hourly_consumption_data: HourlyData = HourlyData()
+        self._hourly_production_data:  HourlyData = HourlyData(
             production=True
         )
 
-    async def _fetch_data(self, hourly_data: "TibberHome.HourlyData") -> None:
+    async def _fetch_data(self, hourly_data: HourlyData) -> None:
         """Update hourly consumption or production data asynchronously."""
         # pylint: disable=too-many-branches,too-many-statements,too-many-locals
 
@@ -369,7 +370,7 @@ class TibberHome:
         _month_energy = 0
         _month_money = 0
         _month_hour_max_month_hour_energy = 0
-        _month_hour_max_month_hour: Optional[dt.datetime] = None
+        _month_hour_max_month_hour: dt.datetime | None = None
 
         for node in hourly_data.data:
             _time = parse(node["from"])
@@ -405,37 +406,37 @@ class TibberHome:
         return await self._fetch_data(self._hourly_production_data)
 
     @property
-    def month_cons(self) -> Optional[float]:
+    def month_cons(self) -> float | None:
         """Get consumption for current month."""
         return self._hourly_consumption_data.month_energy
 
     @property
-    def month_cost(self) -> Optional[float]:
+    def month_cost(self) -> float | None:
         """Get total cost for current month."""
         return self._hourly_consumption_data.month_money
 
     @property
-    def peak_hour(self) -> Optional[float]:
+    def peak_hour(self) -> float | None:
         """Get consumption during peak hour for the current month."""
         return self._hourly_consumption_data.peak_hour
 
     @property
-    def peak_hour_time(self) -> Optional[dt.datetime]:
+    def peak_hour_time(self) -> dt.datetime | None:
         """Get the time for the peak consumption during the current month."""
         return self._hourly_consumption_data.peak_hour_time
 
     @property
-    def last_cons_data_timestamp(self) -> Optional[dt.datetime]:
+    def last_cons_data_timestamp(self) -> dt.datetime | None:
         """Get last consumption data timestampt."""
         return self._hourly_consumption_data.last_data_timestamp
 
     @property
-    def hourly_consumption_data(self) -> List[Dict]:
+    def hourly_consumption_data(self) -> list[dict]:
         """Get consumption data for the last 30 days."""
         return self._hourly_consumption_data.data
 
     @property
-    def hourly_production_data(self) -> List[Dict]:
+    def hourly_production_data(self) -> list[dict]:
         """Get production data for the last 30 days."""
         return self._hourly_production_data.data
 
@@ -702,7 +703,7 @@ class TibberHome:
                 self._level_info[data.get("startsAt")] = data.get("level")
 
     @property
-    def current_price_total(self) -> Optional[float]:
+    def current_price_total(self) -> float | None:
         """Get current price total."""
         if not self._current_price_info:
             return None
@@ -714,12 +715,12 @@ class TibberHome:
         return self._current_price_info
 
     @property
-    def price_total(self) -> Dict[str, float]:
+    def price_total(self) -> dict[str, float]:
         """Get dictionary with price total, key is date-time as a string."""
         return self._price_info
 
     @property
-    def price_level(self) -> Dict[str, str]:
+    def price_level(self) -> dict[str, str]:
         """Get dictionary with price level, key is date-time as a string."""
         return self._level_info
 
@@ -910,7 +911,7 @@ class TibberHome:
 
     async def get_historic_data(
         self, n_data: int, resolution: str = RESOLUTION_HOURLY, production: bool = False
-    ) -> Optional[List[dict]]:
+    ) -> list[dict] | None:
         """Get historic data.
 
         :param n_data: The number of nodes to get from history. e.g. 5 would give 5 nodes
@@ -951,10 +952,10 @@ class TibberHome:
             return None
         return data["nodes"]
 
-    def current_price_data(self) -> Optional[Tuple[float, str, dt.datetime]]:
+    def current_price_data(self) -> tuple[float, str, dt.datetime] | None:
         """Get current price."""
         now = dt.datetime.now(self._tibber_control.time_zone)
-        res: Optional[Tuple[float, str, dt.datetime]] = None
+        res: tuple[float, str, dt.datetime] | None = None
         for key, price_total in self.price_total.items():
             price_time = parse(key).astimezone(self._tibber_control.time_zone)
             time_diff = (now - price_time).total_seconds() / 60
