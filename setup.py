@@ -3,7 +3,7 @@ import os
 from setuptools import setup
 
 consts = {}
-with open(os.path.join("tibber", "const.py"), "r") as fp:
+with open(os.path.join("tibber", "const.py")) as fp:
     exec(fp.read(), consts)
 
 setup(
