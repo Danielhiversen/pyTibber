@@ -2,7 +2,7 @@
 import asyncio
 import datetime as dt
 import logging
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Optional
 
 import aiohttp
 import async_timeout
@@ -310,9 +310,7 @@ class TibberHome:
         self.last_data_timestamp: dt.datetime | None = None
 
         self._hourly_consumption_data: HourlyData = HourlyData()
-        self._hourly_production_data:  HourlyData = HourlyData(
-            production=True
-        )
+        self._hourly_production_data: HourlyData = HourlyData(production=True)
 
     async def _fetch_data(self, hourly_data: HourlyData) -> None:
         """Update hourly consumption or production data asynchronously."""
