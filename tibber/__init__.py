@@ -9,8 +9,8 @@ import async_timeout
 import pytz
 from graphql_subscription_manager import SubscriptionManager
 
-from .const import RESOLUTION_HOURLY, __version__
-from .gql_queries import PUSH_NOTIFICAION
+from .const import __version__
+from .gql_queries import INFO, PUSH_NOTIFICAION
 from .tibber_home import TibberHome
 
 DEFAULT_TIMEOUT = 10

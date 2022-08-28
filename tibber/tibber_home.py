@@ -1,11 +1,11 @@
+"""Tibber home"""
 import datetime as dt
 import logging
 from typing import Callable, Optional
 
 from dateutil.parser import parse
 
-from tibber import RESOLUTION_HOURLY, Tibber
-
+from .const import RESOLUTION_HOURLY
 from .gql_queries import (
     HISTORIC_DATA,
     LIVE_SUBSCRIBE,
@@ -37,14 +37,14 @@ class TibberHome:
 
     # pylint: disable=too-many-instance-attributes, too-many-public-methods
 
-    def __init__(self, home_id: str, tibber_control: Tibber):
+    def __init__(self, home_id: str, tibber_control):
         """Initialize the Tibber home class.
 
         :param home_id: The ID of the home.
         :param tibber_control: The Tibber instance associated with
             this instance of TibberHome.
         """
-        self._tibber_control: Tibber = tibber_control
+        self._tibber_control = tibber_control
         self._home_id: str = home_id
         self._current_price_total: Optional[float] = None
         self._current_price_info: dict[str, float] = {}
