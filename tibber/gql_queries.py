@@ -1,3 +1,5 @@
+"""Gql queries"""
+
 HISTORIC_DATA = """
                 {{
                   viewer {{
