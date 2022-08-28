@@ -32,9 +32,6 @@ jobs:
       - name: isort
         run: |
             isort **/*.py
-      - name: Pylint Code Linter
-        run: |
-            pylint tibber
       - name: MyPy
         run: |
             mypy tibber
