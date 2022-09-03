@@ -2,11 +2,11 @@
 import asyncio
 import datetime as dt
 import logging
+import zoneinfo
 from typing import Optional
 
 import aiohttp
 import async_timeout
-import pytz
 from graphql_subscription_manager import SubscriptionManager
 
 from .const import __version__
@@ -47,7 +47,7 @@ class Tibber:
             self.websession = websession
         self._timeout: int = timeout
         self._access_token: str = access_token
-        self.time_zone: dt.tzinfo = time_zone or pytz.utc
+        self.time_zone: dt.tzinfo = time_zone or zoneinfo.ZoneInfo("UTC")
         self._name: Optional[str] = None
         self._user_id: Optional[str] = None
         self._home_ids: list[str] = []

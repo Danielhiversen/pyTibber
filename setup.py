@@ -13,7 +13,6 @@ setup(
         "aiohttp>=3.0.6",
         "async_timeout>=1.4.0",
         "graphql-subscription-manager>=0.6.0",
-        "pytz",
         "python-dateutil",
     ],
     version=consts["__version__"],
