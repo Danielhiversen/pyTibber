@@ -13,6 +13,7 @@ from .gql_queries import (
     UPDATE_CURRENT_PRICE,
     UPDATE_INFO,
     UPDATE_INFO_PRICE,
+    HISTORIC_PRICE,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -447,6 +448,25 @@ class TibberHome:
         if data is None:
             return None
         return data["nodes"]
+
+    async def get_historic_price_data(
+        self,
+        resolution: str = RESOLUTION_HOURLY,
+    ) -> Optional[list[dict]]:
+        """Get historic price data.
+        :param resolution: The resolution of the data. Can be HOURLY,
+            DAILY, WEEKLY, MONTHLY or ANNUAL
+        """
+        query = HISTORIC_PRICE.format(
+            self.home_id,
+            resolution.lower(),
+        )
+        if not (data := await self._tibber_control.execute(query)):
+            _LOGGER.error("Could not find the data.")
+            return None
+        return data["viewer"]["home"]["currentSubscription"]["priceRating"][
+            resolution.lower()
+        ]["entries"]
 
     def current_price_data(self) -> Optional[tuple[float, str, dt.datetime]]:
         """Get current price."""
