@@ -27,30 +27,20 @@ pip3 install pyTibber
 ## Example:
 
 ```python
-import asyncio
-
 import tibber
+access_token = tibber.DEMO_TOKEN
+tibber_connection = tibber.Tibber(access_token)
+await tibber_connection.update_info()
+print(tibber_connection.name)
 
+home = tibber_connection.get_homes()[0]
+await home.update_info()
+print(home.address1)
 
-async def main():
-    access_token = tibber.DEMO_TOKEN
-    tibber_connection = tibber.Tibber(access_token)
-    await tibber_connection.update_info()
-    print(tibber_connection.name)
+await home.update_price_info()
+print(home.current_price_info)
 
-    home = tibber_connection.get_homes()[0]
-    await home.update_info()
-    print(home.address1)
-
-    await home.update_price_info()
-    print(home.current_price_info)
-
-    await tibber_connection.close_connection()
-
-
-if __name__ ==  '__main__':
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(main())
+await tibber_connection.close_connection()
 ```
 
 
