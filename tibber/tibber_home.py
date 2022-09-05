@@ -12,7 +12,8 @@ from .gql_queries import (
     PRICE_INFO,
     UPDATE_CURRENT_PRICE,
     UPDATE_INFO,
-    UPDATE_INFO_PRICE, HISTORIC_PRICE,
+    UPDATE_INFO_PRICE,
+    HISTORIC_PRICE,
 )
 
 _LOGGER = logging.getLogger(__name__)
