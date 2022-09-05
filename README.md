@@ -71,11 +71,6 @@ async def run():
     home = tibber_connection.get_homes()[0]
     await home.rt_subscribe(_callback)
 
-
-if __name__ == '__main__':
-    loop = asyncio.get_event_loop()
-    asyncio.ensure_future(run())
-    loop.run_forever()
 ```
 
 The library is used as part of Home Assitant: [https://github.com/home-assistant/home-assistant/tree/dev/homeassistant/components/tibber](https://github.com/home-assistant/home-assistant/tree/dev/homeassistant/components/tibber)
