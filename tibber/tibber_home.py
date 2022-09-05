@@ -12,7 +12,7 @@ from .gql_queries import (
     PRICE_INFO,
     UPDATE_CURRENT_PRICE,
     UPDATE_INFO,
-    UPDATE_INFO_PRICE,
+    UPDATE_INFO_PRICE, HISTORIC_PRICE,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -456,24 +456,7 @@ class TibberHome:
         :param resolution: The resolution of the data. Can be HOURLY,
             DAILY, WEEKLY, MONTHLY or ANNUAL
         """
-        query = """
-                {{
-                  viewer {{
-                    home(id: "{0}") {{
-                      currentSubscription {{
-                        priceRating {{
-                            {1} {{
-                              entries {{
-                                  time
-                                  total
-                              }}
-                            }}
-                         }}
-                     }}
-                  }}
-                  }}
-                }}
-          """.format(
+        query = HISTORIC_PRICE.format(
             self.home_id,
             resolution.lower(),
         )
