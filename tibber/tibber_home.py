@@ -451,7 +451,7 @@ class TibberHome:
     async def get_historic_price_data(
         self,
         resolution: str = RESOLUTION_HOURLY,
-    ) -> Optional[List[dict]]:
+    ) -> Optional[list[dict]]:
         """Get historic price data.
         :param resolution: The resolution of the data. Can be HOURLY,
             DAILY, WEEKLY, MONTHLY or ANNUAL
