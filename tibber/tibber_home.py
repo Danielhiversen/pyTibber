@@ -448,6 +448,42 @@ class TibberHome:
             return None
         return data["nodes"]
 
+    async def get_historic_price_data(
+        self, resolution: str = RESOLUTION_HOURLY, production: bool = False
+    ) -> Optional[List[dict]]:
+        """Get historic price data.
+
+        :param n_data: The number of nodes to get from history. e.g. 5 would give 5 nodes
+            and resolution = hourly would give the 5 last hours of historic data
+        :param resolution: The resolution of the data. Can be HOURLY,
+            DAILY, WEEKLY, MONTHLY or ANNUAL
+        """
+        query = """
+                {{
+                  viewer {{
+                    home(id: "{0}") {{
+                      currentSubscription {{
+                        priceRating {{
+                            {1} {{
+                              entries {{
+                                  time
+                                  total
+                              }}
+                            }}
+                         }}
+                     }}
+                  }}
+                  }}
+                }}
+          """.format(
+            self.home_id,
+            resolution.lower(),
+        )
+        if not (data := await self._tibber_control.execute(query)):
+            _LOGGER.error("Could not find the data.")
+            return None
+        return data["viewer"]["home"]["currentSubscription"]["priceRating"]["monthly"]["entries"]
+
     def current_price_data(self) -> Optional[tuple[float, str, dt.datetime]]:
         """Get current price."""
         now = dt.datetime.now(self._tibber_control.time_zone)
