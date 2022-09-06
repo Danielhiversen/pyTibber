@@ -8,12 +8,12 @@ from dateutil.parser import parse
 from .const import RESOLUTION_HOURLY
 from .gql_queries import (
     HISTORIC_DATA,
+    HISTORIC_PRICE,
     LIVE_SUBSCRIBE,
     PRICE_INFO,
     UPDATE_CURRENT_PRICE,
     UPDATE_INFO,
     UPDATE_INFO_PRICE,
-    HISTORIC_PRICE,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -247,6 +247,11 @@ class TibberHome:
             for data in price_info_k:
                 self._price_info[data.get("startsAt")] = data.get("total")
                 self._level_info[data.get("startsAt")] = data.get("level")
+                if (
+                    not self.last_data_timestamp
+                    or parse(data.get("startsAt")) > self.last_data_timestamp
+                ):
+                    self.last_data_timestamp = parse(data.get("startsAt"))
 
     @property
     def current_price_total(self) -> Optional[float]:
@@ -334,7 +339,7 @@ class TibberHome:
             return self.info["viewer"]["home"]["address"]["country"]
         except (KeyError, TypeError):
             _LOGGER.error("Could not find country.")
-        return ""
+            return ""
 
     @property
     def name(self) -> str:
@@ -349,13 +354,23 @@ class TibberHome:
         """Return the price unit (e.g. NOK/kWh)."""
         if not self.currency or not self.consumption_unit:
             _LOGGER.error("Could not find price_unit.")
-            return " "
+            return ""
         return self.currency + "/" + self.consumption_unit
+
+    def current_price_data(self) -> Optional[tuple[float, str, dt.datetime]]:
+        """Get current price."""
+        price_time = (
+            dt.datetime.utcnow()
+            .replace(minute=0, second=0, microsecond=0)
+            .astimezone(self._tibber_control.time_zone)
+        )
+        key = price_time.isoformat().replace("+", ".000+")
+        return round(self.price_total[key], 3), self.price_level[key], price_time
 
     async def rt_subscribe(self, callback: Callable) -> None:
         """Connect to Tibber and subscribe to Tibber real time subscription.
 
-        :param callback: The function to run when data is received.
+        :param callback: The function to call when data is received.
         """
         if self._subscription_id is not None:
             _LOGGER.error("Already subscribed.")
@@ -442,7 +457,7 @@ class TibberHome:
         )
 
         if not (data := await self._tibber_control.execute(query)):
-            _LOGGER.error("Could not find the data.")
+            _LOGGER.error("Could not get the data.")
             return None
         data = data["viewer"]["home"][cons_or_prod_str]
         if data is None:
@@ -462,24 +477,11 @@ class TibberHome:
             resolution.lower(),
         )
         if not (data := await self._tibber_control.execute(query)):
-            _LOGGER.error("Could not find the data.")
+            _LOGGER.error("Could not get the price data.")
             return None
         return data["viewer"]["home"]["currentSubscription"]["priceRating"][
             resolution.lower()
         ]["entries"]
-
-    def current_price_data(self) -> Optional[tuple[float, str, dt.datetime]]:
-        """Get current price."""
-        now = dt.datetime.now(self._tibber_control.time_zone)
-        res: Optional[tuple[float, str, dt.datetime]] = None
-        for key, price_total in self.price_total.items():
-            price_time = parse(key).astimezone(self._tibber_control.time_zone)
-            time_diff = (now - price_time).total_seconds() / 60
-            if not self.last_data_timestamp or price_time > self.last_data_timestamp:
-                self.last_data_timestamp = price_time
-            if 0 <= time_diff < 60:
-                res = round(price_total, 3), self.price_level[key], price_time
-        return res
 
     def current_attributes(self) -> dict:
         """Get current attributes."""

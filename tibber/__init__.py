@@ -10,7 +10,7 @@ import async_timeout
 from graphql_subscription_manager import SubscriptionManager
 
 from .const import __version__
-from .gql_queries import INFO, PUSH_NOTIFICAION
+from .gql_queries import INFO, PUSH_NOTIFICATION
 from .tibber_home import TibberHome
 
 DEFAULT_TIMEOUT = 10
@@ -50,7 +50,7 @@ class Tibber:
         self.time_zone: dt.tzinfo = time_zone or zoneinfo.ZoneInfo("UTC")
         self._name: Optional[str] = None
         self._user_id: Optional[str] = None
-        self._home_ids: list[str] = []
+        self._active_home_ids: list[str] = []
         self._all_home_ids: list[str] = []
         self._homes: dict[str, TibberHome] = {}
         self.sub_manager: Optional[SubscriptionManager] = None
@@ -152,9 +152,11 @@ class Tibber:
 
         if not (viewer := data.get("viewer")):
             return
+
         self._name = viewer.get("name")
         self._user_id = viewer.get("userId")
-        self._home_ids = []
+
+        self._active_home_ids = []
         for _home in viewer.get("homes", []):
             if not (home_id := _home.get("id")):
                 continue
@@ -162,12 +164,12 @@ class Tibber:
             if not (subs := _home.get("subscriptions")):
                 continue
             if subs[0].get("status", "ended").lower() == "running":
-                self._home_ids += [home_id]
+                self._active_home_ids += [home_id]
 
     def get_home_ids(self, only_active=True) -> list[str]:
         """Return list of home ids."""
         if only_active:
-            return self._home_ids
+            return self._active_home_ids
         return self._all_home_ids
 
     def get_homes(self, only_active: bool = True) -> list["TibberHome"]:
@@ -195,7 +197,7 @@ class Tibber:
         """
         if not (
             res := await self.execute(
-                PUSH_NOTIFICAION.format(
+                PUSH_NOTIFICATION.format(
                     title,
                     message,
                 )
