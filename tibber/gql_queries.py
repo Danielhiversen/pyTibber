@@ -7,6 +7,7 @@ HISTORIC_DATA = """
                       {1}(resolution: {2}, last: {3}) {{
                         nodes {{
                           from
+                          unitPrice
                           {4}
                           {1}
                         }}
