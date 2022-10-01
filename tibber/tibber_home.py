@@ -433,7 +433,7 @@ class TibberHome:
         """Is real time subscription running."""
         return (
             self._tibber_control.sub_manager is not None
-            and self._tibber_control.sub_manager.is_running
+            and self._tibber_control.sub_manager.is_running is True
         )
 
     async def get_historic_data(
