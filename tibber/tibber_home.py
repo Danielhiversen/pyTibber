@@ -360,7 +360,7 @@ class TibberHome:
     def current_price_data(self) -> Optional[tuple[float, str, dt.datetime]]:
         """Get current price."""
         price_time = (
-            dt.datetime.utcnow()
+            dt.datetime.now()
             .replace(minute=0, second=0, microsecond=0)
             .astimezone(self._tibber_control.time_zone)
         )
