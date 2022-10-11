@@ -29,6 +29,10 @@ jobs:
             git checkout $GITHUB_HEAD_REF
             git commit -am "fixup! Format Python code with black"
             git push
+      - name: black check
+        uses: lgeiger/black-action@master
+        with:
+            args: ". --check"
       - name: Flake8 Code Linter
         uses: jonasrk/flake8-action@master
         with: 
