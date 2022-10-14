@@ -524,9 +524,10 @@ class TibberHome:
         attr["off_peak_2"] = round(off_peak_2 / num2, 3) if num2 > 0 else 0
         if (
             "glitre"
-            in (self.info["viewer"]["home"]["meteringPointData"]
-                .get("gridCompany") or "")
-            .lower()
+            in (
+                self.info["viewer"]["home"]["meteringPointData"].get("gridCompany")
+                or ""
+            ).lower()
         ):
             if now.month < 7:
                 grid_price = 47.39 / 100
