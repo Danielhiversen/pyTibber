@@ -74,3 +74,5 @@ async def run():
 ```
 
 The library is used as part of Home Assitant: [https://github.com/home-assistant/home-assistant/tree/dev/homeassistant/components/tibber](https://github.com/home-assistant/home-assistant/tree/dev/homeassistant/components/tibber)
+
+
