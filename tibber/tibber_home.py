@@ -438,7 +438,7 @@ class TibberHome:
 
     async def get_historic_data(
         self, n_data: int, resolution: str = RESOLUTION_HOURLY, production: bool = False
-    ) -> Optional[list[dict]]:
+    ) -> list[dict]:
         """Get historic data.
 
         :param n_data: The number of nodes to get from history. e.g. 5 would give 5 nodes
@@ -458,10 +458,10 @@ class TibberHome:
 
         if not (data := await self._tibber_control.execute(query)):
             _LOGGER.error("Could not get the data.")
-            return None
+            return []
         data = data["viewer"]["home"][cons_or_prod_str]
         if data is None:
-            return None
+            return []
         return data["nodes"]
 
     async def get_historic_price_data(
