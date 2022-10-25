@@ -357,7 +357,7 @@ class TibberHome:
             return ""
         return self.currency + "/" + self.consumption_unit
 
-    def current_price_data(self) -> Optional[tuple[float, str, dt.datetime]]:
+    def current_price_data(self) -> tuple[float, str, dt.datetime]:
         """Get current price."""
         price_time = (
             dt.datetime.now()

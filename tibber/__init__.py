@@ -48,7 +48,7 @@ class Tibber:
         self._timeout: int = timeout
         self._access_token: str = access_token
         self.time_zone: dt.tzinfo = time_zone or zoneinfo.ZoneInfo("UTC")
-        self._name: Optional[str] = None
+        self._name: str = ""
         self._user_id: Optional[str] = None
         self._active_home_ids: list[str] = []
         self._all_home_ids: list[str] = []
@@ -235,7 +235,7 @@ class Tibber:
         return self._user_id
 
     @property
-    def name(self) -> Optional[str]:
+    def name(self) -> str:
         """Return name of user."""
         return self._name
 
