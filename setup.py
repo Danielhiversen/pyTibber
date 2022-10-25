@@ -15,6 +15,7 @@ setup(
         "graphql-subscription-manager>=0.6.0",
         "python-dateutil",
     ],
+    package_data={"tibber": ["py.typed"]},
     version=consts["__version__"],
     description="A python3 library to communicate with Tibber",
     python_requires=">=3.9.0",
