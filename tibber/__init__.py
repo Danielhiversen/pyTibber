@@ -40,13 +40,15 @@ class Tibber:
         :param access_token: The access token to access the Tibber API with.
         :param websession: The websession to use when communicating with the Tibber API.
         :param time_zone: The time zone to display times in and to use.
+        :param user_agent: User agent identifier for the platform running this
         """
         if user_agent is None:
             raise Exception("Please provide value for HTTP user agent for allowing better tracking of Tibber API consumers. Example: MyHomeAutomationServer/1.2.3")
 
+        user_agent = f"{user_agent} pyTibber/{__version__}"
         if websession is None:
             self.websession = aiohttp.ClientSession(
-                headers={aiohttp.hdrs.USER_AGENT: f"pyTibber/{__version__}"}
+                headers={aiohttp.hdrs.USER_AGENT: user_agent}
             )
         else:
             self.websession = websession
