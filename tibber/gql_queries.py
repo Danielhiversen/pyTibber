@@ -45,6 +45,7 @@ INFO = """
                 status
               }
             }
+            websocketSubscriptionUrl
           }
         }
         """

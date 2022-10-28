@@ -16,7 +16,6 @@ from .tibber_home import TibberHome
 DEFAULT_TIMEOUT = 10
 DEMO_TOKEN = "5K4MVS-OjfWhK_4yrjOlFe1F6kJXPVf7eQYggo8ebAE"
 API_ENDPOINT = "https://api.tibber.com/v1-beta/gql"
-SUB_ENDPOINT = "wss://api.tibber.com/v1-beta/gql/subscriptions"
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -85,7 +84,7 @@ class Tibber:
             return
         self.sub_manager = SubscriptionManager(
             {"token": self._access_token},
-            SUB_ENDPOINT,
+            self.sub_endpoint,
             self.user_agent,
         )
         self.sub_manager.start()
@@ -161,6 +160,12 @@ class Tibber:
         if not (viewer := data.get("viewer")):
             return
 
+        if not (sub_endpoint := viewer.get("websocketSubscriptionUrl")):
+            return
+
+        _LOGGER.info(f"Using websocket subscription url {sub_endpoint}")
+        self.sub_endpoint = sub_endpoint
+
         self._name = viewer.get("name")
         self._user_id = viewer.get("userId")
 
@@ -171,7 +176,7 @@ class Tibber:
             self._all_home_ids += [home_id]
             if not (subs := _home.get("subscriptions")):
                 continue
-            if subs[0].get("status", "ended").lower() == "running":
+            if subs[0].get("status", "ended") != None and subs[0].get("status", "ended").lower() == "running":
                 self._active_home_ids += [home_id]
 
     def get_home_ids(self, only_active=True) -> list[str]:
