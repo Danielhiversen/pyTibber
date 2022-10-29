@@ -26,16 +26,18 @@ jobs:
       - name: Install depencency
         run: |
             pip install -r requirements.txt
-            pip install dlint flake8 flake8-bugbear flake8-deprecated flake8-executable isort pylint pytest pytest-cov pytest-asyncio mypy types-python-dateutil
+            pip install dlint black flake8 flake8-bugbear flake8-deprecated flake8-executable isort pylint pytest pytest-cov pytest-asyncio mypy types-python-dateutil
       - name: Flake8 Code Linter
         run: |
             flake8 tibber/ 
       - name: isort
         run: |
-            isort **/*.py
+            isort  --check-only **/*.py
       - name: Pylint Code Linter
         run: |
             pylint tibber
       - name: MyPy
         run: |
             mypy tibber
+      - name: black
+        run: black --check $SRC_FOLDER
