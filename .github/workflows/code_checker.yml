@@ -15,6 +15,8 @@ jobs:
           - "3.9"
           - "3.10"
           - "3.11"
+    env:
+      SRC_FOLDER: tibber
     steps:
       - uses: actions/checkout@v3
       - name: Set up Python ${{ matrix.python-version }}
@@ -26,16 +28,18 @@ jobs:
       - name: Install depencency
         run: |
             pip install -r requirements.txt
-            pip install dlint flake8 flake8-bugbear flake8-deprecated flake8-executable isort pylint pytest pytest-cov pytest-asyncio mypy types-python-dateutil
+            pip install dlint black flake8 flake8-bugbear flake8-deprecated flake8-executable isort pylint pytest pytest-cov pytest-asyncio mypy types-python-dateutil
       - name: Flake8 Code Linter
         run: |
-            flake8 tibber/ 
+            flake8 $SRC_FOLDER
       - name: isort
         run: |
-            isort **/*.py
+            isort  --check-only **/*.py
       - name: Pylint Code Linter
         run: |
-            pylint tibber
+            pylint $SRC_FOLDER
       - name: MyPy
         run: |
-            mypy tibber
+            mypy $SRC_FOLDER
+      - name: black
+        run: black --check $SRC_FOLDER
