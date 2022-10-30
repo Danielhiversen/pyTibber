@@ -1,4 +1,6 @@
 """Library to handle connection with Tibber API."""
+from __future__ import annotations
+
 import asyncio
 import datetime as dt
 import logging
@@ -30,8 +32,8 @@ class Tibber:
         self,
         access_token: str = DEMO_TOKEN,
         timeout: int = DEFAULT_TIMEOUT,
-        websession: Optional[aiohttp.ClientSession] = None,
-        time_zone: Optional[dt.tzinfo] = None,
+        websession: aiohttp.ClientSession | None = None,
+        time_zone: dt.tzinfo | None = None,
     ):
         """Initialize the Tibber connection.
 
@@ -49,11 +51,11 @@ class Tibber:
         self._access_token: str = access_token
         self.time_zone: dt.tzinfo = time_zone or zoneinfo.ZoneInfo("UTC")
         self._name: str = ""
-        self._user_id: Optional[str] = None
+        self._user_id: str | None = None
         self._active_home_ids: list[str] = []
         self._all_home_ids: list[str] = []
         self._homes: dict[str, TibberHome] = {}
-        self.sub_manager: Optional[SubscriptionManager] = None
+        self.sub_manager: SubscriptionManager | None = None
         try:
             user_agent = self.websession._default_headers.get(
                 aiohttp.hdrs.USER_AGENT, ""
@@ -91,8 +93,8 @@ class Tibber:
         await self.sub_manager.stop()
 
     async def execute(
-        self, document: str, variable_values: Optional[dict] = None
-    ) -> Optional[dict]:
+        self, document: str, variable_values: dict | None = None
+    ) -> dict | None:
         """Execute a GraphQL query and return the data.
 
         :param document: The GraphQL query to request.
@@ -104,7 +106,7 @@ class Tibber:
 
     async def _execute(
         self, document: str, variable_values: dict = None, retry: int = 2
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Execute a GraphQL query and return the result as a dict loaded from the json response.
 
         :param document: The GraphQL query to request.
@@ -230,7 +232,7 @@ class Tibber:
         await asyncio.gather(*tasks)
 
     @property
-    def user_id(self) -> Optional[str]:
+    def user_id(self) -> str | None:
         """Return user id of user."""
         return self._user_id
 
