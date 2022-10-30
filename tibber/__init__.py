@@ -181,7 +181,7 @@ class Tibber:
             if (home := self.get_home(home_id))
         ]
 
-    def get_home(self, home_id: str) -> Optional["TibberHome"]:
+    def get_home(self, home_id: str) -> "TibberHome" | None:
         """Return an instance of TibberHome for given home id."""
         if home_id not in self._all_home_ids:
             _LOGGER.error("Could not find any Tibber home with id: %s", home_id)
