@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
-from typing import Callable, Optional
+from typing import Callable
 
 from dateutil.parser import parse
 
