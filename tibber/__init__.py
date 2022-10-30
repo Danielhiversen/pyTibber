@@ -5,7 +5,6 @@ import asyncio
 import datetime as dt
 import logging
 import zoneinfo
-from typing import Optional
 
 import aiohttp
 import async_timeout
