@@ -47,13 +47,20 @@ class Tibber:
         if websession is None:
             if user_agent is None:
                 raise Exception("Please provide value for HTTP user agent. Example: MyHomeAutomationServer/1.2.3")
-            user_agent = f"{user_agent} pyTibber/{__version__}"
+            self.user_agent = f"{user_agent} pyTibber/{__version__}"
             self.websession = aiohttp.ClientSession(
-                headers={aiohttp.hdrs.USER_AGENT: user_agent}
+                headers={aiohttp.hdrs.USER_AGENT: self.user_agent}
             )
         else:
-            if websession.headers.get(aiohttp.hdrs.USER_AGENT) is None:
+            try:
+                websession_user_agent = websession._default_headers.get(
+                    aiohttp.hdrs.USER_AGENT, ""
+                )  # will be fixed by aiohttp 4.0
+            except Exception:  # pylint: disable=broad-except
+                websession_user_agent = ""
+            if websession_user_agent is None:
                 raise Exception("Please provide value for HTTP user agent. Example: MyHomeAutomationServer/1.2.3")
+            self.user_agent = f"{websession_user_agent} pyTibber/{__version__}"
             self.websession = websession
 
         self._timeout: int = timeout
@@ -66,13 +73,6 @@ class Tibber:
         self._homes: dict[str, TibberHome] = {}
         self.sub_manager: SubscriptionManager | None = None
         self.api_endpoint = api_endpoint
-        try:
-            user_agent = self.websession._default_headers.get(
-                aiohttp.hdrs.USER_AGENT, ""
-            )  # will be fixed by aiohttp 4.0
-        except Exception:  # pylint: disable=broad-except
-            user_agent = ""
-        self.user_agent = f"{user_agent} pyTibber/{__version__}"
 
     async def close_connection(self) -> None:
         """Close the Tibber connection.
