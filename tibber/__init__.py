@@ -32,7 +32,7 @@ class Tibber:
         websession: Optional[aiohttp.ClientSession] = None,
         time_zone: Optional[dt.tzinfo] = None,
         user_agent: str = None,
-        api_endpoint: str = API_ENDPOINT, # Allow overriding API endpoint for easy testing
+        api_endpoint: str = API_ENDPOINT,  # Allow overriding API endpoint for easy testing
     ):
         """Initialize the Tibber connection.
 
@@ -42,7 +42,7 @@ class Tibber:
         :param user_agent: User agent identifier for the platform running this
         """
         if user_agent is None:
-            raise Exception("Please provide value for HTTP user agent for allowing better tracking of Tibber API consumers. Example: MyHomeAutomationServer/1.2.3")
+            raise Exception("Please provide value for HTTP user agent. Example: MyHomeAutomationServer/1.2.3")
 
         user_agent = f"{user_agent} pyTibber/{__version__}"
         if websession is None:
@@ -176,7 +176,7 @@ class Tibber:
             self._all_home_ids += [home_id]
             if not (subs := _home.get("subscriptions")):
                 continue
-            if subs[0].get("status", "ended") != None and subs[0].get("status", "ended").lower() == "running":
+            if subs[0].get("status", "ended") is not None and subs[0].get("status", "ended").lower() == "running":
                 self._active_home_ids += [home_id]
 
     def get_home_ids(self, only_active=True) -> list[str]:
