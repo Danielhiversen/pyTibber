@@ -43,16 +43,19 @@ class Tibber:
         :param time_zone: The time zone to display times in and to use.
         :param user_agent: User agent identifier for the platform running this
         """
-        if user_agent is None:
-            raise Exception("Please provide value for HTTP user agent. Example: MyHomeAutomationServer/1.2.3")
 
-        user_agent = f"{user_agent} pyTibber/{__version__}"
         if websession is None:
+            if user_agent is None:
+                raise Exception("Please provide value for HTTP user agent. Example: MyHomeAutomationServer/1.2.3")
+            user_agent = f"{user_agent} pyTibber/{__version__}"
             self.websession = aiohttp.ClientSession(
                 headers={aiohttp.hdrs.USER_AGENT: user_agent}
             )
         else:
+            if websession.headers.get(aiohttp.hdrs.USER_AGENT) is None:
+                raise Exception("Please provide value for HTTP user agent. Example: MyHomeAutomationServer/1.2.3")
             self.websession = websession
+
         self._timeout: int = timeout
         self._access_token: str = access_token
         self.time_zone: dt.tzinfo = time_zone or zoneinfo.ZoneInfo("UTC")
