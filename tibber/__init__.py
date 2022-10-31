@@ -58,7 +58,7 @@ class Tibber:
                 )  # will be fixed by aiohttp 4.0
             except Exception:  # pylint: disable=broad-except
                 websession_user_agent = ""
-            if websession_user_agent is None:
+            if websession_user_agent == "":
                 raise Exception("Please provide value for HTTP user agent. Example: MyHomeAutomationServer/1.2.3")
             self.user_agent = f"{websession_user_agent} pyTibber/{__version__}"
             self.websession = websession
