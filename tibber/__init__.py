@@ -10,13 +10,11 @@ import aiohttp
 import async_timeout
 from graphql_subscription_manager import SubscriptionManager
 
-from .const import __version__
+from .const import API_ENDPOINT, DEMO_TOKEN, __version__
 from .gql_queries import INFO, PUSH_NOTIFICATION
 from .tibber_home import TibberHome
 
 DEFAULT_TIMEOUT = 10
-DEMO_TOKEN = "5K4MVS-OjfWhK_4yrjOlFe1F6kJXPVf7eQYggo8ebAE"
-API_ENDPOINT = "https://api.tibber.com/v1-beta/gql"
 SUB_ENDPOINT = "wss://api.tibber.com/v1-beta/gql/subscriptions"
 
 _LOGGER = logging.getLogger(__name__)
