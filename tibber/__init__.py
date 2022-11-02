@@ -10,13 +10,11 @@ import aiohttp
 import async_timeout
 from graphql_subscription_manager import SubscriptionManager
 
-from .const import __version__
+from .const import API_ENDPOINT, DEMO_TOKEN, __version__
 from .gql_queries import INFO, PUSH_NOTIFICATION
 from .tibber_home import TibberHome
 
 DEFAULT_TIMEOUT = 10
-DEMO_TOKEN = "5K4MVS-OjfWhK_4yrjOlFe1F6kJXPVf7eQYggo8ebAE"
-API_ENDPOINT = "https://api.tibber.com/v1-beta/gql"
 SUB_ENDPOINT = "wss://api.tibber.com/v1-beta/gql/subscriptions"
 
 _LOGGER = logging.getLogger(__name__)
@@ -104,7 +102,7 @@ class Tibber:
         return res.get("data")
 
     async def _execute(
-        self, document: str, variable_values: dict = None, retry: int = 2
+        self, document: str, variable_values: dict | None = None, retry: int = 2
     ) -> dict | None:
         """Execute a GraphQL query and return the result as a dict loaded from the json response.
 
@@ -139,7 +137,7 @@ class Tibber:
             _LOGGER.error("Received non-compatible response %s", errors)
         return result
 
-    async def update_info(self, *_) -> None:
+    async def update_info(self) -> None:
         """Updates home info asynchronously."""
         if (res := await self._execute(INFO)) is None:
             return
@@ -167,13 +165,13 @@ class Tibber:
             if subs[0].get("status", "ended").lower() == "running":
                 self._active_home_ids += [home_id]
 
-    def get_home_ids(self, only_active=True) -> list[str]:
+    def get_home_ids(self, only_active: bool = True) -> list[str]:
         """Return list of home ids."""
         if only_active:
             return self._active_home_ids
         return self._all_home_ids
 
-    def get_homes(self, only_active: bool = True) -> list["TibberHome"]:
+    def get_homes(self, only_active: bool = True) -> list[TibberHome]:
         """Return list of Tibber homes."""
         return [
             home
@@ -181,7 +179,7 @@ class Tibber:
             if (home := self.get_home(home_id))
         ]
 
-    def get_home(self, home_id: str) -> "TibberHome" | None:
+    def get_home(self, home_id: str) -> TibberHome | None:
         """Return an instance of TibberHome for given home id."""
         if home_id not in self._all_home_ids:
             _LOGGER.error("Could not find any Tibber home with id: %s", home_id)

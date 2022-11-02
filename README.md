@@ -27,8 +27,10 @@ pip3 install pyTibber
 ## Example:
 
 ```python
+import tibber.const
 import tibber
-access_token = tibber.DEMO_TOKEN
+
+access_token = tibber.const.DEMO_TOKEN
 tibber_connection = tibber.Tibber(access_token)
 await tibber_connection.update_info()
 print(tibber_connection.name)
@@ -49,12 +51,13 @@ await tibber_connection.close_connection()
 An example of how to subscribe to realtime data (Pulse/Watty):
 
 ```python
+import tibber.const
 import asyncio
 
 import aiohttp
 import tibber
 
-ACCESS_TOKEN = tibber.DEMO_TOKEN
+ACCESS_TOKEN = tibber.const.DEMO_TOKEN
 
 
 def _callback(pkg):
