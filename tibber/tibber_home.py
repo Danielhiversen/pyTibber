@@ -538,4 +538,6 @@ class TibberHome:
             if now.hour >= 22 or now.hour < 6:
                 grid_price -= 12 / 100
             attr["grid_price"] = round(grid_price, 3)
+            _LOGGER.warning("Grid price attribute is deprecated and will be removed. "
+                            "Use https://github.com/Danielhiversen/home_assistant_glitre")
         return attr
