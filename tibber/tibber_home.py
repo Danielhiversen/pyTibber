@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from dateutil.parser import parse
 
@@ -17,6 +17,9 @@ from .gql_queries import (
     UPDATE_INFO,
     UPDATE_INFO_PRICE,
 )
+
+if TYPE_CHECKING:
+    from . import Tibber
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -40,7 +43,7 @@ class TibberHome:
 
     # pylint: disable=too-many-instance-attributes, too-many-public-methods
 
-    def __init__(self, home_id: str, tibber_control):
+    def __init__(self, home_id: str, tibber_control: Tibber) -> None:
         """Initialize the Tibber home class.
 
         :param home_id: The ID of the home.

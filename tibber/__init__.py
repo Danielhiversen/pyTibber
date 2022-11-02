@@ -5,6 +5,7 @@ import asyncio
 import datetime as dt
 import logging
 import zoneinfo
+from typing import Any
 
 import aiohttp
 import async_timeout
@@ -104,7 +105,7 @@ class Tibber:
         return res.get("data")
 
     async def _execute(
-        self, document: str, variable_values: dict = None, retry: int = 2
+        self, document: str, variable_values: dict | None = None, retry: int = 2
     ) -> dict | None:
         """Execute a GraphQL query and return the result as a dict loaded from the json response.
 
@@ -139,7 +140,7 @@ class Tibber:
             _LOGGER.error("Received non-compatible response %s", errors)
         return result
 
-    async def update_info(self, *_) -> None:
+    async def update_info(self) -> None:
         """Updates home info asynchronously."""
         if (res := await self._execute(INFO)) is None:
             return
@@ -167,7 +168,7 @@ class Tibber:
             if subs[0].get("status", "ended").lower() == "running":
                 self._active_home_ids += [home_id]
 
-    def get_home_ids(self, only_active=True) -> list[str]:
+    def get_home_ids(self, only_active: bool = True) -> list[str]:
         """Return list of home ids."""
         if only_active:
             return self._active_home_ids

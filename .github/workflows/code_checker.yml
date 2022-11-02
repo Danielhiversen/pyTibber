@@ -40,6 +40,6 @@ jobs:
             pylint $SRC_FOLDER
       - name: MyPy
         run: |
-            mypy $SRC_FOLDER
+            mypy --disallow-incomplete-defs --no-implicit-optional $SRC_FOLDER
       - name: black
         run: black --check $SRC_FOLDER
