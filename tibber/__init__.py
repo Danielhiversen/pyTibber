@@ -25,7 +25,7 @@ _LOGGER = logging.getLogger(__name__)
 class Tibber:
     """Class to communicate with the Tibber api."""
 
-    # pylint: disable=too-many-instance-attributes
+    # pylint: disable=too-many-instance-attributes, too-many-arguments
 
     def __init__(
         self,
