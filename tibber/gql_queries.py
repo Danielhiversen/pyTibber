@@ -34,9 +34,17 @@ HISTORIC_PRICE = """
                   }}
                 }}
           """
+GET_SUB_ENDPOINT = """
+               {
+          viewer {
+            websocketSubscriptionUrl
+            }
+          }
+          """
 INFO = """
         {
           viewer {
+            websocketSubscriptionUrl
             name
             userId
             homes {

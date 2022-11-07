@@ -19,6 +19,13 @@ async def test_tibber_no_session():
 
     assert tibber_connection.name == "Arya Stark"
 
+@pytest.mark.asyncio
+async def test_tibber_sub_url():
+    async with aiohttp.ClientSession() as session:
+        tibber_connection = tibber.Tibber(websession=session)
+
+        await tibber_connection._update_sub_endpoint()
+        assert "wss" in tibber_connection.sub_endpoint
 
 @pytest.mark.asyncio
 async def test_tibber():
@@ -26,6 +33,7 @@ async def test_tibber():
         tibber_connection = tibber.Tibber(websession=session)
         await tibber_connection.update_info()
 
+        assert tibber_connection.sub_endpoint is not None
         assert tibber_connection.name == "Arya Stark"
         assert len(tibber_connection.get_homes(only_active=False)) == 1
 
@@ -59,7 +67,7 @@ async def test_tibber():
                     assert isinstance(home.price_total[key], (float, int))
             else:
                 k += 1
-                assert home.home_id == "cc83e83e-8cbf-4595-9bf7-c3cf192f7d9c"
+                assert home.home_id == "96a14971-525a-4420-aae9-e5aedaa129ff"
                 assert home.address1 == "Winterfell Castle 1"
                 assert home.country is None
 
@@ -76,10 +84,10 @@ async def test_tibber_invalid_token():
             access_token="INVALID_TOKEN", websession=session
         )
         with pytest.raises(
-            tibber.InvalidLogin, match="No valid access token in request"
+            tibber.InvalidLogin, match="Context creation failed: invalid token"
         ):
             await tibber_connection.update_info()
-        assert tibber_connection.name is None
+        assert tibber_connection.name is ""
         assert tibber_connection.get_homes() == []
 
 

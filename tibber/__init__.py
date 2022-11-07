@@ -11,11 +11,10 @@ import async_timeout
 from graphql_subscription_manager import SubscriptionManager
 
 from .const import API_ENDPOINT, DEMO_TOKEN, __version__
-from .gql_queries import INFO, PUSH_NOTIFICATION
+from .gql_queries import INFO, PUSH_NOTIFICATION, GET_SUB_ENDPOINT
 from .tibber_home import TibberHome
 
 DEFAULT_TIMEOUT = 10
-SUB_ENDPOINT = "wss://api.tibber.com/v1-beta/gql/subscriptions"
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -52,6 +51,7 @@ class Tibber:
         self._active_home_ids: list[str] = []
         self._all_home_ids: list[str] = []
         self._homes: dict[str, TibberHome] = {}
+        self._sub_endpoint: str | None = None
         self.sub_manager: SubscriptionManager | None = None
         try:
             user_agent = self.websession._default_headers.get(
@@ -74,9 +74,14 @@ class Tibber:
         """
         if self.sub_manager is not None:
             return
+        
+        if self._sub_endpoint is None:
+            if not await self._update_sub_endpoint():
+                return
+
         self.sub_manager = SubscriptionManager(
             {"token": self._access_token},
-            SUB_ENDPOINT,
+            self._sub_endpoint,
             self.user_agent,
         )
         self.sub_manager.start()
@@ -121,9 +126,18 @@ class Tibber:
         try:
             async with async_timeout.timeout(self._timeout):
                 resp = await self.websession.post(API_ENDPOINT, **post_args)
-            if resp.status != 200:
+            
+            if resp.status == 400:
+                if result := await resp.json():
+                    errors = result.get("errors",[])
+                    error_code = errors[0].get("extensions","").get("code", None)
+                    if error_code == "UNAUTHENTICATED":
+                        return result
+
+            elif resp.status != 200:
                 _LOGGER.error("Error connecting to Tibber, resp code: %s", resp.status)
                 return None
+
             result = await resp.json()
         except aiohttp.ClientError as err:
             if retry > 0:
@@ -141,6 +155,7 @@ class Tibber:
         """Updates home info asynchronously."""
         if (res := await self._execute(INFO)) is None:
             return
+
         if errors := res.get("errors", []):
             msg = errors[0].get("message", "failed to login")
             _LOGGER.error(msg)
@@ -151,6 +166,8 @@ class Tibber:
 
         if not (viewer := data.get("viewer")):
             return
+
+        await self._update_sub_endpoint(viewer.get("websocketSubscriptionUrl"))
 
         self._name = viewer.get("name")
         self._user_id = viewer.get("userId")
@@ -164,6 +181,35 @@ class Tibber:
                 continue
             if subs[0].get("status", "ended").lower() == "running":
                 self._active_home_ids += [home_id]
+
+    async def _update_sub_endpoint(self, endpoint: str = None) -> bool:
+        """Updates subscription endpoint asynchronously. Returns True if update was successful. """
+        _LOGGER.debug("Update subscription endpoint")
+
+        #force update
+        if endpoint is None:
+            _LOGGER.info("Forced update of subscription URL")
+            if (res := await self._execute(GET_SUB_ENDPOINT)) is None:
+                return False
+
+            if errors := res.get("errors", []):
+                msg = errors[0].get("message", "failed to login")
+                _LOGGER.error(msg)
+                raise InvalidLogin(msg)
+
+            if not (data := res.get("data")):
+                return False
+
+            if not (viewer := data.get("viewer")):
+                return False
+
+            if not (endpoint := viewer.get("websocketSubscriptionUrl")):
+                return False
+
+        self._sub_endpoint = endpoint
+
+        _LOGGER.debug(f"GraphQL subscription URL set to {self.sub_endpoint}")
+        return True
 
     def get_home_ids(self, only_active: bool = True) -> list[str]:
         """Return list of home ids."""
@@ -237,6 +283,11 @@ class Tibber:
     def name(self) -> str:
         """Return name of user."""
         return self._name
+
+    @property
+    def sub_endpoint(self) -> str:
+        """Return name of user."""
+        return self._sub_endpoint
 
     @property
     def home_ids(self) -> list[str]:
