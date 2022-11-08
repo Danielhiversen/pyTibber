@@ -5,11 +5,10 @@ import asyncio
 import datetime as dt
 import logging
 import zoneinfo
-
-import aiohttp
-from aiohttp import ClientResponse
 from http import HTTPStatus
+
 import async_timeout
+from aiohttp import ClientError, ClientResponse, ClientSession, hdrs
 from graphql_subscription_manager import SubscriptionManager
 
 from .const import API_ENDPOINT, DEMO_TOKEN, __version__
@@ -35,7 +34,7 @@ class Tibber:
         self,
         access_token: str = DEMO_TOKEN,
         timeout: int = DEFAULT_TIMEOUT,
-        websession: aiohttp.ClientSession | None = None,
+        websession: ClientSession | None = None,
         time_zone: dt.tzinfo | None = None,
     ):
         """Initialize the Tibber connection.
@@ -45,8 +44,8 @@ class Tibber:
         :param time_zone: The time zone to display times in and to use.
         """
         if websession is None:
-            self.websession = aiohttp.ClientSession(
-                headers={aiohttp.hdrs.USER_AGENT: f"pyTibber/{__version__}"}
+            self.websession = ClientSession(
+                headers={hdrs.USER_AGENT: f"pyTibber/{__version__}"}
             )
         else:
             self.websession = websession
@@ -61,7 +60,7 @@ class Tibber:
         self.sub_manager: SubscriptionManager | None = None
         try:
             user_agent = self.websession._default_headers.get(
-                aiohttp.hdrs.USER_AGENT, ""
+                hdrs.USER_AGENT, ""
             )  # will be fixed by aiohttp 4.0
         except Exception:  # pylint: disable=broad-except
             user_agent = ""
@@ -120,7 +119,7 @@ class Tibber:
         post_args = {
             "headers": {
                 "Authorization": "Bearer " + self._access_token,
-                aiohttp.hdrs.USER_AGENT: self.user_agent,
+                hdrs.USER_AGENT: self.user_agent,
             },
             "data": payload,
         }
@@ -130,7 +129,7 @@ class Tibber:
 
             return await self.extract_response_data(resp)
 
-        except aiohttp.ClientError as err:
+        except ClientError as err:
             if retry > 0:
                 return await self._execute(document, variable_values, retry - 1)
             _LOGGER.error("Error connecting to Tibber: %s ", err, exc_info=True)
