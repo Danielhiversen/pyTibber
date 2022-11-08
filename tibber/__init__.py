@@ -25,6 +25,7 @@ HTTP_CODES_RETRIABLE = [HTTPStatus.TOO_MANY_REQUESTS, HTTPStatus.PRECONDITION_RE
 HTTP_CODES_FATAL = [HTTPStatus.BAD_REQUEST]
 API_ERR_UNAUTH = "UNAUTHENTICATED"
 
+
 class Tibber:
     """Class to communicate with the Tibber api."""
 
@@ -138,20 +139,28 @@ class Tibber:
             _LOGGER.error("Timed out when connecting to Tibber")
             raise
         except (InvalidLogin, FatalHttpException) as err:
-            _LOGGER.error(f"Fatal error interacting with Tibber API, HTTP status: {err.status}. API error: {err.extension_code} / {err.message}")
+            _LOGGER.error(
+                "Fatal error interacting with Tibber API, HTTP status: %i. API error: %s / %s",
+                err.status,
+                err.extension_code,
+                err.message)
             raise
         except (RetryableHttpException) as err:
-            _LOGGER.warning(f"Temporary failure interacting with Tibber API, HTTP status: {err.status}. API error: {err.extension_code} / {err.message}")
+            _LOGGER.warning(
+                "Temporary failure interacting with Tibber API, HTTP status: %i. API error: %s / %s",
+                err.status,
+                err.extension_code,
+                err.message)
             raise
 
-    async def extract_response_data(self, response:ClientResponse) -> dict | None:
+    async def extract_response_data(self, response: ClientResponse) -> dict | None:
         """Extracts the response as JSON or throws a HttpException"""
         result = await response.json()
-        
+
         if response.status == HTTPStatus.OK:
             return result
-        
-        if errors := result.get("errors",[]):
+
+        if errors := result.get("errors", []):
             error_code = errors[0].get("extensions").get("code")
             error_message = errors[0].get("message")
 
@@ -165,15 +174,15 @@ class Tibber:
             else:
                 msg = error_message if error_message else "request failed"
                 raise FatalHttpException(response.status, msg, error_code)
-        
-        #if reached here the HTTP response code is unhandled
+
+        # if reached here the HTTP response code is unhandled
         raise FatalHttpException(response.status, f"Unknown error: {error_message}", error_code)
 
     async def update_info(self) -> None:
         """Updates home info asynchronously."""
         if (res := await self._execute(INFO)) is None:
             return
-        
+
         if not (data := res.get("data")):
             return
 
@@ -271,9 +280,10 @@ class Tibber:
         """Return list of home ids."""
         return self.get_home_ids(only_active=True)
 
+
 class HttpException(Exception):
     """Exception base for HTTP errors
-    
+
     :param status: http response code
     :param message: http response message if any
     :param extension_code: http response extension if any
@@ -285,23 +295,26 @@ class HttpException(Exception):
         self.extension_code = extension_code
         super().__init__(self.message)
 
+
 class InvalidLogin(HttpException):
     """Invalid login exception."""
     def __init__(self, message: str = None):
         self.message = message
         super().__init__(400, self.message, API_ERR_UNAUTH)
 
+
 class FatalHttpException(HttpException):
     """Exception raised for HTTP codes that are non-retriable
-    
+
     :param status: http response code
     :param message: http response message if any
     :param extension_code: http response extension if any
     """
-    
+
+
 class RetryableHttpException(HttpException):
     """Exception raised for HTTP codes that are possible to retry
-    
+
     :param status: http response code
     :param retry_after_sec: indicate to the user that the request can be retried after X seconds
     :param message: http response message if any

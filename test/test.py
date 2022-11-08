@@ -82,6 +82,7 @@ async def test_tibber_invalid_token():
         assert not tibber_connection.name
         assert tibber_connection.get_homes() == []
 
+
 @pytest.mark.asyncio
 async def test_tibber_invalid_query():
     async with aiohttp.ClientSession() as session:
@@ -94,6 +95,7 @@ async def test_tibber_invalid_query():
 
         assert not tibber_connection.name
         assert tibber_connection.get_homes() == []
+
 
 @pytest.mark.asyncio
 async def test_tibber_notification():
