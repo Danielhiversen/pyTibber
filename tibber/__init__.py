@@ -142,14 +142,16 @@ class Tibber:
                 "Fatal error interacting with Tibber API, HTTP status: %i. API error: %s / %s",
                 err.status,
                 err.extension_code,
-                err.message)
+                err.message,
+            )
             raise
         except (RetryableHttpException) as err:
             _LOGGER.warning(
                 "Temporary failure interacting with Tibber API, HTTP status: %i. API error: %s / %s",
                 err.status,
                 err.extension_code,
-                err.message)
+                err.message,
+            )
             raise
 
     async def extract_response_data(self, response: ClientResponse) -> dict | None:
@@ -164,18 +166,22 @@ class Tibber:
             error_message = errors[0].get("message")
 
         if response.status in HTTP_CODES_RETRIABLE:
-            raise RetryableHttpException(response.status, message=error_message, extension_code=error_code)
+            raise RetryableHttpException(
+                response.status, message=error_message, extension_code=error_code
+            )
 
         if response.status in HTTP_CODES_FATAL:
             if error_code == API_ERR_UNAUTH:
                 msg = error_message if error_message else "failed to login"
                 raise InvalidLogin(msg)
-            else:
-                msg = error_message if error_message else "request failed"
-                raise FatalHttpException(response.status, msg, error_code)
+
+            msg = error_message if error_message else "request failed"
+            raise FatalHttpException(response.status, msg, error_code)
 
         # if reached here the HTTP response code is unhandled
-        raise FatalHttpException(response.status, f"Unknown error: {error_message}", error_code)
+        raise FatalHttpException(
+            response.status, f"Unknown error: {error_message}", error_code
+        )
 
     async def update_info(self) -> None:
         """Updates home info asynchronously."""
@@ -288,7 +294,9 @@ class HttpException(Exception):
     :param extension_code: http response extension if any
     """
 
-    def __init__(self, status: int, message: str = "HTTP error", extension_code: str = None):
+    def __init__(
+        self, status: int, message: str = "HTTP error", extension_code: str = ""
+    ):
         self.status = status
         self.message = message
         self.extension_code = extension_code
@@ -297,7 +305,8 @@ class HttpException(Exception):
 
 class InvalidLogin(HttpException):
     """Invalid login exception."""
-    def __init__(self, message: str = None):
+
+    def __init__(self, message: str = "failed to login"):
         self.message = message
         super().__init__(400, self.message, API_ERR_UNAUTH)
 
@@ -320,6 +329,12 @@ class RetryableHttpException(HttpException):
     :param extension_code: http response extension if any
     """
 
-    def __init__(self, status: int, retry_after_sec: int = 0, message: str = None, extension_code: str = None):
+    def __init__(
+        self,
+        status: int,
+        retry_after_sec: int = 0,
+        message: str = "",
+        extension_code: str = "",
+    ):
         self.retry_after_sec = retry_after_sec
         super().__init__(status, message, extension_code)
