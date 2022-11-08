@@ -59,7 +59,7 @@ async def test_tibber():
                     assert isinstance(home.price_total[key], (float, int))
             else:
                 k += 1
-                assert home.home_id == "cc83e83e-8cbf-4595-9bf7-c3cf192f7d9c"
+                assert home.home_id == "96a14971-525a-4420-aae9-e5aedaa129ff"
                 assert home.address1 == "Winterfell Castle 1"
                 assert home.country is None
 
@@ -76,12 +76,24 @@ async def test_tibber_invalid_token():
             access_token="INVALID_TOKEN", websession=session
         )
         with pytest.raises(
-            tibber.InvalidLogin, match="No valid access token in request"
+            tibber.InvalidLogin, match="Context creation failed: invalid token"
         ):
             await tibber_connection.update_info()
-        assert tibber_connection.name is None
+        assert not tibber_connection.name
         assert tibber_connection.get_homes() == []
 
+@pytest.mark.asyncio
+async def test_tibber_invalid_query():
+    async with aiohttp.ClientSession() as session:
+        tibber_connection = tibber.Tibber(websession=session)
+
+        with pytest.raises(
+            tibber.FatalHttpException, match="Syntax Error*"
+        ):
+            await tibber_connection.execute("invalidquery")
+
+        assert not tibber_connection.name
+        assert tibber_connection.get_homes() == []
 
 @pytest.mark.asyncio
 async def test_tibber_notification():
