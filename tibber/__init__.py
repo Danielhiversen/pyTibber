@@ -33,8 +33,8 @@ class Tibber:
         timeout: int = DEFAULT_TIMEOUT,
         websession: aiohttp.ClientSession | None = None,
         time_zone: dt.tzinfo | None = None,
-        user_agent: str = None,
-        api_endpoint: str = API_ENDPOINT,  # Allow overriding API endpoint for easy testing
+        user_agent: str | None = None,
+        api_endpoint: str | None = API_ENDPOINT,  # Allow overriding API endpoint for easy testing
     ):
         """Initialize the Tibber connection.
 
