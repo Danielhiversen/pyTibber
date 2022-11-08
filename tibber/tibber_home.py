@@ -1,7 +1,9 @@
 """Tibber home"""
+from __future__ import annotations
+
 import datetime as dt
 import logging
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable
 
 from dateutil.parser import parse
 
@@ -16,6 +18,9 @@ from .gql_queries import (
     UPDATE_INFO_PRICE,
 )
 
+if TYPE_CHECKING:
+    from . import Tibber
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -25,11 +30,11 @@ class HourlyData:
     # pylint: disable=too-few-public-methods
     def __init__(self, production: bool = False):
         self.is_production: bool = production
-        self.month_energy: Optional[float] = None
-        self.month_money: Optional[float] = None
-        self.peak_hour: Optional[float] = None
-        self.peak_hour_time: Optional[dt.datetime] = None
-        self.last_data_timestamp: Optional[dt.datetime] = None
+        self.month_energy: float | None = None
+        self.month_money: float | None = None
+        self.peak_hour: float | None = None
+        self.peak_hour_time: dt.datetime | None = None
+        self.last_data_timestamp: dt.datetime | None = None
         self.data: list[dict] = []
 
 
@@ -38,7 +43,7 @@ class TibberHome:
 
     # pylint: disable=too-many-instance-attributes, too-many-public-methods
 
-    def __init__(self, home_id: str, tibber_control):
+    def __init__(self, home_id: str, tibber_control: Tibber) -> None:
         """Initialize the Tibber home class.
 
         :param home_id: The ID of the home.
@@ -47,14 +52,14 @@ class TibberHome:
         """
         self._tibber_control = tibber_control
         self._home_id: str = home_id
-        self._current_price_total: Optional[float] = None
+        self._current_price_total: float | None = None
         self._current_price_info: dict[str, float] = {}
         self._price_info: dict[str, float] = {}
         self._level_info: dict[str, str] = {}
         self._rt_power: list[tuple[dt.datetime, float]] = []
         self.info: dict[str, dict] = {}
-        self._subscription_id: Optional[str] = None
-        self.last_data_timestamp: Optional[dt.datetime] = None
+        self._subscription_id: str | None = None
+        self.last_data_timestamp: dt.datetime | None = None
 
         self._hourly_consumption_data: HourlyData = HourlyData()
         self._hourly_production_data: HourlyData = HourlyData(production=True)
@@ -115,7 +120,7 @@ class TibberHome:
         _month_energy = 0
         _month_money = 0
         _month_hour_max_month_hour_energy = 0
-        _month_hour_max_month_hour: Optional[dt.datetime] = None
+        _month_hour_max_month_hour: dt.datetime | None = None
 
         for node in hourly_data.data:
             _time = parse(node["from"])
@@ -151,27 +156,27 @@ class TibberHome:
         return await self._fetch_data(self._hourly_production_data)
 
     @property
-    def month_cons(self) -> Optional[float]:
+    def month_cons(self) -> float | None:
         """Get consumption for current month."""
         return self._hourly_consumption_data.month_energy
 
     @property
-    def month_cost(self) -> Optional[float]:
+    def month_cost(self) -> float | None:
         """Get total cost for current month."""
         return self._hourly_consumption_data.month_money
 
     @property
-    def peak_hour(self) -> Optional[float]:
+    def peak_hour(self) -> float | None:
         """Get consumption during peak hour for the current month."""
         return self._hourly_consumption_data.peak_hour
 
     @property
-    def peak_hour_time(self) -> Optional[dt.datetime]:
+    def peak_hour_time(self) -> dt.datetime | None:
         """Get the time for the peak consumption during the current month."""
         return self._hourly_consumption_data.peak_hour_time
 
     @property
-    def last_cons_data_timestamp(self) -> Optional[dt.datetime]:
+    def last_cons_data_timestamp(self) -> dt.datetime | None:
         """Get last consumption data timestampt."""
         return self._hourly_consumption_data.last_data_timestamp
 
@@ -254,7 +259,7 @@ class TibberHome:
                     self.last_data_timestamp = parse(data.get("startsAt"))
 
     @property
-    def current_price_total(self) -> Optional[float]:
+    def current_price_total(self) -> float | None:
         """Get current price total."""
         if not self._current_price_info:
             return None
@@ -467,7 +472,7 @@ class TibberHome:
     async def get_historic_price_data(
         self,
         resolution: str = RESOLUTION_HOURLY,
-    ) -> Optional[list[dict]]:
+    ) -> list[dict] | None:
         """Get historic price data.
         :param resolution: The resolution of the data. Can be HOURLY,
             DAILY, WEEKLY, MONTHLY or ANNUAL
@@ -536,4 +541,8 @@ class TibberHome:
             if now.hour >= 22 or now.hour < 6:
                 grid_price -= 12 / 100
             attr["grid_price"] = round(grid_price, 3)
+            _LOGGER.warning(
+                "Grid price attribute is deprecated and will be removed. "
+                "Use https://github.com/Danielhiversen/home_assistant_glitre"
+            )
         return attr
