@@ -136,7 +136,7 @@ class Tibber:
             raise
         except (InvalidLogin, FatalHttpException) as err:
             _LOGGER.error(
-                "Fatal error interacting with Tibber API, HTTP status: %i. API error: %s / %s",
+                "Fatal error interacting with Tibber API, HTTP status: %s. API error: %s / %s",
                 err.status,
                 err.extension_code,
                 err.message,
@@ -144,7 +144,7 @@ class Tibber:
             raise
         except RetryableHttpException as err:
             _LOGGER.warning(
-                "Temporary failure interacting with Tibber API, HTTP status: %i. API error: %s / %s",
+                "Temporary failure interacting with Tibber API, HTTP status: %s. API error: %s / %s",
                 err.status,
                 err.extension_code,
                 err.message,
