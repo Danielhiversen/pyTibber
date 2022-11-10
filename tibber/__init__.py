@@ -34,7 +34,8 @@ class Tibber:
         websession: aiohttp.ClientSession | None = None,
         time_zone: dt.tzinfo | None = None,
         user_agent: str | None = None,
-        api_endpoint: str | None = None,  # Allow overriding API endpoint for easy testing
+        api_endpoint: str
+        | None = None,  # Allow overriding API endpoint for easy testing
     ):
         """Initialize the Tibber connection.
 
@@ -49,7 +50,9 @@ class Tibber:
         else:
             user_agent = websession.headers.get(aiohttp.hdrs.USER_AGENT)
         if user_agent is None:
-            raise Exception("Please provide value for HTTP user agent. Example: MyHomeAutomationServer/1.2.3")
+            raise Exception(
+                "Please provide value for HTTP user agent. Example: MyHomeAutomationServer/1.2.3"
+            )
         self.user_agent = f"{user_agent} pyTibber/{__version__}"
         self.websession = websession
 
