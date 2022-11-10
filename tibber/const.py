@@ -5,7 +5,7 @@ from __future__ import annotations
 from http import HTTPStatus
 from typing import Final
 
-__version__ = "0.25.7b"
+__version__ = "0.25.6"
 
 RESOLUTION_HOURLY: Final = "HOURLY"
 RESOLUTION_DAILY: Final = "DAILY"
