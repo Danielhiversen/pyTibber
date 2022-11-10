@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../"
 import aiohttp  # noqa: E402
 
 import tibber  # noqa: E402
+from tibber.exceptions import FatalHttpException, InvalidLogin
 
 
 @pytest.mark.asyncio
@@ -76,7 +77,7 @@ async def test_tibber_invalid_token():
             access_token="INVALID_TOKEN", websession=session
         )
         with pytest.raises(
-            tibber.InvalidLogin, match="Context creation failed: invalid token"
+            InvalidLogin, match="Context creation failed: invalid token"
         ):
             await tibber_connection.update_info()
         assert not tibber_connection.name
@@ -89,7 +90,7 @@ async def test_tibber_invalid_query():
         tibber_connection = tibber.Tibber(websession=session)
 
         with pytest.raises(
-            tibber.FatalHttpException, match="Syntax Error*"
+            FatalHttpException, match="Syntax Error*"
         ):
             await tibber_connection.execute("invalidquery")
 
