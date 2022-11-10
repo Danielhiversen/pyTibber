@@ -34,7 +34,7 @@ class Tibber:
         websession: aiohttp.ClientSession | None = None,
         time_zone: dt.tzinfo | None = None,
         user_agent: str | None = None,
-        api_endpoint: str | None = API_ENDPOINT,  # Allow overriding API endpoint for easy testing
+        api_endpoint: str | None = None,  # Allow overriding API endpoint for easy testing
     ):
         """Initialize the Tibber connection.
 
@@ -62,7 +62,7 @@ class Tibber:
         self._all_home_ids: list[str] = []
         self._homes: dict[str, TibberHome] = {}
         self.sub_manager: SubscriptionManager | None = None
-        self.api_endpoint = api_endpoint
+        self.api_endpoint = api_endpoint or API_ENDPOINT
 
     async def close_connection(self) -> None:
         """Close the Tibber connection.
