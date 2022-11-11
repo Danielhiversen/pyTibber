@@ -25,7 +25,7 @@ async def extract_response_data(response: ClientResponse) -> dict:
         error_message = errors[0].get("message")
     else:
         error_code = API_ERR_CODE_UNKNOWN
-    
+
     if response.status in HTTP_CODES_RETRIABLE:
         if error_message:
             msg = error_message
