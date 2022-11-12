@@ -8,7 +8,7 @@ from .const import (
     API_ERR_CODE_UNAUTH,
     API_ERR_CODE_UNKNOWN,
     HTTP_CODES_FATAL,
-    HTTP_CODES_RETRIABLE
+    HTTP_CODES_RETRIABLE,
 )
 from .exceptions import FatalHttpException, InvalidLogin, RetryableHttpException
 
@@ -48,6 +48,4 @@ async def extract_response_data(response: ClientResponse) -> dict:
         raise FatalHttpException(response.status, msg, error_code)
 
     # if reached here the HTTP response code is unhandled
-    raise FatalHttpException(
-        response.status, f"Unknown error: {msg}", error_code
-    )
+    raise FatalHttpException(response.status, f"Unknown error: {msg}", error_code)

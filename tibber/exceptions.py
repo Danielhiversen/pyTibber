@@ -12,7 +12,10 @@ class HttpException(Exception):
     """
 
     def __init__(
-        self, status: int, message: str = "HTTP error", extension_code: str = API_ERR_CODE_UNKNOWN
+        self,
+        status: int,
+        message: str = "HTTP error",
+        extension_code: str = API_ERR_CODE_UNKNOWN,
     ):
         self.status = status
         self.message = message
