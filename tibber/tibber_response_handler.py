@@ -13,6 +13,21 @@ from .const import (
 from .exceptions import FatalHttpException, InvalidLogin, RetryableHttpException
 
 
+def extract_error_details(errors: dict, default_message: str = "") -> tuple[str, str]:
+    """Tries to extract the error message and code from the provided 'errors' dictionary"""
+    error_code = API_ERR_CODE_UNKNOWN
+    if default_message:
+        error_message = default_message
+    else:
+        error_message = "N/A"
+
+    if errors:
+        error_code = errors[0].get("extensions").get("code")
+        error_message = errors[0].get("message")
+
+    return error_code, error_message
+
+
 async def extract_response_data(response: ClientResponse) -> dict:
     """Extracts the response as JSON or throws a HttpException"""
     result = await response.json()
@@ -20,32 +35,26 @@ async def extract_response_data(response: ClientResponse) -> dict:
     if response.status == HTTPStatus.OK:
         return result
 
-    if errors := result.get("errors", []):
-        error_code = errors[0].get("extensions").get("code")
-        error_message = errors[0].get("message")
-    else:
-        error_code = API_ERR_CODE_UNKNOWN
-
     if response.status in HTTP_CODES_RETRIABLE:
-        if error_message:
-            msg = error_message
-        else:
-            if response_body := str(response.content):
-                msg = response_body
-            else:
-                msg = "N/A"
+        error_code, error_message = extract_error_details(
+            result.get("errors", []), str(response.content)
+        )
 
         raise RetryableHttpException(
-            response.status, message=msg, extension_code=error_code
+            response.status, message=error_message, extension_code=error_code
         )
 
     if response.status in HTTP_CODES_FATAL:
+        error_code, error_message = extract_error_details(
+            result.get("errors", []), "request failed"
+        )
         if error_code == API_ERR_CODE_UNAUTH:
-            msg = error_message if error_message else "failed to login"
-            raise InvalidLogin(response.status, msg, error_code)
+            raise InvalidLogin(response.status, error_message, error_code)
 
-        msg = error_message if error_message else "request failed"
-        raise FatalHttpException(response.status, msg, error_code)
+        raise FatalHttpException(response.status, error_message, error_code)
 
-    # if reached here the HTTP response code is unhandled
-    raise FatalHttpException(response.status, f"Unknown error: {msg}", error_code)
+    error_code, error_message = extract_error_details(result.get("errors", []))
+    # if reached here the HTTP response code is not currently handled
+    raise FatalHttpException(
+        response.status, f"Unhandled error: {error_message}", error_code
+    )
