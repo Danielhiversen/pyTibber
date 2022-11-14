@@ -65,7 +65,7 @@ class Tibber:
         self._all_home_ids: list[str] = []
         self._homes: dict[str, TibberHome] = {}
         self.sub_manager: SubscriptionManager | None = None
-        self.api_endpoint = api_endpoint or API_ENDPOINT
+        self.api_endpoint = api_endpoint
 
     async def close_connection(self) -> None:
         """Close the Tibber connection.
