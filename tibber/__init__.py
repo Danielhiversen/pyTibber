@@ -34,8 +34,7 @@ class Tibber:
         websession: aiohttp.ClientSession | None = None,
         time_zone: dt.tzinfo | None = None,
         user_agent: str | None = None,
-        api_endpoint: str
-        | None = None,  # Allow overriding API endpoint for easy testing
+        api_endpoint: str = API_ENDPOINT,  
     ):
         """Initialize the Tibber connection.
 
