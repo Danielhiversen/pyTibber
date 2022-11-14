@@ -43,6 +43,7 @@ class Tibber:
         :param websession: The websession to use when communicating with the Tibber API.
         :param time_zone: The time zone to display times in and to use.
         :param user_agent: User agent identifier for the platform running this. Required if websession is None.
+        :param api_endpoint: Allow overriding API endpoint for easy testing
         """
 
         if websession is None:
