@@ -23,7 +23,7 @@ _LOGGER = logging.getLogger(__name__)
 class Tibber:
     """Class to communicate with the Tibber api."""
 
-    # pylint: disable=too-many-instance-attributes
+    # pylint: disable=too-many-instance-attributes, too-many-arguments
 
     def __init__(
         self,
@@ -31,19 +31,29 @@ class Tibber:
         timeout: int = DEFAULT_TIMEOUT,
         websession: aiohttp.ClientSession | None = None,
         time_zone: dt.tzinfo | None = None,
+        user_agent: str | None = None,
+        api_endpoint: str = API_ENDPOINT,
     ):
         """Initialize the Tibber connection.
 
         :param access_token: The access token to access the Tibber API with.
         :param websession: The websession to use when communicating with the Tibber API.
         :param time_zone: The time zone to display times in and to use.
+        :param user_agent: User agent identifier for the platform running this. Required if websession is None.
+        :param api_endpoint: Allow overriding API endpoint for easy testing
         """
+
         if websession is None:
-            self.websession = aiohttp.ClientSession(
-                headers={aiohttp.hdrs.USER_AGENT: f"pyTibber/{__version__}"}
-            )
+            websession = aiohttp.ClientSession()
         else:
-            self.websession = websession
+            user_agent = websession.headers.get(aiohttp.hdrs.USER_AGENT)
+        if user_agent is None:
+            raise Exception(
+                "Please provide value for HTTP user agent. Example: MyHomeAutomationServer/1.2.3"
+            )
+        self.user_agent = f"{user_agent} pyTibber/{__version__}"
+        self.websession = websession
+
         self._timeout: int = timeout
         self._access_token: str = access_token
         self.time_zone: dt.tzinfo = time_zone or zoneinfo.ZoneInfo("UTC")
@@ -53,13 +63,7 @@ class Tibber:
         self._all_home_ids: list[str] = []
         self._homes: dict[str, TibberHome] = {}
         self.sub_manager: SubscriptionManager | None = None
-        try:
-            user_agent = self.websession._default_headers.get(
-                aiohttp.hdrs.USER_AGENT, ""
-            )  # will be fixed by aiohttp 4.0
-        except Exception:  # pylint: disable=broad-except
-            user_agent = ""
-        self.user_agent = f"{user_agent} pyTibber/{__version__}"
+        self.api_endpoint = api_endpoint
 
     async def close_connection(self) -> None:
         """Close the Tibber connection.
@@ -120,7 +124,7 @@ class Tibber:
         }
         try:
             async with async_timeout.timeout(self._timeout):
-                resp = await self.websession.post(API_ENDPOINT, **post_args)
+                resp = await self.websession.post(self.api_endpoint, **post_args)
             if resp.status != 200:
                 _LOGGER.error("Error connecting to Tibber, resp code: %s", resp.status)
                 return None
