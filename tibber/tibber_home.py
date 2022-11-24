@@ -385,11 +385,12 @@ class TibberHome:
             _time = parse(live_data["timestamp"]).astimezone(
                 self._tibber_control.time_zone
             )
-            self._rt_power.append((_time, live_data["power"] / 1000))
             while self._rt_power and self._rt_power[0][0] < _time - dt.timedelta(
                 minutes=5
             ):
                 self._rt_power.pop(0)
+
+            self._rt_power.append((_time, live_data["power"] / 1000))
             current_hour = live_data["accumulatedConsumptionLastHour"]
             if current_hour is not None:
                 power = sum(p[1] for p in self._rt_power) / len(self._rt_power)
@@ -406,9 +407,15 @@ class TibberHome:
                     self._hourly_consumption_data.peak_hour_time = _time
             return data
 
+        async def _disconnect():
+            await asyncio.sleep(30)
+            _LOGGER.debug("No data received for 30 seconds, reconnecting")
+            await self._tibber_control.rt_disconnect()
+
         async def _start():
             """Subscribe to Tibber."""
             _retry_count = 0
+            restarter = None
             while True:
                 try:
                     if not self.rt_subscription_running:
@@ -416,16 +423,25 @@ class TibberHome:
                     async for data in self._tibber_control.sub_manager.session.subscribe(
                         gql(LIVE_SUBSCRIBE % self.home_id)
                     ):
+                        if restarter:
+                            restarter.cancel()
+                        restarter = asyncio.ensure_future(_disconnect())
+                        data = {"data": data}
+                        try:
+                            data = _add_extra_data(data)
+                        except KeyError:
+                            pass
+                        callback(data)
                         _retry_count = 0
-                        callback(_add_extra_data({"data": data}))
                 except Exception:  # pylint: disable=broad-except
                     delay_seconds = min(
                         random.SystemRandom().randint(1, 60) + _retry_count**2,
                         60 * 60,
                     )
                     _LOGGER.error(
-                        "Tibber connection failed, will retry in %s seconds",
+                        "Tibber connection closed, will reconnect in %s seconds",
                         delay_seconds,
+                        exc_info=True,
                     )
                     _retry_count += 1
                     await asyncio.sleep(delay_seconds)
