@@ -419,7 +419,7 @@ class TibberHome:
                             _retry_count = 0
                 except Exception:  # pylint: disable=broad-except
                     delay_seconds = min(
-                        random.randrange(1, 60) + _retry_count**2, 60 * 60
+                        random.SystemRandom.randrange(1, 60) + _retry_count**2, 60 * 60
                     )
                     _LOGGER.error(
                         "Tibber connection failed, will retry in %s seconds",
@@ -535,4 +535,8 @@ class TibberHome:
             if now.hour >= 22 or now.hour < 6:
                 grid_price -= 12 / 100
             attr["grid_price"] = round(grid_price, 3)
+            _LOGGER.warning(
+                "Grid price attribute is deprecated and will be removed. "
+                "Use https://github.com/Danielhiversen/home_assistant_glitre"
+            )
         return attr
