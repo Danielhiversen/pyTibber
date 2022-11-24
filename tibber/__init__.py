@@ -1,6 +1,4 @@
 """Library to handle connection with Tibber API."""
-from __future__ import annotations
-
 import asyncio
 import datetime as dt
 import logging
@@ -8,7 +6,8 @@ import zoneinfo
 
 import aiohttp
 import async_timeout
-from graphql_subscription_manager import SubscriptionManager
+from gql import Client
+from gql.transport.websockets import WebsocketsTransport
 
 from .const import API_ENDPOINT, DEMO_TOKEN, __version__
 from .gql_queries import INFO, PUSH_NOTIFICATION
@@ -62,7 +61,7 @@ class Tibber:
         self._active_home_ids: list[str] = []
         self._all_home_ids: list[str] = []
         self._homes: dict[str, TibberHome] = {}
-        self.sub_manager: SubscriptionManager | None = None
+        self.sub_manager: Client = self._get_sub_manager()
         self.api_endpoint = api_endpoint
 
     async def close_connection(self) -> None:
@@ -70,28 +69,13 @@ class Tibber:
         This method simply closes the websession used by the object."""
         await self.websession.close()
 
-    async def rt_connect(self) -> None:
-        """Start the GraphQL subscription manager for real time data.
-        This method instantiates the graphql_subscription_manager.SubscriptionManager
-        class which authenticates the user with the provided access token, and then
-        starts the SubscriptionManager.
-        """
-        if self.sub_manager is not None:
-            return
-        self.sub_manager = SubscriptionManager(
-            {"token": self._access_token},
-            SUB_ENDPOINT,
-            self.user_agent,
-        )
-        self.sub_manager.start()
-
     async def rt_disconnect(self) -> None:
         """Stop subscription manager.
         This method simply calls the stop method of the SubscriptionManager if it is defined.
         """
-        if self.sub_manager is None:
+        if self.sub_manager.transport is None:
             return
-        await self.sub_manager.stop()
+        await self.sub_manager.transport.close()
 
     async def execute(
         self, document: str, variable_values: dict | None = None
@@ -231,6 +215,24 @@ class Tibber:
             if home.has_production:
                 tasks.append(home.fetch_production_data())
         await asyncio.gather(*tasks)
+
+    def _get_sub_manager(self):
+        return Client(
+            transport=WebsocketsTransport(
+                url=SUB_ENDPOINT,
+                init_payload={"token": self._access_token},
+            ),
+        )
+
+    @property
+    def rt_subscription_running(self) -> bool:
+        """Is real time subscription running."""
+        return (
+            self.sub_manager.transport is not None
+            and isinstance(self.sub_manager.transport, WebsocketsTransport)
+            and self.sub_manager.transport.websocket is not None
+            and self.sub_manager.transport.websocket.open
+        )
 
     @property
     def user_id(self) -> str | None:
