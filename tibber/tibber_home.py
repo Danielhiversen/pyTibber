@@ -419,7 +419,8 @@ class TibberHome:
                             _retry_count = 0
                 except Exception:  # pylint: disable=broad-except
                     delay_seconds = min(
-                        random.SystemRandom.randrange(1, 60) + _retry_count**2, 60 * 60
+                        random.SystemRandom.randrange(1, 60) + _retry_count**2,
+                        60 * 60,
                     )
                     _LOGGER.error(
                         "Tibber connection failed, will retry in %s seconds",
