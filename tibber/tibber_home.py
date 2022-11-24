@@ -411,15 +411,16 @@ class TibberHome:
             _retry_count = 0
             while True:
                 try:
-                    async with self._tibber_control.sub_manager as session:
-                        async for data in session.subscribe(
-                            gql(LIVE_SUBSCRIBE % self.home_id)
-                        ):
-                            callback(_add_extra_data({"data": data}))
-                            _retry_count = 0
+                    if not self.rt_subscription_running:
+                        await self._tibber_control.sub_manager.connect_async()
+                    async for data in self._tibber_control.sub_manager.session.subscribe(
+                        gql(LIVE_SUBSCRIBE % self.home_id)
+                    ):
+                        _retry_count = 0
+                        callback(_add_extra_data({"data": data}))
                 except Exception:  # pylint: disable=broad-except
                     delay_seconds = min(
-                        random.SystemRandom.randrange(1, 60) + _retry_count**2,
+                        random.SystemRandom().randint(1, 60) + _retry_count**2,
                         60 * 60,
                     )
                     _LOGGER.error(

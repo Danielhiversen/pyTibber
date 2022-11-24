@@ -223,6 +223,8 @@ class Tibber:
             transport=WebsocketsTransport(
                 url=SUB_ENDPOINT,
                 init_payload={"token": self._access_token},
+                ping_interval=20,
+                keep_alive_timeout=60,
             ),
         )
 
