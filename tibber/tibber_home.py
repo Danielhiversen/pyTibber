@@ -415,7 +415,7 @@ class TibberHome:
         async def _start():
             """Subscribe to Tibber."""
             _retry_count = 0
-            restarter = None
+            restarter = asyncio.ensure_future(_disconnect())
             while True:
                 try:
                     if not self.rt_subscription_running:
@@ -423,8 +423,7 @@ class TibberHome:
                     async for data in self._tibber_control.sub_manager.session.subscribe(
                         gql(LIVE_SUBSCRIBE % self.home_id)
                     ):
-                        if restarter:
-                            restarter.cancel()
+                        restarter.cancel()
                         restarter = asyncio.ensure_future(_disconnect())
                         data = {"data": data}
                         try:
@@ -441,7 +440,6 @@ class TibberHome:
                     _LOGGER.error(
                         "Tibber connection closed, will reconnect in %s seconds",
                         delay_seconds,
-                        exc_info=True,
                     )
                     _retry_count += 1
                     await asyncio.sleep(delay_seconds)
