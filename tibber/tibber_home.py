@@ -1,11 +1,14 @@
 """Tibber home"""
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import logging
+import random
 from typing import TYPE_CHECKING, Callable
 
 from dateutil.parser import parse
+from gql import gql
 
 from .const import RESOLUTION_HOURLY
 from .gql_queries import (
@@ -58,7 +61,6 @@ class TibberHome:
         self._level_info: dict[str, str] = {}
         self._rt_power: list[tuple[dt.datetime, float]] = []
         self.info: dict[str, dict] = {}
-        self._subscription_id: str | None = None
         self.last_data_timestamp: dt.datetime | None = None
 
         self._hourly_consumption_data: HourlyData = HourlyData()
@@ -377,29 +379,22 @@ class TibberHome:
 
         :param callback: The function to call when data is received.
         """
-        if self._subscription_id is not None:
-            _LOGGER.error("Already subscribed.")
-            return
-        await self._tibber_control.rt_connect()
-        document = LIVE_SUBSCRIBE % self.home_id
 
         def _add_extra_data(data: dict) -> dict:
-            _time = parse(data["data"]["liveMeasurement"]["timestamp"]).astimezone(
+            live_data = data["data"]["liveMeasurement"]
+            _time = parse(live_data["timestamp"]).astimezone(
                 self._tibber_control.time_zone
-            )
-            self._rt_power.append(
-                (_time, data["data"]["liveMeasurement"]["power"] / 1000)
             )
             while self._rt_power and self._rt_power[0][0] < _time - dt.timedelta(
                 minutes=5
             ):
                 self._rt_power.pop(0)
-            current_hour = data["data"]["liveMeasurement"][
-                "accumulatedConsumptionLastHour"
-            ]
+
+            self._rt_power.append((_time, live_data["power"] / 1000))
+            current_hour = live_data["accumulatedConsumptionLastHour"]
             if current_hour is not None:
                 power = sum(p[1] for p in self._rt_power) / len(self._rt_power)
-                data["data"]["liveMeasurement"]["estimatedHourConsumption"] = round(
+                live_data["estimatedHourConsumption"] = round(
                     current_hour
                     + power * (3600 - (_time.minute * 60 + _time.second)) / 3600,
                     3,
@@ -412,34 +407,49 @@ class TibberHome:
                     self._hourly_consumption_data.peak_hour_time = _time
             return data
 
-        def callback_add_extra_data(data: dict) -> None:
-            """Add estimated hourly consumption."""
-            try:
-                data = _add_extra_data(data)
-            except KeyError:
-                pass
-            callback(data)
+        async def _disconnect():
+            await asyncio.sleep(30)
+            _LOGGER.debug("No data received for 30 seconds, reconnecting")
+            await self._tibber_control.rt_disconnect()
 
-        if self._tibber_control.sub_manager is not None:
-            self._subscription_id = await self._tibber_control.sub_manager.subscribe(
-                document, callback_add_extra_data
-            )
+        async def _start():
+            """Subscribe to Tibber."""
+            _retry_count = 0
+            restarter = asyncio.ensure_future(_disconnect())
+            while True:
+                try:
+                    if not self.rt_subscription_running:
+                        await self._tibber_control.sub_manager.connect_async()
+                    async for data in self._tibber_control.sub_manager.session.subscribe(
+                        gql(LIVE_SUBSCRIBE % self.home_id)
+                    ):
+                        restarter.cancel()
+                        restarter = asyncio.ensure_future(_disconnect())
+                        data = {"data": data}
+                        try:
+                            data = _add_extra_data(data)
+                        except KeyError:
+                            pass
+                        callback(data)
+                        _retry_count = 0
+                except Exception:  # pylint: disable=broad-except
+                    delay_seconds = min(
+                        random.SystemRandom().randint(1, 60) + _retry_count**2,
+                        60 * 60,
+                    )
+                    _LOGGER.error(
+                        "Tibber connection closed, will reconnect in %s seconds",
+                        delay_seconds,
+                    )
+                    _retry_count += 1
+                    await asyncio.sleep(delay_seconds)
 
-    async def rt_unsubscribe(self) -> None:
-        """Unsubscribe to Tibber real time subscription."""
-        if self._subscription_id is None:
-            _LOGGER.error("Not subscribed.")
-            return
-        if self._tibber_control.sub_manager is not None:
-            await self._tibber_control.sub_manager.unsubscribe(self._subscription_id)
+        asyncio.get_running_loop().create_task(_start())
 
     @property
     def rt_subscription_running(self) -> bool:
         """Is real time subscription running."""
-        return (
-            self._tibber_control.sub_manager is not None
-            and self._tibber_control.sub_manager.is_running is True
-        )
+        return self._tibber_control.rt_subscription_running
 
     async def get_historic_data(
         self, n_data: int, resolution: str = RESOLUTION_HOURLY, production: bool = False
