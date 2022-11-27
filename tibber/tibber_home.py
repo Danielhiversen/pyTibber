@@ -415,7 +415,7 @@ class TibberHome:
         async def _start():
             """Subscribe to Tibber."""
             _retry_count = 0
-            restarter = asyncio.ensure_future(_disconnect())
+            restarter = asyncio.create_task(_disconnect())
             while True:
                 try:
                     if not self.rt_subscription_running:
@@ -424,7 +424,7 @@ class TibberHome:
                         gql(LIVE_SUBSCRIBE % self.home_id)
                     ):
                         restarter.cancel()
-                        restarter = asyncio.ensure_future(_disconnect())
+                        restarter = asyncio.create_task(_disconnect())
                         data = {"data": data}
                         try:
                             data = _add_extra_data(data)
@@ -444,7 +444,7 @@ class TibberHome:
                     _retry_count += 1
                     await asyncio.sleep(delay_seconds)
 
-        asyncio.get_running_loop().create_task(_start())
+        asyncio.create_task(_start())
 
     @property
     def rt_subscription_running(self) -> bool:
