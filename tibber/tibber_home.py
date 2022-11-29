@@ -424,7 +424,6 @@ class TibberHome:
                     ):
                         restarter.cancel()
                         restarter = asyncio.create_task(_disconnect())
-                        print(data["liveMeasurement"].get("power"))
                         data = {"data": data}
                         try:
                             data = _add_extra_data(data)
