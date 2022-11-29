@@ -439,7 +439,6 @@ class TibberHome:
                     _LOGGER.error(
                         "Tibber connection closed, will reconnect in %s seconds",
                         delay_seconds,
-                        exc_info=True,
                     )
                     _retry_count += 1
                     await asyncio.sleep(delay_seconds)
