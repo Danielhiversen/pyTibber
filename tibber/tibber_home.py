@@ -418,13 +418,13 @@ class TibberHome:
             restarter = asyncio.create_task(_disconnect())
             while True:
                 try:
-                    if not self.rt_subscription_running:
-                        await self._tibber_control.sub_manager.connect_async()
+                    await self._tibber_control.rt_connect()
                     async for data in self._tibber_control.sub_manager.session.subscribe(
                         gql(LIVE_SUBSCRIBE % self.home_id)
                     ):
                         restarter.cancel()
                         restarter = asyncio.create_task(_disconnect())
+                        print(data["liveMeasurement"].get("power"))
                         data = {"data": data}
                         try:
                             data = _add_extra_data(data)
@@ -440,6 +440,7 @@ class TibberHome:
                     _LOGGER.error(
                         "Tibber connection closed, will reconnect in %s seconds",
                         delay_seconds,
+                        exc_info=True,
                     )
                     _retry_count += 1
                     await asyncio.sleep(delay_seconds)
