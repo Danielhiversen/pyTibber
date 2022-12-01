@@ -19,6 +19,7 @@ DEFAULT_TIMEOUT = 10
 SUB_ENDPOINT = "wss://api.tibber.com/v1-beta/gql/subscriptions"
 
 _LOGGER = logging.getLogger(__name__)
+LOCK_RT_CONNECT = asyncio.Lock()
 
 
 class Tibber:
@@ -63,7 +64,7 @@ class Tibber:
         self._active_home_ids: list[str] = []
         self._all_home_ids: list[str] = []
         self._homes: dict[str, TibberHome] = {}
-        self.sub_manager: Client = self._get_sub_manager()
+        self.sub_manager: Client | None = None
         self.api_endpoint = api_endpoint
 
     async def close_connection(self) -> None:
@@ -75,9 +76,24 @@ class Tibber:
         """Stop subscription manager.
         This method simply calls the stop method of the SubscriptionManager if it is defined.
         """
-        if self.sub_manager.transport is None:
+        if self.sub_manager is None or self.sub_manager.transport is None:
             return
-        await self.sub_manager.transport.close()
+        await self.sub_manager.close_async()
+
+    async def rt_connect(self) -> None:
+        """Start subscription manager."""
+        async with LOCK_RT_CONNECT:
+            if self.rt_subscription_running:
+                return
+            self.sub_manager = Client(
+                transport=WebsocketsTransport(
+                    url=SUB_ENDPOINT,
+                    init_payload={"token": self._access_token},
+                    headers={"User-Agent": self.user_agent},
+                    ping_interval=20,
+                ),
+            )
+            await self.sub_manager.connect_async()
 
     async def execute(
         self, document: str, variable_values: dict | None = None
@@ -218,21 +234,12 @@ class Tibber:
                 tasks.append(home.fetch_production_data())
         await asyncio.gather(*tasks)
 
-    def _get_sub_manager(self):
-        return Client(
-            transport=WebsocketsTransport(
-                url=SUB_ENDPOINT,
-                init_payload={"token": self._access_token},
-                headers={"User-Agent": self.user_agent},
-                ping_interval=20,
-            ),
-        )
-
     @property
     def rt_subscription_running(self) -> bool:
         """Is real time subscription running."""
         return (
-            self.sub_manager.transport is not None
+            self.sub_manager is not None
+            and self.sub_manager.transport is not None
             and isinstance(self.sub_manager.transport, WebsocketsTransport)
             and self.sub_manager.transport.websocket is not None
             and self.sub_manager.transport.websocket.open

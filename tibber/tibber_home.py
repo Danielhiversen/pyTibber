@@ -418,8 +418,7 @@ class TibberHome:
             restarter = asyncio.create_task(_disconnect())
             while True:
                 try:
-                    if not self.rt_subscription_running:
-                        await self._tibber_control.sub_manager.connect_async()
+                    await self._tibber_control.rt_connect()
                     async for data in self._tibber_control.sub_manager.session.subscribe(
                         gql(LIVE_SUBSCRIBE % self.home_id)
                     ):
