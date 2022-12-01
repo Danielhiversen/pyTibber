@@ -46,7 +46,7 @@ class Tibber:
 
         if websession is None:
             websession = aiohttp.ClientSession()
-        else:
+        elif user_agent is None:
             user_agent = websession.headers.get(aiohttp.hdrs.USER_AGENT)
         if user_agent is None:
             raise Exception(
