@@ -364,15 +364,15 @@ class TibberHome:
             return ""
         return self.currency + "/" + self.consumption_unit
 
-    def current_price_data(self) -> tuple[float, str, dt.datetime]:
+    def current_price_data(self) -> tuple[float | None, str | None, dt.datetime | None]:
         """Get current price."""
-        price_time = (
-            dt.datetime.now()
-            .replace(minute=0, second=0, microsecond=0)
-            .astimezone(self._tibber_control.time_zone)
-        )
-        key = price_time.isoformat().replace("+", ".000+")
-        return round(self.price_total[key], 3), self.price_level[key], price_time
+        now = dt.datetime.now(self._tibber_control.time_zone)
+        for key, price_total in self.price_total.items():
+            price_time = parse(key).astimezone(self._tibber_control.time_zone)
+            time_diff = (now - price_time).total_seconds() / 60
+            if 0 <= time_diff < 60:
+                return round(price_total, 3), self.price_level[key], price_time
+        return None, None, None
 
     async def rt_subscribe(self, callback: Callable) -> None:
         """Connect to Tibber and subscribe to Tibber real time subscription.
