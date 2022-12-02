@@ -461,22 +461,38 @@ class TibberHome:
             DAILY, WEEKLY, MONTHLY or ANNUAL
         :param production: True to get production data instead of consumption
         """
-        cons_or_prod_str = "production" if production else "consumption"
-        query = HISTORIC_DATA.format(
-            self.home_id,
-            cons_or_prod_str,
-            resolution,
-            n_data,
-            "profit" if production else "totalCost cost",
-        )
-
-        if not (data := await self._tibber_control.execute(query)):
-            _LOGGER.error("Could not get the data.")
-            return []
-        data = data["viewer"]["home"][cons_or_prod_str]
-        if data is None:
-            return []
-        return data["nodes"]
+        cursor = ""
+        res = []
+        max_n_data = 750
+        while n_data > 0:
+            _n_data = min(max_n_data, n_data)
+            cons_or_prod_str = "production" if production else "consumption"
+            query = HISTORIC_DATA.format(
+                self.home_id,
+                cons_or_prod_str,
+                resolution,
+                _n_data,
+                "profit" if production else "totalCost cost",
+                cursor
+            )
+            if not (data := await self._tibber_control.execute(query)):
+                _LOGGER.error("Could not get the data.")
+                continue
+            data = data["viewer"]["home"][cons_or_prod_str]
+            if data is None:
+                continue
+            res.extend(data["nodes"])
+            n_data -= len(data["nodes"])
+            if not data["pageInfo"]["hasPreviousPage"] or not data["pageInfo"]["startCursor"]:
+                if n_data > 0:
+                    max_n_data = max_n_data // 10
+                    if max_n_data < 1:
+                        _LOGGER.warning("Found less data than requested")
+                        break
+                    continue
+                break
+            cursor = data["pageInfo"]["startCursor"]
+        return res
 
     async def get_historic_price_data(
         self,
