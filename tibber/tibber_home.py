@@ -463,7 +463,7 @@ class TibberHome:
         """
         cursor = ""
         res = []
-        max_n_data = 750
+        max_n_data = 7000
         while n_data > 0:
             _n_data = min(max_n_data, n_data)
             cons_or_prod_str = "production" if production else "consumption"
