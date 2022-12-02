@@ -473,7 +473,7 @@ class TibberHome:
                 resolution,
                 _n_data,
                 "profit" if production else "totalCost cost",
-                cursor
+                cursor,
             )
             if not (data := await self._tibber_control.execute(query)):
                 _LOGGER.error("Could not get the data.")
@@ -483,7 +483,10 @@ class TibberHome:
                 continue
             res.extend(data["nodes"])
             n_data -= len(data["nodes"])
-            if not data["pageInfo"]["hasPreviousPage"] or not data["pageInfo"]["startCursor"]:
+            if (
+                not data["pageInfo"]["hasPreviousPage"]
+                or not data["pageInfo"]["startCursor"]
+            ):
                 if n_data > 0:
                     max_n_data = max_n_data // 10
                     if max_n_data < 1:
