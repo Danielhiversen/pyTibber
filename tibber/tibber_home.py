@@ -411,10 +411,14 @@ class TibberHome:
         async def _restarter():
             while True:
                 await asyncio.sleep(10)
-                if self._last_rt_data_received is not None and self._last_rt_data_received > dt.datetime.now() - dt.timedelta(seconds=30):
+                if (
+                    self._last_rt_data_received is not None
+                    and self._last_rt_data_received
+                    > dt.datetime.now() - dt.timedelta(seconds=30)
+                ):
                     try:
                         await self._tibber_control.rt_disconnect()
-                    except Exception: # pylint: disable=broad-except
+                    except Exception:  # pylint: disable=broad-except
                         _LOGGER.exception("Error disconnecting from Tibber")
                     _LOGGER.debug("No data received for 30 seconds, reconnecting")
 
@@ -457,7 +461,11 @@ class TibberHome:
         """Is real time subscription running."""
         if not self._tibber_control.rt_subscription_running:
             return False
-        if self._last_rt_data_received is None or self._last_rt_data_received > dt.datetime.now() - dt.timedelta(seconds=60):
+        if (
+            self._last_rt_data_received is None
+            or self._last_rt_data_received
+            > dt.datetime.now() - dt.timedelta(seconds=60)
+        ):
             return False
         return True
 
