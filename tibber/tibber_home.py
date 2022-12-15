@@ -380,6 +380,7 @@ class TibberHome:
 
         :param callback: The function to call when data is received.
         """
+        # pylint: disable=too-many-statements
 
         def _add_extra_data(data: dict) -> dict:
             live_data = data["data"]["liveMeasurement"]
