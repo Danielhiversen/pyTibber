@@ -408,9 +408,9 @@ class TibberHome:
                     self._hourly_consumption_data.peak_hour_time = _time
             return data
 
-        run_start = None
-
         async def _restarter():
+            nonlocal run_start
+
             while True:
                 _LOGGER.debug("Last data timestamp: %s", self._last_rt_data_received)
                 if self._last_rt_data_received > dt.datetime.now() - dt.timedelta(
@@ -425,7 +425,6 @@ class TibberHome:
                 )
 
                 try:
-                    nonlocal run_start
                     if run_start is not None:
                         _LOGGER.debug("Canceling previous run")
                         run_start.cancel()
