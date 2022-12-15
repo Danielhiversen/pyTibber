@@ -79,6 +79,7 @@ class Tibber:
         if self.sub_manager is None or self.sub_manager.transport is None:
             return
         await self.sub_manager.close_async()
+        self.sub_manager = None
 
     async def rt_connect(self) -> None:
         """Start subscription manager."""
