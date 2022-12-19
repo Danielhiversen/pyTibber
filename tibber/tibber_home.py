@@ -412,8 +412,14 @@ class TibberHome:
         async def _restarter():
             nonlocal run_start
             _retry_count = 0
-            print("hheeeeere")
             await asyncio.sleep(5)
+
+            def _is_ok():
+                return (
+                    run_start in asyncio.all_tasks()
+                    and dt.datetime.now() - self._last_rt_data_received
+                    < dt.timedelta(seconds=60)
+                )
 
             while True:
                 _LOGGER.debug(
@@ -425,13 +431,8 @@ class TibberHome:
                         ).total_seconds()
                     ),
                 )
-                if (
-                    run_start in asyncio.all_tasks()
-                    and dt.datetime.now() - self._last_rt_data_received
-                    < dt.timedelta(seconds=10)
-                ):
+                if _is_ok():
                     await asyncio.sleep(1)
-                    print("sleeping")
                     _retry_count = 0
                     continue
 
@@ -450,11 +451,7 @@ class TibberHome:
                     delay_seconds,
                 )
                 await asyncio.sleep(delay_seconds)
-                if (
-                    run_start in asyncio.all_tasks()
-                    and dt.datetime.now() - self._last_rt_data_received
-                    < dt.timedelta(seconds=10)
-                ):
+                if _is_ok():
                     continue
                 _retry_count += 1
 
