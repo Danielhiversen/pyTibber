@@ -438,7 +438,7 @@ class TibberHome:
 
                 delay_seconds = min(
                     random.SystemRandom().randint(1, 60) + _retry_count**2,
-                    60 * 60,
+                    20 * 60,
                 )
                 _LOGGER.error(
                     "No data received for %s seconds, reconnecting home %s in %s seconds",
@@ -491,7 +491,6 @@ class TibberHome:
                         callback(data)
                         self._last_rt_data_received = dt.datetime.now()
                         _LOGGER.debug("Data received: %s", self._last_rt_data_received)
-                        _retry_count = 0
                 except Exception:  # pylint: disable=broad-except
                     _LOGGER.error(
                         "Tibber connection closed",
