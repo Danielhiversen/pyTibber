@@ -411,25 +411,54 @@ class TibberHome:
 
         async def _restarter():
             nonlocal run_start
+            _retry_count = 0
+            await asyncio.sleep(5)
+
+            def _is_ok():
+                return (
+                    run_start in asyncio.all_tasks()
+                    and dt.datetime.now() - self._last_rt_data_received
+                    < dt.timedelta(seconds=60)
+                )
 
             while True:
-                _LOGGER.debug("Last data timestamp: %s", self._last_rt_data_received)
-                if self._last_rt_data_received > dt.datetime.now() - dt.timedelta(
-                    seconds=60
-                ):
-                    await asyncio.sleep(10)
+                _LOGGER.debug(
+                    "Last data timestamp: %s, %ss",
+                    self._last_rt_data_received,
+                    int(
+                        (
+                            dt.datetime.now() - self._last_rt_data_received
+                        ).total_seconds()
+                    ),
+                )
+                if _is_ok():
+                    await asyncio.sleep(1)
+                    _retry_count = 0
                     continue
 
-                _LOGGER.error(
-                    "No data received for 60 seconds, reconnecting home %s",
-                    self.home_id,
+                delay_seconds = min(
+                    random.SystemRandom().randint(1, 60) + _retry_count**2,
+                    20 * 60,
                 )
+                _LOGGER.error(
+                    "No data received for %s seconds, reconnecting home %s in %s seconds",
+                    int(
+                        (
+                            dt.datetime.now() - self._last_rt_data_received
+                        ).total_seconds()
+                    ),
+                    self.home_id,
+                    delay_seconds,
+                )
+                await asyncio.sleep(delay_seconds)
+                if _is_ok():
+                    continue
+                _retry_count += 1
 
                 try:
                     if run_start is not None:
                         _LOGGER.debug("Canceling previous run")
                         run_start.cancel()
-                        await run_start
                 except Exception:  # pylint: disable=broad-except
                     _LOGGER.exception("Error cancel run_start")
                 try:
@@ -439,7 +468,6 @@ class TibberHome:
                     _LOGGER.exception("Error disconnecting from Tibber")
 
                 self._last_rt_data_received = dt.datetime.now()
-                await asyncio.sleep(10)
                 try:
                     _LOGGER.debug("Starting new run")
                     run_start = asyncio.create_task(_start())
@@ -448,7 +476,6 @@ class TibberHome:
 
         async def _start():
             """Subscribe to Tibber."""
-            _retry_count = 0
             self._last_rt_data_received = dt.datetime.now()
             while True:
                 try:
@@ -464,19 +491,12 @@ class TibberHome:
                         callback(data)
                         self._last_rt_data_received = dt.datetime.now()
                         _LOGGER.debug("Data received: %s", self._last_rt_data_received)
-                        _retry_count = 0
                 except Exception:  # pylint: disable=broad-except
-                    delay_seconds = min(
-                        random.SystemRandom().randint(1, 60) + _retry_count**2,
-                        60 * 60,
-                    )
                     _LOGGER.error(
-                        "Tibber connection closed, will reconnect in %s seconds",
-                        delay_seconds,
-                        exc_info=_retry_count > 0,
+                        "Tibber connection closed",
+                        exc_info=True,
                     )
-                    _retry_count += 1
-                    await asyncio.sleep(delay_seconds)
+                    return
 
         run_start = asyncio.create_task(_start())
         asyncio.create_task(_restarter())

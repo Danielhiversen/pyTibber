@@ -76,10 +76,16 @@ class Tibber:
         """Stop subscription manager.
         This method simply calls the stop method of the SubscriptionManager if it is defined.
         """
-        if self.sub_manager is None or self.sub_manager.transport is None:
-            return
-        await self.sub_manager.close_async()
-        self.sub_manager = None
+        try:
+            if (
+                self.sub_manager is None
+                or self.sub_manager.transport is None
+                or not hasattr(self.sub_manager, "session")
+            ):
+                return
+            await self.sub_manager.close_async()
+        finally:
+            self.sub_manager = None
 
     async def rt_connect(self) -> None:
         """Start subscription manager."""
