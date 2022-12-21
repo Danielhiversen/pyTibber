@@ -12,7 +12,7 @@ setup(
     install_requires=[
         "aiohttp>=3.0.6",
         "async_timeout>=1.4.0",
-        "gql",
+        "gql[aiohttp,websockets]",
         "python-dateutil",
     ],
     package_data={"tibber": ["py.typed"]},
