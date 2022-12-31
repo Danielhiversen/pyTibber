@@ -475,25 +475,23 @@ class TibberHome:
             """Subscribe to Tibber."""
             self._last_rt_data_received = dt.datetime.now()
             await self._tibber_control.rt_connect()
-            while True:
-                try:
-                    async for data in self._tibber_control.sub_manager.session.subscribe(
-                        gql(LIVE_SUBSCRIBE % self.home_id)
-                    ):
-                        data = {"data": data}
-                        try:
-                            data = _add_extra_data(data)
-                        except KeyError:
-                            pass
-                        callback(data)
-                        self._last_rt_data_received = dt.datetime.now()
-                        _LOGGER.debug("Data received: %s", self._last_rt_data_received)
-                except Exception:  # pylint: disable=broad-except
-                    _LOGGER.error(
-                        "Tibber connection closed",
-                        exc_info=True,
-                    )
-                    return
+            try:
+                async for data in self._tibber_control.sub_manager.session.subscribe(
+                    gql(LIVE_SUBSCRIBE % self.home_id)
+                ):
+                    data = {"data": data}
+                    try:
+                        data = _add_extra_data(data)
+                    except KeyError:
+                        pass
+                    callback(data)
+                    self._last_rt_data_received = dt.datetime.now()
+                    _LOGGER.debug("Data received: %s", self._last_rt_data_received)
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.error(
+                    "Tibber connection closed",
+                    exc_info=True,
+                )
 
         run_start = asyncio.create_task(_start())
         asyncio.create_task(_restarter())

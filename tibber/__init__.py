@@ -108,10 +108,8 @@ class Tibber:
     async def rt_reconnect(self) -> None:
         """Restart subscription manager."""
         async with LOCK_RT_RECONNECT:
-            if self.rt_subscription_running:
-                return
             if dt.datetime.now() - self._last_rt_connect_attempt < dt.timedelta(
-                seconds=30
+                seconds=60
             ):
                 _LOGGER.warning(
                     "Tibber RT connect attempt too soon, skipping, %s",
