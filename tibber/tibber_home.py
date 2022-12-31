@@ -462,7 +462,11 @@ class TibberHome:
                 except Exception:  # pylint: disable=broad-except
                     _LOGGER.exception("Error cancel run_start")
 
-                await self._tibber_control.rt_reconnect()
+                try:
+                    _LOGGER.debug("Reconnect connection")
+                    await self._tibber_control.rt_reconnect()
+                except Exception:  # pylint: disable=broad-except
+                    _LOGGER.exception("Error reconnecting to Tibber")
 
                 self._last_rt_data_received = dt.datetime.now()
                 try:
