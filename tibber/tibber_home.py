@@ -461,11 +461,8 @@ class TibberHome:
                         run_start.cancel()
                 except Exception:  # pylint: disable=broad-except
                     _LOGGER.exception("Error cancel run_start")
-                try:
-                    _LOGGER.debug("Closing connection")
-                    await self._tibber_control.rt_disconnect()
-                except Exception:  # pylint: disable=broad-except
-                    _LOGGER.exception("Error disconnecting from Tibber")
+
+                await self._tibber_control.rt_reconnect()
 
                 self._last_rt_data_received = dt.datetime.now()
                 try:
@@ -477,9 +474,9 @@ class TibberHome:
         async def _start():
             """Subscribe to Tibber."""
             self._last_rt_data_received = dt.datetime.now()
+            await self._tibber_control.rt_connect()
             while True:
                 try:
-                    await self._tibber_control.rt_connect()
                     async for data in self._tibber_control.sub_manager.session.subscribe(
                         gql(LIVE_SUBSCRIBE % self.home_id)
                     ):

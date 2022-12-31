@@ -5,6 +5,7 @@ import asyncio
 import datetime as dt
 import logging
 import zoneinfo
+import websockets
 
 import aiohttp
 import async_timeout
@@ -19,6 +20,7 @@ DEFAULT_TIMEOUT = 10
 SUB_ENDPOINT = "wss://api.tibber.com/v1-beta/gql/subscriptions"
 
 _LOGGER = logging.getLogger(__name__)
+LOCK_RT_RECONNECT = asyncio.Lock()
 LOCK_RT_CONNECT = asyncio.Lock()
 
 
@@ -66,6 +68,7 @@ class Tibber:
         self._homes: dict[str, TibberHome] = {}
         self.sub_manager: Client | None = None
         self.api_endpoint = api_endpoint
+        self._last_rt_connect_attempt = dt.datetime.fromtimestamp(0)
 
     async def close_connection(self) -> None:
         """Close the Tibber connection.
@@ -92,6 +95,7 @@ class Tibber:
         async with LOCK_RT_CONNECT:
             if self.rt_subscription_running:
                 return
+
             self.sub_manager = Client(
                 transport=WebsocketsTransport(
                     url=SUB_ENDPOINT,
@@ -101,6 +105,29 @@ class Tibber:
                 ),
             )
             await self.sub_manager.connect_async()
+
+    async def rt_reconnect(self) -> None:
+        """Restart subscription manager."""
+        async with LOCK_RT_RECONNECT:
+            if self.rt_subscription_running:
+                return
+            if dt.datetime.now() - self._last_rt_connect_attempt < dt.timedelta(
+                seconds=30
+            ):
+                _LOGGER.warning(
+                    "Tibber RT connect attempt too soon, skipping, %s",
+                    self._last_rt_connect_attempt,
+                )
+                return
+
+            try:
+                _LOGGER.debug("Closing connection")
+                await self.rt_disconnect()
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.exception("Error disconnecting from Tibber")
+
+            self._last_rt_connect_attempt = dt.datetime.now()
+            await self.rt_connect()
 
     async def execute(
         self, document: str, variable_values: dict | None = None
