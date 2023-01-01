@@ -244,7 +244,11 @@ class Tibber:
     @property
     def rt_subscription_running(self) -> bool:
         """Is real time subscription running."""
-        return self.sub_manager.running
+        return (
+            self.sub_manager.transport is not None
+            and isinstance(self.sub_manager.transport, TibberWebsocketsTransport)
+            and self.sub_manager.transport.running
+        )
 
     @property
     def user_id(self) -> str | None:
@@ -277,7 +281,7 @@ class TibberWebsocketsTransport(WebsocketsTransport):
             headers={"User-Agent": user_agent},
             ping_interval=20,
         )
-        self._watchdog_runnner = None
+        self._watchdog_runnner: None | asyncio.Task = None
 
     @property
     def running(self) -> bool:
@@ -324,12 +328,12 @@ class TibberWebsocketsTransport(WebsocketsTransport):
             try:
                 await self.connect()
             except Exception:  # pylint: disable=broad-except
-                deolay_seconds = min(
+                delay_seconds = min(
                     random.SystemRandom().randint(1, 60) + _retry_count**2,
                     20 * 60,
                 )
                 _LOGGER.exception(
-                    "Error in _watchdog connect, retrying in %s seconds", deolay_seconds
+                    "Error in _watchdog connect, retrying in %s seconds", delay_seconds
                 )
                 await asyncio.sleep(delay_seconds)
                 _retry_count += 1

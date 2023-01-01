@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
-import random
 from typing import TYPE_CHECKING, Callable
 
 from dateutil.parser import parse
@@ -424,7 +423,7 @@ class TibberHome:
                 self._last_rt_data_received = dt.datetime.now()
                 _LOGGER.debug("Data received: %s", self._last_rt_data_received)
 
-        run_start = asyncio.create_task(_start())
+        asyncio.create_task(_start())
 
     @property
     def rt_subscription_running(self) -> bool:
