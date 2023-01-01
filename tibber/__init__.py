@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
+import random
 import zoneinfo
 
 import aiohttp
@@ -19,7 +20,6 @@ DEFAULT_TIMEOUT = 10
 SUB_ENDPOINT = "wss://api.tibber.com/v1-beta/gql/subscriptions"
 
 _LOGGER = logging.getLogger(__name__)
-LOCK_RT_RECONNECT = asyncio.Lock()
 LOCK_RT_CONNECT = asyncio.Lock()
 
 
@@ -65,7 +65,13 @@ class Tibber:
         self._active_home_ids: list[str] = []
         self._all_home_ids: list[str] = []
         self._homes: dict[str, TibberHome] = {}
-        self.sub_manager: Client | None = None
+        self.sub_manager: Client = Client(
+            transport=TibberWebsocketsTransport(
+                SUB_ENDPOINT,
+                self._access_token,
+                self.user_agent,
+            ),
+        )
         self.api_endpoint = api_endpoint
         self._last_rt_connect_attempt = dt.datetime.fromtimestamp(0)
 
@@ -78,53 +84,23 @@ class Tibber:
         """Stop subscription manager.
         This method simply calls the stop method of the SubscriptionManager if it is defined.
         """
-        try:
-            if (
-                self.sub_manager is None
-                or self.sub_manager.transport is None
-                or not hasattr(self.sub_manager, "session")
-            ):
-                return
-            await self.sub_manager.close_async()
-        finally:
-            self.sub_manager = None
+        if self.sub_manager.transport is None or not hasattr(
+            self.sub_manager, "session"
+        ):
+            return
+        await self.sub_manager.close_async()
 
     async def rt_connect(self) -> None:
         """Start subscription manager."""
         async with LOCK_RT_CONNECT:
             if self.rt_subscription_running:
                 return
-
-            self.sub_manager = Client(
-                transport=WebsocketsTransport(
-                    url=SUB_ENDPOINT,
-                    init_payload={"token": self._access_token},
-                    headers={"User-Agent": self.user_agent},
-                    ping_interval=20,
-                ),
-            )
-            await self.sub_manager.connect_async()
-
-    async def rt_reconnect(self) -> None:
-        """Restart subscription manager."""
-        async with LOCK_RT_RECONNECT:
-            if dt.datetime.now() - self._last_rt_connect_attempt < dt.timedelta(
-                seconds=60
-            ):
-                _LOGGER.warning(
-                    "Tibber RT connect attempt too soon, skipping, %s",
-                    self._last_rt_connect_attempt,
-                )
-                return
-
             try:
-                _LOGGER.debug("Closing connection")
-                await self.rt_disconnect()
+                await self.sub_manager.connect_async()
             except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Error disconnecting from Tibber")
-
-            self._last_rt_connect_attempt = dt.datetime.now()
-            await self.rt_connect()
+                _LOGGER.exception("Failed to connect to Tibber RT")
+                await self.rt_disconnect()
+                raise
 
     async def execute(
         self, document: str, variable_values: dict | None = None
@@ -268,13 +244,7 @@ class Tibber:
     @property
     def rt_subscription_running(self) -> bool:
         """Is real time subscription running."""
-        return (
-            self.sub_manager is not None
-            and self.sub_manager.transport is not None
-            and isinstance(self.sub_manager.transport, WebsocketsTransport)
-            and self.sub_manager.transport.websocket is not None
-            and self.sub_manager.transport.websocket.open
-        )
+        return self.sub_manager.running
 
     @property
     def user_id(self) -> str | None:
@@ -294,3 +264,72 @@ class Tibber:
 
 class InvalidLogin(Exception):
     """Invalid login exception."""
+
+
+class TibberWebsocketsTransport(WebsocketsTransport):
+    """Tibber websockets transport."""
+
+    def __init__(self, url: str, access_token: str, user_agent: str) -> None:
+        """Initialize."""
+        super().__init__(
+            url=url,
+            init_payload={"token": access_token},
+            headers={"User-Agent": user_agent},
+            ping_interval=20,
+        )
+        self._watchdog_runnner = None
+
+    @property
+    def running(self) -> bool:
+        """Is real time subscription running."""
+        return self.websocket is not None and self.websocket.open
+
+    async def connect(self) -> None:
+        """Connect to websockets."""
+        print(self._watchdog_runnner is None, "connect")
+        if self._watchdog_runnner is None:
+            _LOGGER.debug("Starting watchdog")
+            self._watchdog_runnner = asyncio.create_task(self._watchdog())
+        return await super().connect()
+
+    async def close(self) -> None:
+        """Close websockets."""
+        if self._watchdog_runnner is not None:
+            _LOGGER.debug("Stopping watchdog")
+            self._watchdog_runnner.cancel()
+            self._watchdog_runnner = None
+        return await super().close()
+
+    async def _receive(self) -> str:
+        """Wait the next message from the websocket connection and log the answer"""
+        return await asyncio.wait_for(super()._receive(), timeout=90)
+
+    async def _watchdog(self) -> None:
+        await asyncio.sleep(10)
+
+        _retry_count = 0
+        while True:
+            print("...............", self.receive_data_task in asyncio.all_tasks())
+            if self.receive_data_task in asyncio.all_tasks() and self.running:
+                _retry_count = 0
+                _LOGGER.debug("Watchdog: Connection is alive")
+                await asyncio.sleep(10)
+                continue
+
+            try:
+                await self.close()
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.exception("Error in _watchdog close")
+
+            try:
+                await self.connect()
+            except Exception:  # pylint: disable=broad-except
+                deolay_seconds = min(
+                    random.SystemRandom().randint(1, 60) + _retry_count**2,
+                    20 * 60,
+                )
+                _LOGGER.exception(
+                    "Error in _watchdog connect, retrying in %s seconds", deolay_seconds
+                )
+                await asyncio.sleep(delay_seconds)
+                _retry_count += 1

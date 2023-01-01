@@ -380,7 +380,6 @@ class TibberHome:
 
         :param callback: The function to call when data is received.
         """
-        # pylint: disable=too-many-statements
 
         def _add_extra_data(data: dict) -> dict:
             live_data = data["data"]["liveMeasurement"]
@@ -409,96 +408,23 @@ class TibberHome:
                     self._hourly_consumption_data.peak_hour_time = _time
             return data
 
-        async def _restarter():
-            nonlocal run_start
-            _retry_count = 0
-            await asyncio.sleep(5)
-
-            def _is_ok():
-                return (
-                    run_start in asyncio.all_tasks()
-                    and dt.datetime.now() - self._last_rt_data_received
-                    < dt.timedelta(seconds=60)
-                )
-
-            while True:
-                _LOGGER.debug(
-                    "Last data timestamp: %s, %ss",
-                    self._last_rt_data_received,
-                    int(
-                        (
-                            dt.datetime.now() - self._last_rt_data_received
-                        ).total_seconds()
-                    ),
-                )
-                if _is_ok():
-                    await asyncio.sleep(1)
-                    _retry_count = 0
-                    continue
-
-                delay_seconds = min(
-                    random.SystemRandom().randint(1, 60) + _retry_count**2,
-                    20 * 60,
-                )
-                _LOGGER.error(
-                    "No data received for %s seconds, reconnecting home %s in %s seconds",
-                    int(
-                        (
-                            dt.datetime.now() - self._last_rt_data_received
-                        ).total_seconds()
-                    ),
-                    self.home_id,
-                    delay_seconds,
-                )
-                await asyncio.sleep(delay_seconds)
-                if _is_ok():
-                    continue
-                _retry_count += 1
-
-                try:
-                    if run_start is not None:
-                        _LOGGER.debug("Canceling previous run")
-                        run_start.cancel()
-                except Exception:  # pylint: disable=broad-except
-                    _LOGGER.exception("Error cancel run_start")
-
-                try:
-                    _LOGGER.debug("Reconnect connection")
-                    await self._tibber_control.rt_reconnect()
-                except Exception:  # pylint: disable=broad-except
-                    _LOGGER.exception("Error reconnecting to Tibber")
-
-                self._last_rt_data_received = dt.datetime.now()
-                try:
-                    _LOGGER.debug("Starting new run")
-                    run_start = asyncio.create_task(_start())
-                except Exception:  # pylint: disable=broad-except
-                    _LOGGER.exception("Error starting Tibber rt")
-
         async def _start():
             """Subscribe to Tibber."""
             self._last_rt_data_received = dt.datetime.now()
             await self._tibber_control.rt_connect()
-            try:
-                async for data in self._tibber_control.sub_manager.session.subscribe(
-                    gql(LIVE_SUBSCRIBE % self.home_id)
-                ):
-                    data = {"data": data}
-                    try:
-                        data = _add_extra_data(data)
-                    except KeyError:
-                        pass
-                    callback(data)
-                    self._last_rt_data_received = dt.datetime.now()
-                    _LOGGER.debug("Data received: %s", self._last_rt_data_received)
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.error(
-                    "Tibber connection closed",
-                    exc_info=True,
-                )
+            async for data in self._tibber_control.sub_manager.session.subscribe(
+                gql(LIVE_SUBSCRIBE % self.home_id)
+            ):
+                data = {"data": data}
+                try:
+                    data = _add_extra_data(data)
+                except KeyError:
+                    pass
+                callback(data)
+                self._last_rt_data_received = dt.datetime.now()
+                _LOGGER.debug("Data received: %s", self._last_rt_data_received)
 
         run_start = asyncio.create_task(_start())
-        asyncio.create_task(_restarter())
 
     @property
     def rt_subscription_running(self) -> bool:
