@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Final
 
-__version__ = "0.26.6"
+__version__ = "0.26.7"
 
 RESOLUTION_HOURLY: Final = "HOURLY"
 RESOLUTION_DAILY: Final = "DAILY"
