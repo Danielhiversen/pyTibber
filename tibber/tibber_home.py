@@ -431,7 +431,6 @@ class TibberHome:
                     await asyncio.sleep(10)
 
         asyncio.create_task(_start())
-        print("Started rt_subscribe", self.home_id)
         await self._tibber_control.rt_connect()
 
     @property

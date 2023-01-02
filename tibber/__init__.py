@@ -92,7 +92,6 @@ class Tibber:
         async with LOCK_RT_CONNECT:
             if self.rt_subscription_running:
                 return
-            await asyncio.sleep(10)
             try:
                 await self.sub_manager.connect_async()
             except Exception:  # pylint: disable=broad-except
@@ -312,7 +311,6 @@ class TibberWebsocketsTransport(WebsocketsTransport):
 
     async def connect(self) -> None:
         """Connect to websockets."""
-        print(self._watchdog_runner is None, "connect")
         if self._watchdog_runner is None:
             _LOGGER.debug("Starting watchdog")
             self._watchdog_running = True
@@ -343,7 +341,6 @@ class TibberWebsocketsTransport(WebsocketsTransport):
 
         _retry_count = 0
         while self._watchdog_running:
-            print("...............", self.receive_data_task in asyncio.all_tasks())
             if self.receive_data_task in asyncio.all_tasks() and self.running:
                 _retry_count = 0
                 _LOGGER.debug("Watchdog: Connection is alive")
