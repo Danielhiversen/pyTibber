@@ -72,7 +72,7 @@ class TibberHome:
 
         now = dt.datetime.utcnow().replace(tzinfo=dt.timezone.utc)
         local_now = now.astimezone(self._tibber_control.time_zone)
-        n_hours = 30 * 24
+        n_hours = 60 * 24
 
         if self.has_real_time_consumption:
             if (
@@ -409,21 +409,30 @@ class TibberHome:
 
         async def _start():
             """Subscribe to Tibber."""
-            self._last_rt_data_received = dt.datetime.now()
-            await self._tibber_control.rt_connect()
-            async for data in self._tibber_control.sub_manager.session.subscribe(
-                gql(LIVE_SUBSCRIBE % self.home_id)
-            ):
-                data = {"data": data}
+            while True:
                 try:
-                    data = _add_extra_data(data)
-                except KeyError:
-                    pass
-                callback(data)
-                self._last_rt_data_received = dt.datetime.now()
-                _LOGGER.debug("Data received: %s", self._last_rt_data_received)
+                    async for data in self._tibber_control.sub_manager.session.subscribe(
+                        gql(LIVE_SUBSCRIBE % self.home_id)
+                    ):
+                        data = {"data": data}
+                        try:
+                            data = _add_extra_data(data)
+                        except KeyError:
+                            pass
+                        callback(data)
+                        self._last_rt_data_received = dt.datetime.now()
+                        _LOGGER.debug(
+                            "Data received for %s",
+                            self.home_id,
+                        )
+                except Exception:  # pylint: disable=broad-except
+                    if self.rt_subscription_running:
+                        _LOGGER.exception("Error in rt_subscribe")
+                    await asyncio.sleep(10)
 
         asyncio.create_task(_start())
+        print("Started rt_subscribe", self.home_id)
+        await self._tibber_control.rt_connect()
 
     @property
     def rt_subscription_running(self) -> bool:
@@ -447,7 +456,7 @@ class TibberHome:
         """
         cursor = ""
         res = []
-        max_n_data = 7000
+        max_n_data = 5000
         while n_data > 0:
             _n_data = min(max_n_data, n_data)
             cons_or_prod_str = "production" if production else "consumption"
@@ -459,7 +468,7 @@ class TibberHome:
                 "profit" if production else "totalCost cost",
                 cursor,
             )
-            if not (data := await self._tibber_control.execute(query)):
+            if not (data := await self._tibber_control.execute(query, timeout=30)):
                 _LOGGER.error("Could not get the data.")
                 continue
             data = data["viewer"]["home"][cons_or_prod_str]
