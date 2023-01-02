@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
-import random
 from typing import TYPE_CHECKING, Callable
 
 from dateutil.parser import parse
@@ -73,7 +72,7 @@ class TibberHome:
 
         now = dt.datetime.utcnow().replace(tzinfo=dt.timezone.utc)
         local_now = now.astimezone(self._tibber_control.time_zone)
-        n_hours = 30 * 24
+        n_hours = 60 * 24
 
         if self.has_real_time_consumption:
             if (
@@ -380,7 +379,6 @@ class TibberHome:
 
         :param callback: The function to call when data is received.
         """
-        # pylint: disable=too-many-statements
 
         def _add_extra_data(data: dict) -> dict:
             live_data = data["data"]["liveMeasurement"]
@@ -409,77 +407,10 @@ class TibberHome:
                     self._hourly_consumption_data.peak_hour_time = _time
             return data
 
-        async def _restarter():
-            nonlocal run_start
-            _retry_count = 0
-            await asyncio.sleep(5)
-
-            def _is_ok():
-                return (
-                    run_start in asyncio.all_tasks()
-                    and dt.datetime.now() - self._last_rt_data_received
-                    < dt.timedelta(seconds=60)
-                )
-
-            while True:
-                _LOGGER.debug(
-                    "Last data timestamp: %s, %ss",
-                    self._last_rt_data_received,
-                    int(
-                        (
-                            dt.datetime.now() - self._last_rt_data_received
-                        ).total_seconds()
-                    ),
-                )
-                if _is_ok():
-                    await asyncio.sleep(1)
-                    _retry_count = 0
-                    continue
-
-                delay_seconds = min(
-                    random.SystemRandom().randint(1, 60) + _retry_count**2,
-                    20 * 60,
-                )
-                _LOGGER.error(
-                    "No data received for %s seconds, reconnecting home %s in %s seconds",
-                    int(
-                        (
-                            dt.datetime.now() - self._last_rt_data_received
-                        ).total_seconds()
-                    ),
-                    self.home_id,
-                    delay_seconds,
-                )
-                await asyncio.sleep(delay_seconds)
-                if _is_ok():
-                    continue
-                _retry_count += 1
-
-                try:
-                    if run_start is not None:
-                        _LOGGER.debug("Canceling previous run")
-                        run_start.cancel()
-                except Exception:  # pylint: disable=broad-except
-                    _LOGGER.exception("Error cancel run_start")
-                try:
-                    _LOGGER.debug("Closing connection")
-                    await self._tibber_control.rt_disconnect()
-                except Exception:  # pylint: disable=broad-except
-                    _LOGGER.exception("Error disconnecting from Tibber")
-
-                self._last_rt_data_received = dt.datetime.now()
-                try:
-                    _LOGGER.debug("Starting new run")
-                    run_start = asyncio.create_task(_start())
-                except Exception:  # pylint: disable=broad-except
-                    _LOGGER.exception("Error starting Tibber rt")
-
         async def _start():
             """Subscribe to Tibber."""
-            self._last_rt_data_received = dt.datetime.now()
             while True:
                 try:
-                    await self._tibber_control.rt_connect()
                     async for data in self._tibber_control.sub_manager.session.subscribe(
                         gql(LIVE_SUBSCRIBE % self.home_id)
                     ):
@@ -490,16 +421,17 @@ class TibberHome:
                             pass
                         callback(data)
                         self._last_rt_data_received = dt.datetime.now()
-                        _LOGGER.debug("Data received: %s", self._last_rt_data_received)
+                        _LOGGER.debug(
+                            "Data received for %s",
+                            self.home_id,
+                        )
                 except Exception:  # pylint: disable=broad-except
-                    _LOGGER.error(
-                        "Tibber connection closed",
-                        exc_info=True,
-                    )
-                    return
+                    if self.rt_subscription_running:
+                        _LOGGER.exception("Error in rt_subscribe")
+                    await asyncio.sleep(10)
 
-        run_start = asyncio.create_task(_start())
-        asyncio.create_task(_restarter())
+        asyncio.create_task(_start())
+        await self._tibber_control.rt_connect()
 
     @property
     def rt_subscription_running(self) -> bool:
@@ -523,7 +455,7 @@ class TibberHome:
         """
         cursor = ""
         res = []
-        max_n_data = 7000
+        max_n_data = 5000
         while n_data > 0:
             _n_data = min(max_n_data, n_data)
             cons_or_prod_str = "production" if production else "consumption"
@@ -535,7 +467,7 @@ class TibberHome:
                 "profit" if production else "totalCost cost",
                 cursor,
             )
-            if not (data := await self._tibber_control.execute(query)):
+            if not (data := await self._tibber_control.execute(query, timeout=30)):
                 _LOGGER.error("Could not get the data.")
                 continue
             data = data["viewer"]["home"][cons_or_prod_str]
