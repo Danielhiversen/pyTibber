@@ -64,7 +64,7 @@ class Tibber:
         self._active_home_ids: list[str] = []
         self._all_home_ids: list[str] = []
         self._homes: dict[str, TibberHome] = {}
-        self.sub_manager = None
+        self.sub_manager: Client = Client()
         self.api_endpoint = api_endpoint
         self.sub_endpoint = None
 
@@ -84,7 +84,7 @@ class Tibber:
     async def rt_connect(self) -> None:
         """Start subscription manager."""
         if self.sub_manager is None:
-            self.sub_manager: Client = Client(
+            self.sub_manager = Client(
                 transport=TibberWebsocketsTransport(
                     self.sub_endpoint,
                     self._access_token,
@@ -205,7 +205,10 @@ class Tibber:
             self._all_home_ids += [home_id]
             if not (subs := _home.get("subscriptions")):
                 continue
-            if subs[0].get("status", "ended") is not None and subs[0].get("status", "ended").lower() == "running":
+            if (
+                subs[0].get("status", "ended") is not None
+                and subs[0].get("status", "ended").lower() == "running"
+            ):
                 self._active_home_ids += [home_id]
 
     def get_home_ids(self, only_active: bool = True) -> list[str]:
