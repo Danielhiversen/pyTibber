@@ -64,7 +64,7 @@ class Tibber:
         self._active_home_ids: list[str] = []
         self._all_home_ids: list[str] = []
         self._homes: dict[str, TibberHome] = {}
-        self.sub_manager: Client = Client()
+        self.sub_manager: Client = None # type: ignore
         self.api_endpoint = api_endpoint
         self.sub_endpoint = None
 
