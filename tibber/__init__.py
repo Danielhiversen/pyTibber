@@ -97,8 +97,8 @@ class Tibber:
                 return
             try:
                 await self.sub_manager.connect_async()
-            except Exception as e:  # pylint: disable=broad-except
-                _LOGGER.error("Failed to connect to Tibber RT %s", str(e))
+            except Exception as exception:  # pylint: disable=broad-except
+                _LOGGER.error("Failed to connect to Tibber RT %s", str(exception))
                 await self.rt_disconnect()
                 raise
 
