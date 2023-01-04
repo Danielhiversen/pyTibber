@@ -4,7 +4,11 @@ HISTORIC_DATA = """
                 {{
                   viewer {{
                     home(id: "{0}") {{
-                      {1}(resolution: {2}, last: {3}) {{
+                      {1}(resolution: {2}, last: {3}, before: "{5}") {{
+                        pageInfo {{
+                          hasPreviousPage
+                          startCursor
+                        }}
                         nodes {{
                           from
                           unitPrice

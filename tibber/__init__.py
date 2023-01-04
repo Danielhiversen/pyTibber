@@ -4,11 +4,13 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
+import random
 import zoneinfo
 
 import aiohttp
 import async_timeout
-from graphql_subscription_manager import SubscriptionManager
+from gql import Client
+from gql.transport.websockets import WebsocketsTransport
 
 from .const import API_ENDPOINT, DEMO_TOKEN, __version__
 from .gql_queries import INFO, PUSH_NOTIFICATION
@@ -17,12 +19,13 @@ from .tibber_home import TibberHome
 DEFAULT_TIMEOUT = 10
 
 _LOGGER = logging.getLogger(__name__)
+LOCK_RT_CONNECT = asyncio.Lock()
 
 
 class Tibber:
     """Class to communicate with the Tibber api."""
 
-    # pylint: disable=too-many-instance-attributes
+    # pylint: disable=too-many-instance-attributes, too-many-arguments
 
     def __init__(
         self,
@@ -31,25 +34,28 @@ class Tibber:
         websession: aiohttp.ClientSession | None = None,
         time_zone: dt.tzinfo | None = None,
         user_agent: str | None = None,
-        api_endpoint: str | None = API_ENDPOINT,  # Allow overriding API endpoint for easy testing
+        api_endpoint: str = API_ENDPOINT,
     ):
         """Initialize the Tibber connection.
 
         :param access_token: The access token to access the Tibber API with.
         :param websession: The websession to use when communicating with the Tibber API.
         :param time_zone: The time zone to display times in and to use.
-        :param user_agent: User agent identifier for the platform running this
+        :param user_agent: User agent identifier for the platform running this. Required if websession is None.
+        :param api_endpoint: Allow overriding API endpoint for easy testing
         """
-        if user_agent is None:
-            raise Exception("Please provide value for HTTP user agent. Example: MyHomeAutomationServer/1.2.3")
 
-        user_agent = f"{user_agent} pyTibber/{__version__}"
         if websession is None:
-            self.websession = aiohttp.ClientSession(
-                headers={aiohttp.hdrs.USER_AGENT: user_agent}
+            websession = aiohttp.ClientSession()
+        elif user_agent is None:
+            user_agent = websession.headers.get(aiohttp.hdrs.USER_AGENT)
+        if user_agent is None:
+            raise Exception(
+                "Please provide value for HTTP user agent. Example: MyHomeAutomationServer/1.2.3"
             )
-        else:
-            self.websession = websession
+        self.user_agent = f"{user_agent} pyTibber/{__version__}"
+        self.websession = websession
+
         self._timeout: int = timeout
         self._access_token: str = access_token
         self.time_zone: dt.tzinfo = time_zone or zoneinfo.ZoneInfo("UTC")
@@ -58,64 +64,72 @@ class Tibber:
         self._active_home_ids: list[str] = []
         self._all_home_ids: list[str] = []
         self._homes: dict[str, TibberHome] = {}
-        self.sub_manager: SubscriptionManager | None = None
+        self.sub_manager: Client = Client(
+            transport=TibberWebsocketsTransport(
+                SUB_ENDPOINT,
+                self._access_token,
+                self.user_agent,
+            ),
+        )
         self.api_endpoint = api_endpoint
-        try:
-            user_agent = self.websession._default_headers.get(
-                aiohttp.hdrs.USER_AGENT, ""
-            )  # will be fixed by aiohttp 4.0
-        except Exception:  # pylint: disable=broad-except
-            user_agent = ""
-        self.user_agent = f"{user_agent} pyTibber/{__version__}"
 
     async def close_connection(self) -> None:
         """Close the Tibber connection.
         This method simply closes the websession used by the object."""
         await self.websession.close()
 
-    async def rt_connect(self) -> None:
-        """Start the GraphQL subscription manager for real time data.
-        This method instantiates the graphql_subscription_manager.SubscriptionManager
-        class which authenticates the user with the provided access token, and then
-        starts the SubscriptionManager.
-        """
-        if self.sub_manager is not None:
-            return
-        self.sub_manager = SubscriptionManager(
-            {"token": self._access_token},
-            self.sub_endpoint,
-            self.user_agent,
-        )
-        self.sub_manager.start()
-
     async def rt_disconnect(self) -> None:
         """Stop subscription manager.
         This method simply calls the stop method of the SubscriptionManager if it is defined.
         """
-        if self.sub_manager is None:
+        if not hasattr(self.sub_manager, "session"):
             return
-        await self.sub_manager.stop()
+        await self.sub_manager.close_async()
+
+    async def rt_connect(self) -> None:
+        """Start subscription manager."""
+        async with LOCK_RT_CONNECT:
+            if self.rt_subscription_running:
+                return
+            try:
+                await self.sub_manager.connect_async()
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.error("Failed to connect to Tibber RT")
+                await self.rt_disconnect()
+                raise
 
     async def execute(
-        self, document: str, variable_values: dict | None = None
+        self,
+        document: str,
+        variable_values: dict | None = None,
+        timeout: int | None = None,
     ) -> dict | None:
         """Execute a GraphQL query and return the data.
 
         :param document: The GraphQL query to request.
         :param variable_values: The GraphQL variables to parse with the request.
+        :param timeout: The timeout to use for the request.
         """
-        if (res := await self._execute(document, variable_values)) is None:
+        if (
+            res := await self._execute(document, variable_values, timeout=timeout)
+        ) is None:
             return None
         return res.get("data")
 
     async def _execute(
-        self, document: str, variable_values: dict | None = None, retry: int = 2
+        self,
+        document: str,
+        variable_values: dict | None = None,
+        retry: int = 2,
+        timeout: int | None = None,
     ) -> dict | None:
         """Execute a GraphQL query and return the result as a dict loaded from the json response.
 
         :param document: The GraphQL query to request.
         :param variable_values: The GraphQL variables to parse with the request.
         """
+        timeout = timeout or self._timeout
+
         payload = {"query": document, "variables": variable_values or {}}
 
         post_args = {
@@ -126,18 +140,30 @@ class Tibber:
             "data": payload,
         }
         try:
-            async with async_timeout.timeout(self._timeout):
+            async with async_timeout.timeout(timeout):
                 resp = await self.websession.post(self.api_endpoint, **post_args)
             if resp.status != 200:
                 _LOGGER.error("Error connecting to Tibber, resp code: %s", resp.status)
                 return None
             result = await resp.json()
-        except aiohttp.ClientError as err:
+        except aiohttp.ClientError:
             if retry > 0:
-                return await self._execute(document, variable_values, retry - 1)
-            _LOGGER.error("Error connecting to Tibber: %s ", err, exc_info=True)
+                return await self._execute(
+                    document,
+                    variable_values,
+                    retry - 1,
+                    timeout,
+                )
+            _LOGGER.error("Error connecting to Tibber", exc_info=True)
             raise
         except asyncio.TimeoutError:
+            if retry > 0:
+                return await self._execute(
+                    document,
+                    variable_values,
+                    retry - 1,
+                    timeout,
+                )
             _LOGGER.error("Timed out when connecting to Tibber")
             raise
         if errors := result.get("errors"):
@@ -242,6 +268,14 @@ class Tibber:
         await asyncio.gather(*tasks)
 
     @property
+    def rt_subscription_running(self) -> bool:
+        """Is real time subscription running."""
+        return (
+            isinstance(self.sub_manager.transport, TibberWebsocketsTransport)
+            and self.sub_manager.transport.running
+        )
+
+    @property
     def user_id(self) -> str | None:
         """Return user id of user."""
         return self._user_id
@@ -259,3 +293,89 @@ class Tibber:
 
 class InvalidLogin(Exception):
     """Invalid login exception."""
+
+
+class TibberWebsocketsTransport(WebsocketsTransport):
+    """Tibber websockets transport."""
+
+    def __init__(self, url: str, access_token: str, user_agent: str) -> None:
+        """Initialize TibberWebsocketsTransport."""
+        super().__init__(
+            url=url,
+            init_payload={"token": access_token},
+            headers={"User-Agent": user_agent},
+            ping_interval=10,
+        )
+        self._watchdog_runner: None | asyncio.Task = None
+        self._watchdog_running: bool = False
+
+    @property
+    def running(self) -> bool:
+        """Is real time subscription running."""
+        return self.websocket is not None and self.websocket.open
+
+    async def connect(self) -> None:
+        """Connect to websockets."""
+        if self._watchdog_runner is None:
+            _LOGGER.debug("Starting watchdog")
+            self._watchdog_running = True
+            self._watchdog_runner = asyncio.create_task(self._watchdog())
+        return await super().connect()
+
+    async def close(self) -> None:
+        """Close websockets."""
+        if self._watchdog_runner is not None:
+            _LOGGER.debug("Stopping watchdog")
+            self._watchdog_running = False
+            self._watchdog_runner.cancel()
+            self._watchdog_runner = None
+        return await super().close()
+
+    async def _receive(self) -> str:
+        """Wait the next message from the websocket connection."""
+        timeout = 90
+        try:
+            return await asyncio.wait_for(super()._receive(), timeout=timeout)
+        except asyncio.TimeoutError:
+            _LOGGER.error("No data received from Tibber for %s seconds", timeout)
+            raise
+
+    async def _watchdog(self) -> None:
+        """Watchdog to keep connection alive."""
+        await asyncio.sleep(60)
+
+        _retry_count = 0
+        while self._watchdog_running:
+            if self.receive_data_task in asyncio.all_tasks() and self.running:
+                _retry_count = 0
+                _LOGGER.debug("Watchdog: Connection is alive")
+                await asyncio.sleep(5)
+                continue
+
+            _LOGGER.error("Watchdog: Connection is down")
+
+            try:
+                await super().close()
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.exception("Error in watchdog close")
+
+            if not self._watchdog_running:
+                return
+
+            try:
+                await super().connect()
+            except Exception:  # pylint: disable=broad-except
+                delay_seconds = min(
+                    random.SystemRandom().randint(1, 60) + _retry_count**2,
+                    20 * 60,
+                )
+                _retry_count += 1
+                _LOGGER.error(
+                    "Error in watchdog connect, retrying in %s seconds, %s",
+                    delay_seconds,
+                    _retry_count,
+                    exc_info=_retry_count > 1,
+                )
+                await asyncio.sleep(delay_seconds)
+            else:
+                _LOGGER.debug("Watchdog: Reconnected successfully")
