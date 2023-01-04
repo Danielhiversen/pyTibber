@@ -97,8 +97,8 @@ class Tibber:
                 return
             try:
                 await self.sub_manager.connect_async()
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.error("Failed to connect to Tibber RT")
+            except Exception as e:  # pylint: disable=broad-except
+                _LOGGER.error("Failed to connect to Tibber RT %s", str(e))
                 await self.rt_disconnect()
                 raise
 
@@ -192,7 +192,7 @@ class Tibber:
         if not (sub_endpoint := viewer.get("websocketSubscriptionUrl")):
             return
 
-        _LOGGER.info("Using websocket subscription url %s", sub_endpoint)
+        _LOGGER.debug("Using websocket subscription url %s", sub_endpoint)
         self.sub_endpoint = sub_endpoint
 
         self._name = viewer.get("name")
