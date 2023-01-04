@@ -64,14 +64,9 @@ class Tibber:
         self._active_home_ids: list[str] = []
         self._all_home_ids: list[str] = []
         self._homes: dict[str, TibberHome] = {}
-        self.sub_manager: Client = Client(
-            transport=TibberWebsocketsTransport(
-                SUB_ENDPOINT,
-                self._access_token,
-                self.user_agent,
-            ),
-        )
+        self.sub_manager = None
         self.api_endpoint = api_endpoint
+        self.sub_endpoint = None
 
     async def close_connection(self) -> None:
         """Close the Tibber connection.
@@ -88,6 +83,15 @@ class Tibber:
 
     async def rt_connect(self) -> None:
         """Start subscription manager."""
+        if self.sub_manager is None:
+            self.sub_manager: Client = Client(
+                transport=TibberWebsocketsTransport(
+                    self.sub_endpoint,
+                    self._access_token,
+                    self.user_agent,
+                ),
+            )
+
         async with LOCK_RT_CONNECT:
             if self.rt_subscription_running:
                 return
@@ -188,7 +192,7 @@ class Tibber:
         if not (sub_endpoint := viewer.get("websocketSubscriptionUrl")):
             return
 
-        _LOGGER.info(f"Using websocket subscription url {sub_endpoint}")
+        _LOGGER.info("Using websocket subscription url %s", sub_endpoint)
         self.sub_endpoint = sub_endpoint
 
         self._name = viewer.get("name")
