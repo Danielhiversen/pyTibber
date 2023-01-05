@@ -206,8 +206,8 @@ class Tibber:
             if not (subs := _home.get("subscriptions")):
                 continue
             if (
-                subs[0].get("status", "ended") is not None
-                and subs[0].get("status", "ended").lower() == "running"
+                subs[0].get("status") is not None
+                and subs[0]["status"].lower() == "running"
             ):
                 self._active_home_ids += [home_id]
 
