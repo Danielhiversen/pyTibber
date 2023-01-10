@@ -77,12 +77,15 @@ class Tibber:
         """Stop subscription manager.
         This method simply calls the stop method of the SubscriptionManager if it is defined.
         """
-        if not hasattr(self.sub_manager, "session"):
+        if self.sub_manager is None or not hasattr(self.sub_manager, "session"):
             return
         await self.sub_manager.close_async()
 
     async def rt_connect(self) -> None:
         """Start subscription manager."""
+        if self.sub_endpoint is None:
+            raise Exception("Subscription endpoint not initialized")
+
         if self.sub_manager is None:
             self.sub_manager = Client(
                 transport=TibberWebsocketsTransport(
@@ -278,7 +281,8 @@ class Tibber:
     def rt_subscription_running(self) -> bool:
         """Is real time subscription running."""
         return (
-            isinstance(self.sub_manager.transport, TibberWebsocketsTransport)
+            self.sub_manager is not None
+            and isinstance(self.sub_manager.transport, TibberWebsocketsTransport)
             and self.sub_manager.transport.running
         )
 
