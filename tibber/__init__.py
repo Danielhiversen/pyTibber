@@ -49,7 +49,7 @@ class Tibber:
         """
 
         if websession is None:
-            websession = aiohttp.ClientSession()
+            websession = ClientSession()
         elif user_agent is None:
             user_agent = websession.headers.get(hdrs.USER_AGENT)
         if user_agent is None:
@@ -157,7 +157,7 @@ class Tibber:
                     retry - 1,
                     timeout,
                 )
-            _LOGGER.error("Error connecting to Tibber", exc_info=True)
+            _LOGGER.error("Error connecting to Tibber: %s ", err, exc_info=True)
             raise
         except asyncio.TimeoutError:
             if retry > 0:
