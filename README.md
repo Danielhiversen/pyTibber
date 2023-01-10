@@ -31,7 +31,7 @@ import tibber.const
 import tibber
 
 access_token = tibber.const.DEMO_TOKEN
-tibber_connection = tibber.Tibber(access_token)
+tibber_connection = tibber.Tibber(access_token, user_agent="user_agent")
 await tibber_connection.update_info()
 print(tibber_connection.name)
 
@@ -69,7 +69,7 @@ def _callback(pkg):
 
 async def run():
     async with aiohttp.ClientSession() as session:
-        tibber_connection = tibber.Tibber(ACCESS_TOKEN, websession=session)
+        tibber_connection = tibber.Tibber(ACCESS_TOKEN, websession=session, user_agent="user_agent")
         await tibber_connection.update_info()
     home = tibber_connection.get_homes()[0]
     await home.rt_subscribe(_callback)
