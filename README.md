@@ -31,7 +31,7 @@ import tibber.const
 import tibber
 
 access_token = tibber.const.DEMO_TOKEN
-tibber_connection = tibber.Tibber(access_token, user_agent="user_agent")
+tibber_connection = tibber.Tibber(access_token, user_agent="change_this")
 await tibber_connection.update_info()
 print(tibber_connection.name)
 
@@ -69,13 +69,13 @@ def _callback(pkg):
 
 async def run():
     async with aiohttp.ClientSession() as session:
-        tibber_connection = tibber.Tibber(ACCESS_TOKEN, websession=session, user_agent="user_agent")
+        tibber_connection = tibber.Tibber(ACCESS_TOKEN, websession=session, user_agent="change_this")
         await tibber_connection.update_info()
     home = tibber_connection.get_homes()[0]
     await home.rt_subscribe(_callback)
 
 ```
 
-The library is used as part of Home Assitant: [https://github.com/home-assistant/home-assistant/tree/dev/homeassistant/components/tibber](https://github.com/home-assistant/home-assistant/tree/dev/homeassistant/components/tibber)
+The library is used as part of Home Assistant: [https://github.com/home-assistant/home-assistant/tree/dev/homeassistant/components/tibber](https://github.com/home-assistant/home-assistant/tree/dev/homeassistant/components/tibber)
 
 
