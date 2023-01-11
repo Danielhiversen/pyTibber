@@ -298,9 +298,7 @@ class TibberWebsocketsTransport(WebsocketsTransport):
         )
         self._watchdog_runner: None | asyncio.Task = None
         self._watchdog_running: bool = False
-        self._reconnect_at: dt.datetime = (
-            dt.datetime.now() + dt.timedelta(seconds=90)
-        )
+        self._reconnect_at: dt.datetime = dt.datetime.now() + dt.timedelta(seconds=90)
         self._timeout: int = 90
 
     @property
@@ -332,9 +330,7 @@ class TibberWebsocketsTransport(WebsocketsTransport):
         except asyncio.TimeoutError:
             _LOGGER.error("No data received from Tibber for %s seconds", self._timeout)
             raise
-        self._reconnect_at = dt.datetime.now() + dt.timedelta(
-            seconds=self._timeout
-        )
+        self._reconnect_at = dt.datetime.now() + dt.timedelta(seconds=self._timeout)
         return msg
 
     async def _watchdog(self) -> None:
@@ -358,9 +354,7 @@ class TibberWebsocketsTransport(WebsocketsTransport):
                 self._reconnect_at,
                 self.receive_data_task in asyncio.all_tasks(),
             )
-            self._reconnect_at = dt.datetime.now() + dt.timedelta(
-                seconds=self._timeout
-            )
+            self._reconnect_at = dt.datetime.now() + dt.timedelta(seconds=self._timeout)
 
             try:
                 await super().close()
