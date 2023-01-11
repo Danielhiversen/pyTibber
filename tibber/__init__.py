@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import datetime
 import datetime as dt
 import logging
 import random
@@ -299,8 +298,8 @@ class TibberWebsocketsTransport(WebsocketsTransport):
         )
         self._watchdog_runner: None | asyncio.Task = None
         self._watchdog_running: bool = False
-        self._reconnect_at: datetime.datetime = (
-            datetime.datetime.now() + datetime.timedelta(seconds=90)
+        self._reconnect_at: dt.datetime = (
+            dt.datetime.now() + dt.timedelta(seconds=90)
         )
         self._timeout: int = 90
 
@@ -333,7 +332,7 @@ class TibberWebsocketsTransport(WebsocketsTransport):
         except asyncio.TimeoutError:
             _LOGGER.error("No data received from Tibber for %s seconds", self._timeout)
             raise
-        self._reconnect_at = datetime.datetime.now() + datetime.timedelta(
+        self._reconnect_at = dt.datetime.now() + dt.timedelta(
             seconds=self._timeout
         )
         return msg
@@ -347,7 +346,7 @@ class TibberWebsocketsTransport(WebsocketsTransport):
             if (
                 self.receive_data_task in asyncio.all_tasks()
                 and self.running
-                and self._reconnect_at > datetime.datetime.now()
+                and self._reconnect_at > dt.datetime.now()
             ):
                 _retry_count = 0
                 _LOGGER.debug("Watchdog: Connection is alive")
@@ -359,7 +358,7 @@ class TibberWebsocketsTransport(WebsocketsTransport):
                 self._reconnect_at,
                 self.receive_data_task in asyncio.all_tasks(),
             )
-            self._reconnect_at = datetime.datetime.now() + datetime.timedelta(
+            self._reconnect_at = dt.datetime.now() + dt.timedelta(
                 seconds=self._timeout
             )
 
