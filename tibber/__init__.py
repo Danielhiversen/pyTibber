@@ -298,6 +298,8 @@ class TibberWebsocketsTransport(WebsocketsTransport):
         )
         self._watchdog_runner: None | asyncio.Task = None
         self._watchdog_running: bool = False
+        self._reconnect_at: dt.datetime = dt.datetime.now() + dt.timedelta(seconds=90)
+        self._timeout: int = 90
 
     @property
     def running(self) -> bool:
@@ -310,7 +312,7 @@ class TibberWebsocketsTransport(WebsocketsTransport):
             _LOGGER.debug("Starting watchdog")
             self._watchdog_running = True
             self._watchdog_runner = asyncio.create_task(self._watchdog())
-        return await super().connect()
+        await super().connect()
 
     async def close(self) -> None:
         """Close websockets."""
@@ -319,16 +321,17 @@ class TibberWebsocketsTransport(WebsocketsTransport):
             self._watchdog_running = False
             self._watchdog_runner.cancel()
             self._watchdog_runner = None
-        return await super().close()
+        await super().close()
 
     async def _receive(self) -> str:
         """Wait the next message from the websocket connection."""
-        timeout = 90
         try:
-            return await asyncio.wait_for(super()._receive(), timeout=timeout)
+            msg = await asyncio.wait_for(super()._receive(), timeout=self._timeout)
         except asyncio.TimeoutError:
-            _LOGGER.error("No data received from Tibber for %s seconds", timeout)
+            _LOGGER.error("No data received from Tibber for %s seconds", self._timeout)
             raise
+        self._reconnect_at = dt.datetime.now() + dt.timedelta(seconds=self._timeout)
+        return msg
 
     async def _watchdog(self) -> None:
         """Watchdog to keep connection alive."""
@@ -336,13 +339,22 @@ class TibberWebsocketsTransport(WebsocketsTransport):
 
         _retry_count = 0
         while self._watchdog_running:
-            if self.receive_data_task in asyncio.all_tasks() and self.running:
+            if (
+                self.receive_data_task in asyncio.all_tasks()
+                and self.running
+                and self._reconnect_at > dt.datetime.now()
+            ):
                 _retry_count = 0
                 _LOGGER.debug("Watchdog: Connection is alive")
                 await asyncio.sleep(5)
                 continue
 
-            _LOGGER.error("Watchdog: Connection is down")
+            _LOGGER.error(
+                "Watchdog: Connection is down, %s, %s",
+                self._reconnect_at,
+                self.receive_data_task in asyncio.all_tasks(),
+            )
+            self._reconnect_at = dt.datetime.now() + dt.timedelta(seconds=self._timeout)
 
             try:
                 await super().close()
