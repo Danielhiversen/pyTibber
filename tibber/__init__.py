@@ -92,12 +92,7 @@ class Tibber:
         async with LOCK_RT_CONNECT:
             if self.rt_subscription_running:
                 return
-            try:
-                await self.sub_manager.connect_async()
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.error("Failed to connect to Tibber RT")
-                await self.rt_disconnect()
-                raise
+            await self.sub_manager.connect_async()
 
     async def execute(
         self,
@@ -354,23 +349,21 @@ class TibberWebsocketsTransport(WebsocketsTransport):
             except Exception:  # pylint: disable=broad-except
                 _LOGGER.exception("Error in watchdog close")
 
-            if not self._watchdog_running:
-                return
+            delay_seconds = min(
+                random.SystemRandom().randint(1, 60) + _retry_count**2,
+                60 * 60,
+            )
+            _retry_count += 1
+
+            await asyncio.sleep(delay_seconds)
 
             try:
                 await super().connect()
             except Exception:  # pylint: disable=broad-except
-                delay_seconds = min(
-                    random.SystemRandom().randint(1, 60) + _retry_count**2,
-                    20 * 60,
-                )
-                _retry_count += 1
                 _LOGGER.error(
-                    "Error in watchdog connect, retrying in %s seconds, %s",
-                    delay_seconds,
+                    "Error in watchdog connect, will retry. Retry count: %s",
                     _retry_count,
                     exc_info=_retry_count > 1,
                 )
-                await asyncio.sleep(delay_seconds)
             else:
-                _LOGGER.debug("Watchdog: Reconnected successfully")
+                _LOGGER.info("Watchdog: Reconnected successfully")

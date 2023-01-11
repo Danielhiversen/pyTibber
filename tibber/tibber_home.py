@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import datetime as dt
 import logging
 from typing import TYPE_CHECKING, Callable
@@ -428,6 +429,18 @@ class TibberHome:
                 except Exception:  # pylint: disable=broad-except
                     if self.rt_subscription_running:
                         _LOGGER.exception("Error in rt_subscribe")
+                    try:
+                        await asyncio.gather(
+                            *[
+                                self.update_info(),
+                                self._tibber_control.update_info(),
+                            ]
+                        )
+                    except Exception:  # pylint: disable=broad-except
+                        _LOGGER.exception("Error in update_info")
+                    if not self.has_real_time_consumption:
+                        _LOGGER.error("No real time device for %s", self.home_id)
+                        return
                     await asyncio.sleep(10)
 
         asyncio.create_task(_start())
