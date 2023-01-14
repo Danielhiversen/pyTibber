@@ -67,7 +67,7 @@ class Tibber:
         self._all_home_ids: list[str] = []
         self._homes: dict[str, TibberHome] = {}
         self.sub_manager: Client | None = None
-        self.api_endpoint = api_endpoint
+        self.api_endpoint: str = api_endpoint
         self.sub_endpoint = None
 
     async def close_connection(self) -> None:
@@ -321,13 +321,20 @@ class TibberWebsocketsTransport(WebsocketsTransport):
         )
         self._watchdog_runner: None | asyncio.Task = None
         self._watchdog_running: bool = False
-        self._reconnect_at: dt.datetime = dt.datetime.now() + dt.timedelta(seconds=90)
-        self._timeout: int = 90
+        self._timeout: int = 900
+        self._reconnect_at: dt.datetime = dt.datetime.now() + dt.timedelta(
+            seconds=self._timeout
+        )
 
     @property
     def running(self) -> bool:
         """Is real time subscription running."""
-        return self.websocket is not None and self.websocket.open
+        return (
+            self.websocket is not None
+            and self.websocket.open
+            and self._reconnect_at > dt.datetime.now()
+            and self.receive_data_task in asyncio.all_tasks()
+        )
 
     async def connect(self) -> None:
         """Connect to websockets."""
@@ -362,11 +369,7 @@ class TibberWebsocketsTransport(WebsocketsTransport):
 
         _retry_count = 0
         while self._watchdog_running:
-            if (
-                self.receive_data_task in asyncio.all_tasks()
-                and self.running
-                and self._reconnect_at > dt.datetime.now()
-            ):
+            if self.running:
                 _retry_count = 0
                 _LOGGER.debug("Watchdog: Connection is alive")
                 await asyncio.sleep(5)
