@@ -7,14 +7,16 @@ import logging
 import random
 import zoneinfo
 
-import aiohttp
 import async_timeout
+from aiohttp import ClientError, ClientSession, hdrs
 from gql import Client
 from gql.transport.websockets import WebsocketsTransport
 
 from .const import API_ENDPOINT, DEMO_TOKEN, __version__
+from .exceptions import FatalHttpException, InvalidLogin, RetryableHttpException
 from .gql_queries import INFO, PUSH_NOTIFICATION
 from .tibber_home import TibberHome
+from .tibber_response_handler import extract_response_data
 
 DEFAULT_TIMEOUT = 10
 SUB_ENDPOINT = "wss://api.tibber.com/v1-beta/gql/subscriptions"
@@ -32,7 +34,7 @@ class Tibber:
         self,
         access_token: str = DEMO_TOKEN,
         timeout: int = DEFAULT_TIMEOUT,
-        websession: aiohttp.ClientSession | None = None,
+        websession: ClientSession | None = None,
         time_zone: dt.tzinfo | None = None,
         user_agent: str | None = None,
         api_endpoint: str = API_ENDPOINT,
@@ -47,9 +49,9 @@ class Tibber:
         """
 
         if websession is None:
-            websession = aiohttp.ClientSession()
+            websession = ClientSession()
         elif user_agent is None:
-            user_agent = websession.headers.get(aiohttp.hdrs.USER_AGENT)
+            user_agent = websession.headers.get(hdrs.USER_AGENT)
         if user_agent is None:
             raise Exception(
                 "Please provide value for HTTP user agent. Example: MyHomeAutomationServer/1.2.3"
@@ -131,18 +133,18 @@ class Tibber:
         post_args = {
             "headers": {
                 "Authorization": "Bearer " + self._access_token,
-                aiohttp.hdrs.USER_AGENT: self.user_agent,
+                hdrs.USER_AGENT: self.user_agent,
             },
             "data": payload,
         }
         try:
             async with async_timeout.timeout(timeout):
                 resp = await self.websession.post(self.api_endpoint, **post_args)
-            if resp.status != 200:
-                _LOGGER.error("Error connecting to Tibber, resp code: %s", resp.status)
-                return None
-            result = await resp.json()
-        except aiohttp.ClientError:
+
+            return await extract_response_data(resp)
+
+        except ClientError as err:
+
             if retry > 0:
                 return await self._execute(
                     document,
@@ -150,7 +152,7 @@ class Tibber:
                     retry - 1,
                     timeout,
                 )
-            _LOGGER.error("Error connecting to Tibber", exc_info=True)
+            _LOGGER.error("Error connecting to Tibber: %s ", err, exc_info=True)
             raise
         except asyncio.TimeoutError:
             if retry > 0:
@@ -162,18 +164,27 @@ class Tibber:
                 )
             _LOGGER.error("Timed out when connecting to Tibber")
             raise
-        if errors := result.get("errors"):
-            _LOGGER.error("Received non-compatible response %s", errors)
-        return result
+        except (InvalidLogin, FatalHttpException) as err:
+            _LOGGER.error(
+                "Fatal error interacting with Tibber API, HTTP status: %s. API error: %s / %s",
+                err.status,
+                err.extension_code,
+                err.message,
+            )
+            raise
+        except RetryableHttpException as err:
+            _LOGGER.warning(
+                "Temporary failure interacting with Tibber API, HTTP status: %s. API error: %s / %s",
+                err.status,
+                err.extension_code,
+                err.message,
+            )
+            raise
 
     async def update_info(self) -> None:
         """Updates home info asynchronously."""
         if (res := await self._execute(INFO)) is None:
             return
-        if errors := res.get("errors", []):
-            msg = errors[0].get("message", "failed to login")
-            _LOGGER.error(msg)
-            raise InvalidLogin(msg)
 
         if not (data := res.get("data")):
             return
@@ -279,10 +290,6 @@ class Tibber:
     def home_ids(self) -> list[str]:
         """Return list of home ids."""
         return self.get_home_ids(only_active=True)
-
-
-class InvalidLogin(Exception):
-    """Invalid login exception."""
 
 
 class TibberWebsocketsTransport(WebsocketsTransport):
