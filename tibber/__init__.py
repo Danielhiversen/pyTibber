@@ -202,6 +202,10 @@ class Tibber:
 
         _LOGGER.debug("Using websocket subscription url %s", sub_endpoint)
         self.sub_endpoint = sub_endpoint
+        if self.sub_manager is not None and isinstance(
+            self.sub_manager.transport, TibberWebsocketsTransport
+        ):
+            self.sub_manager.transport.url = sub_endpoint
 
         self._name = viewer.get("name")
         self._user_id = viewer.get("userId")
