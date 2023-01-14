@@ -19,7 +19,6 @@ from .tibber_home import TibberHome
 from .tibber_response_handler import extract_response_data
 
 DEFAULT_TIMEOUT = 10
-SUB_ENDPOINT = "wss://api.tibber.com/v1-beta/gql/subscriptions"
 
 _LOGGER = logging.getLogger(__name__)
 LOCK_RT_CONNECT = asyncio.Lock()
@@ -67,14 +66,9 @@ class Tibber:
         self._active_home_ids: list[str] = []
         self._all_home_ids: list[str] = []
         self._homes: dict[str, TibberHome] = {}
-        self.sub_manager: Client = Client(
-            transport=TibberWebsocketsTransport(
-                SUB_ENDPOINT,
-                self._access_token,
-                self.user_agent,
-            ),
-        )
+        self.sub_manager: Client | None = None
         self.api_endpoint = api_endpoint
+        self.sub_endpoint = None
 
     async def close_connection(self) -> None:
         """Close the Tibber connection.
@@ -85,12 +79,24 @@ class Tibber:
         """Stop subscription manager.
         This method simply calls the stop method of the SubscriptionManager if it is defined.
         """
-        if not hasattr(self.sub_manager, "session"):
+        if self.sub_manager is None or not hasattr(self.sub_manager, "session"):
             return
         await self.sub_manager.close_async()
 
     async def rt_connect(self) -> None:
         """Start subscription manager."""
+        if self.sub_endpoint is None:
+            raise Exception("Subscription endpoint not initialized")
+
+        if self.sub_manager is None:
+            self.sub_manager = Client(
+                transport=TibberWebsocketsTransport(
+                    self.sub_endpoint,
+                    self._access_token,
+                    self.user_agent,
+                ),
+            )
+
         async with LOCK_RT_CONNECT:
             if self.rt_subscription_running:
                 return
@@ -192,6 +198,12 @@ class Tibber:
         if not (viewer := data.get("viewer")):
             return
 
+        if not (sub_endpoint := viewer.get("websocketSubscriptionUrl")):
+            return
+
+        _LOGGER.debug("Using websocket subscription url %s", sub_endpoint)
+        self.sub_endpoint = sub_endpoint
+
         self._name = viewer.get("name")
         self._user_id = viewer.get("userId")
 
@@ -202,7 +214,10 @@ class Tibber:
             self._all_home_ids += [home_id]
             if not (subs := _home.get("subscriptions")):
                 continue
-            if subs[0].get("status", "ended").lower() == "running":
+            if (
+                subs[0].get("status") is not None
+                and subs[0]["status"].lower() == "running"
+            ):
                 self._active_home_ids += [home_id]
 
     def get_home_ids(self, only_active: bool = True) -> list[str]:
@@ -272,7 +287,8 @@ class Tibber:
     def rt_subscription_running(self) -> bool:
         """Is real time subscription running."""
         return (
-            isinstance(self.sub_manager.transport, TibberWebsocketsTransport)
+            self.sub_manager is not None
+            and isinstance(self.sub_manager.transport, TibberWebsocketsTransport)
             and self.sub_manager.transport.running
         )
 
