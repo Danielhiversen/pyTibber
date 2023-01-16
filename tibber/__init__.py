@@ -167,24 +167,6 @@ class Tibber:
                 )
             else:
                 _LOGGER.info("Watchdog: Reconnected successfully")
-
-            try:
-                await self.sub_manager.connect_async()
-            except Exception:  # pylint: disable=broad-except
-                delay_seconds = min(
-                    random.SystemRandom().randint(1, 60) + _retry_count**2,
-                    20 * 60,
-                )
-                _retry_count += 1
-                _LOGGER.error(
-                    "Error in watchdog connect, retrying in %s seconds, %s",
-                    delay_seconds,
-                    _retry_count,
-                    exc_info=_retry_count > 1,
-                )
-                await asyncio.sleep(delay_seconds)
-            else:
-                _LOGGER.debug("Watchdog: Reconnected successfully")
                 await asyncio.sleep(60)
 
     async def execute(
