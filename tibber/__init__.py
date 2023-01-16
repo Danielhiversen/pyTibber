@@ -368,7 +368,7 @@ class TibberWebsocketsTransport(WebsocketsTransport):
             ping_interval=10,
         )
         self.reconnect_at: dt.datetime = dt.datetime.now() + dt.timedelta(seconds=90)
-        self._timeout: int = 2
+        self._timeout: int = 90
 
     @property
     def running(self) -> bool:
