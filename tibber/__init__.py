@@ -137,7 +137,7 @@ class Tibber:
             if not self._watchdog_running:
                 return
 
-            self.sub_manager: Client = Client(
+            self.sub_manager = Client(
                 transport=TibberWebsocketsTransport(
                     SUB_ENDPOINT,
                     self._access_token,
