@@ -75,6 +75,7 @@ class Tibber:
         self.api_endpoint = api_endpoint
         self._watchdog_runner: None | asyncio.Task = None
         self._watchdog_running: bool = False
+        self._reconnect_at: dt.datetime = dt.datetime.now() + dt.timedelta(seconds=90)
 
     async def close_connection(self) -> None:
         """Close the Tibber connection.
