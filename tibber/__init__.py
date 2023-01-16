@@ -132,7 +132,6 @@ class Tibber:
                 self.sub_manager.transport.reconnect_at,
             )
 
-
             try:
                 if hasattr(self.sub_manager, "session"):
                     await self.sub_manager.close_async()
