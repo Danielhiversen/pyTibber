@@ -120,10 +120,7 @@ class Tibber:
 
         _retry_count = 0
         while self._watchdog_running:
-            if (
-                self.sub_manager.transport.running
-                and self.sub_manager.transport.reconnect_at > dt.datetime.now()
-            ):
+            if self.sub_manager.transport.running:
                 _retry_count = 0
                 _LOGGER.debug("Watchdog: Connection is alive")
                 await asyncio.sleep(5)

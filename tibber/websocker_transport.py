@@ -27,7 +27,12 @@ class TibberWebsocketsTransport(WebsocketsTransport):
     @property
     def running(self) -> bool:
         """Is real time subscription running."""
-        return self.websocket is not None and self.websocket.open
+        return (
+            self.websocket is not None
+            and self.websocket.open
+            and self.reconnect_at > dt.datetime.now()
+            and self.receive_data_task in asyncio.all_tasks()
+        )
 
     async def _receive(self) -> str:
         """Wait the next message from the websocket connection."""
