@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
+import random
 import zoneinfo
 
 import async_timeout
@@ -142,16 +143,35 @@ class Tibber:
             except Exception:  # pylint: disable=broad-except
                 _LOGGER.exception("Error in watchdog close")
 
-            if not self._watchdog_running:
-                return
+            if self.sub_endpoint is None:
+                raise Exception("Subscription endpoint not initialized")
+
+            delay_seconds = min(
+                random.SystemRandom().randint(1, 60) + _retry_count**2,
+                60 * 60,
+            )
+            _retry_count += 1
+
+            await asyncio.sleep(delay_seconds)
 
             self.sub_manager = Client(
                 transport=TibberWebsocketsTransport(
-                    SUB_ENDPOINT,
+                    self.sub_endpoint,
                     self._access_token,
                     self.user_agent,
                 ),
             )
+
+            try:
+                await self.sub_manager.connect_async()
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.error(
+                    "Error in watchdog connect, will retry. Retry count: %s",
+                    _retry_count,
+                    exc_info=_retry_count > 1,
+                )
+            else:
+                _LOGGER.info("Watchdog: Reconnected successfully")
 
             try:
                 await self.sub_manager.connect_async()
@@ -380,33 +400,3 @@ class Tibber:
     def home_ids(self) -> list[str]:
         """Return list of home ids."""
         return self.get_home_ids(only_active=True)
-
-class TibberWebsocketsTransport(WebsocketsTransport):
-    """Tibber websockets transport."""
-
-    def __init__(self, url: str, access_token: str, user_agent: str) -> None:
-        """Initialize TibberWebsocketsTransport."""
-        super().__init__(
-            url=url,
-            init_payload={"token": access_token},
-            headers={"User-Agent": user_agent},
-            ping_interval=10,
-        )
-        self.reconnect_at: dt.datetime = dt.datetime.now() + dt.timedelta(seconds=90)
-        self._timeout: int = 90
-
-    @property
-    def running(self) -> bool:
-        """Is real time subscription running."""
-        return self.websocket is not None and self.websocket.open
-
-    async def _receive(self) -> str:
-        """Wait the next message from the websocket connection."""
-        try:
-            msg = await asyncio.wait_for(super()._receive(), timeout=self._timeout)
-        except asyncio.TimeoutError:
-            _LOGGER.error("No data received from Tibber for %s seconds", self._timeout)
-            raise
-        self.reconnect_at = dt.datetime.now() + dt.timedelta(seconds=self._timeout)
-        return msg
-
