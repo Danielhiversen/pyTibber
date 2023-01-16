@@ -88,7 +88,10 @@ class Tibber:
             self._watchdog_runner = None
         if self.sub_manager is None or not hasattr(self.sub_manager, "session"):
             return
-        await self.sub_manager.close_async()
+        try:
+            await self.sub_manager.close_async()
+        finally:
+            self.sub_manager = None
 
     async def rt_connect(self) -> None:
         """Start subscription manager."""
@@ -142,7 +145,6 @@ class Tibber:
                 60 * 60,
             )
             _retry_count += 1
-
             await asyncio.sleep(delay_seconds)
 
             self.sub_manager = None
