@@ -73,6 +73,8 @@ class Tibber:
             ),
         )
         self.api_endpoint = api_endpoint
+        self._watchdog_runner: None | asyncio.Task = None
+        self._watchdog_running: bool = False
 
     async def close_connection(self) -> None:
         """Close the Tibber connection.
@@ -83,6 +85,11 @@ class Tibber:
         """Stop subscription manager.
         This method simply calls the stop method of the SubscriptionManager if it is defined.
         """
+        if self._watchdog_runner is not None:
+            _LOGGER.debug("Stopping watchdog")
+            self._watchdog_running = False
+            self._watchdog_runner.cancel()
+            self._watchdog_runner = None
         if not hasattr(self.sub_manager, "session"):
             return
         await self.sub_manager.close_async()
@@ -92,7 +99,68 @@ class Tibber:
         async with LOCK_RT_CONNECT:
             if self.rt_subscription_running:
                 return
+            if self._watchdog_runner is None:
+                _LOGGER.debug("Starting watchdog")
+                self._watchdog_running = True
+                self._watchdog_runner = asyncio.create_task(self._rt_watchdog())
             await self.sub_manager.connect_async()
+
+    async def _rt_watchdog(self) -> None:
+        """Watchdog to keep connection alive."""
+        assert isinstance(self.sub_manager.transport, TibberWebsocketsTransport)
+        await asyncio.sleep(60)
+
+        _retry_count = 0
+        while self._watchdog_running:
+            if (
+                self.sub_manager.transport.running
+                and self.sub_manager.transport.reconnect_at > dt.datetime.now()
+            ):
+                _retry_count = 0
+                _LOGGER.debug("Watchdog: Connection is alive")
+                await asyncio.sleep(5)
+                continue
+
+            _LOGGER.error(
+                "Watchdog: Connection is down, %s",
+                self.sub_manager.transport.reconnect_at,
+            )
+            self.reconnect_at = dt.datetime.now() + dt.timedelta(seconds=self._timeout)
+
+            try:
+                await self.sub_manager.close_async()
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.exception("Error in watchdog close")
+
+            if not self._watchdog_running:
+                return
+
+            self.sub_manager: Client = Client(
+                transport=TibberWebsocketsTransport(
+                    SUB_ENDPOINT,
+                    self._access_token,
+                    self.user_agent,
+                ),
+            )
+
+            try:
+                await self.sub_manager.connect_async()
+            except Exception:  # pylint: disable=broad-except
+                delay_seconds = min(
+                    random.SystemRandom().randint(1, 60) + _retry_count**2,
+                    20 * 60,
+                )
+                _retry_count += 1
+                _LOGGER.error(
+                    "Error in watchdog connect, retrying in %s seconds, %s",
+                    delay_seconds,
+                    _retry_count,
+                    exc_info=_retry_count > 1,
+                )
+                await asyncio.sleep(delay_seconds)
+            else:
+                _LOGGER.debug("Watchdog: Reconnected successfully")
+                await asyncio.sleep(60)
 
     async def execute(
         self,
@@ -296,32 +364,13 @@ class TibberWebsocketsTransport(WebsocketsTransport):
             headers={"User-Agent": user_agent},
             ping_interval=10,
         )
-        self._watchdog_runner: None | asyncio.Task = None
-        self._watchdog_running: bool = False
-        self._reconnect_at: dt.datetime = dt.datetime.now() + dt.timedelta(seconds=90)
+        self.reconnect_at: dt.datetime = dt.datetime.now() + dt.timedelta(seconds=90)
         self._timeout: int = 90
 
     @property
     def running(self) -> bool:
         """Is real time subscription running."""
         return self.websocket is not None and self.websocket.open
-
-    async def connect(self) -> None:
-        """Connect to websockets."""
-        if self._watchdog_runner is None:
-            _LOGGER.debug("Starting watchdog")
-            self._watchdog_running = True
-            self._watchdog_runner = asyncio.create_task(self._watchdog())
-        await super().connect()
-
-    async def close(self) -> None:
-        """Close websockets."""
-        if self._watchdog_runner is not None:
-            _LOGGER.debug("Stopping watchdog")
-            self._watchdog_running = False
-            self._watchdog_runner.cancel()
-            self._watchdog_runner = None
-        await super().close()
 
     async def _receive(self) -> str:
         """Wait the next message from the websocket connection."""
@@ -330,54 +379,5 @@ class TibberWebsocketsTransport(WebsocketsTransport):
         except asyncio.TimeoutError:
             _LOGGER.error("No data received from Tibber for %s seconds", self._timeout)
             raise
-        self._reconnect_at = dt.datetime.now() + dt.timedelta(seconds=self._timeout)
+        self.reconnect_at = dt.datetime.now() + dt.timedelta(seconds=self._timeout)
         return msg
-
-    async def _watchdog(self) -> None:
-        """Watchdog to keep connection alive."""
-        await asyncio.sleep(60)
-
-        _retry_count = 0
-        while self._watchdog_running:
-            if (
-                self.receive_data_task in asyncio.all_tasks()
-                and self.running
-                and self._reconnect_at > dt.datetime.now()
-            ):
-                _retry_count = 0
-                _LOGGER.debug("Watchdog: Connection is alive")
-                await asyncio.sleep(5)
-                continue
-
-            _LOGGER.error(
-                "Watchdog: Connection is down, %s, %s",
-                self._reconnect_at,
-                self.receive_data_task in asyncio.all_tasks(),
-            )
-            self._reconnect_at = dt.datetime.now() + dt.timedelta(seconds=self._timeout)
-
-            try:
-                await super().close()
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Error in watchdog close")
-
-            if not self._watchdog_running:
-                return
-
-            try:
-                await super().connect()
-            except Exception:  # pylint: disable=broad-except
-                delay_seconds = min(
-                    random.SystemRandom().randint(1, 60) + _retry_count**2,
-                    20 * 60,
-                )
-                _retry_count += 1
-                _LOGGER.error(
-                    "Error in watchdog connect, retrying in %s seconds, %s",
-                    delay_seconds,
-                    _retry_count,
-                    exc_info=_retry_count > 1,
-                )
-                await asyncio.sleep(delay_seconds)
-            else:
-                _LOGGER.debug("Watchdog: Reconnected successfully")
