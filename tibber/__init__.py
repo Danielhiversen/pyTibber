@@ -121,8 +121,7 @@ class Tibber:
 
         _retry_count = 0
         while self._watchdog_running:
-            if self.sub_manager.transport.running:
-                _retry_count = 0
+            if self.rt_subscription_running:
                 _LOGGER.debug("Watchdog: Connection is alive")
                 await asyncio.sleep(5)
                 continue
@@ -138,9 +137,6 @@ class Tibber:
             except Exception:  # pylint: disable=broad-except
                 _LOGGER.exception("Error in watchdog close")
 
-            if self.sub_endpoint is None:
-                raise Exception("Subscription endpoint not initialized")
-
             delay_seconds = min(
                 random.SystemRandom().randint(1, 60) + _retry_count**2,
                 60 * 60,
@@ -149,16 +145,10 @@ class Tibber:
 
             await asyncio.sleep(delay_seconds)
 
-            self.sub_manager = Client(
-                transport=TibberWebsocketsTransport(
-                    self.sub_endpoint,
-                    self._access_token,
-                    self.user_agent,
-                ),
-            )
+            self.sub_manager = None
 
             try:
-                await self.sub_manager.connect_async()
+                await self.rt_connect()
             except Exception:  # pylint: disable=broad-except
                 _LOGGER.error(
                     "Error in watchdog connect, will retry. Retry count: %s",
