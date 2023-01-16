@@ -429,6 +429,15 @@ class TibberHome:
                     if self.rt_subscription_running:
                         _LOGGER.exception("Error in rt_subscribe")
                     await asyncio.sleep(10)
+                    await asyncio.gather(
+                        *[
+                            self.update_info(),
+                            self._tibber_control.update_info(),
+                        ]
+                    )
+                    if not self.has_real_time_consumption:
+                        _LOGGER.error("No real time device for %s", self.home_id)
+                        return
 
         asyncio.create_task(_start())
         await self._tibber_control.rt_connect()
@@ -554,15 +563,8 @@ class TibberHome:
                 or ""
             ).lower()
         ):
-            if now.month < 7:
-                grid_price = 47.39 / 100
-            else:
-                grid_price = 47.25 / 100
-            if now.hour >= 22 or now.hour < 6:
-                grid_price -= 12 / 100
-            attr["grid_price"] = round(grid_price, 3)
             _LOGGER.warning(
-                "Grid price attribute is deprecated and will be removed. "
+                "Grid price attribute is deprecated and removed. "
                 "Use https://github.com/Danielhiversen/home_assistant_glitre"
             )
         return attr
