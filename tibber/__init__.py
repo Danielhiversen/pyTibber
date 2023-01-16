@@ -130,7 +130,8 @@ class Tibber:
             )
 
             try:
-                await self.sub_manager.close_async()
+                if hasattr(self.sub_manager, "session"):
+                    await self.sub_manager.close_async()
             except Exception:  # pylint: disable=broad-except
                 _LOGGER.exception("Error in watchdog close")
 
@@ -367,7 +368,7 @@ class TibberWebsocketsTransport(WebsocketsTransport):
             ping_interval=10,
         )
         self.reconnect_at: dt.datetime = dt.datetime.now() + dt.timedelta(seconds=90)
-        self._timeout: int = 90
+        self._timeout: int = 2
 
     @property
     def running(self) -> bool:
