@@ -75,7 +75,6 @@ class Tibber:
         self.api_endpoint = api_endpoint
         self._watchdog_runner: None | asyncio.Task = None
         self._watchdog_running: bool = False
-        self._reconnect_at: dt.datetime = dt.datetime.now() + dt.timedelta(seconds=90)
 
     async def close_connection(self) -> None:
         """Close the Tibber connection.
@@ -126,7 +125,9 @@ class Tibber:
                 "Watchdog: Connection is down, %s",
                 self.sub_manager.transport.reconnect_at,
             )
-            self.reconnect_at = dt.datetime.now() + dt.timedelta(seconds=self._timeout)
+            self.sub_manager.transport.reconnect_at = dt.datetime.now() + dt.timedelta(
+                seconds=self._timeout
+            )
 
             try:
                 await self.sub_manager.close_async()
