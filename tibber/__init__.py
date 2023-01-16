@@ -115,8 +115,8 @@ class Tibber:
 
     async def _rt_watchdog(self) -> None:
         """Watchdog to keep connection alive."""
-        assert isinstance(self.sub_manager.transport, TibberWebsocketsTransport)
         assert self.sub_manager is not None
+        assert isinstance(self.sub_manager.transport, TibberWebsocketsTransport)
         await asyncio.sleep(60)
 
         _retry_count = 0
