@@ -120,9 +120,25 @@ class Tibber:
         """Watchdog to keep connection alive."""
         await asyncio.sleep(60)
 
+        next_is_running_test = dt.datetime.now()
         _retry_count = 0
         while self._watchdog_running:
             if self.rt_subscription_running:
+                is_running = True
+                if next_is_running_test > dt.datetime.now():
+                    for home in self.get_homes(False):
+                        if not home.has_real_time_consumption:
+                            continue
+                        if not home.rt_subscription_running:
+                            is_running = False
+                            next_is_running_test = dt.datetime.now() + dt.timedelta(
+                                seconds=60
+                            )
+                            break
+                if is_running:
+                    _LOGGER.debug("Watchdog: Connection is alive")
+                    await asyncio.sleep(5)
+                    continue
                 _LOGGER.debug("Watchdog: Connection is alive")
                 await asyncio.sleep(5)
                 continue
