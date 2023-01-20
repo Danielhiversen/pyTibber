@@ -6,6 +6,7 @@ import datetime as dt
 import logging
 
 from gql.transport.websockets import WebsocketsTransport
+from gql.transport.exceptions import TransportClosed
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -21,7 +22,7 @@ class TibberWebsocketsTransport(WebsocketsTransport):
             headers={"User-Agent": user_agent},
             ping_interval=10,
         )
-        self._timeout: int = 900
+        self._timeout: int = 90
         self.reconnect_at: dt.datetime = dt.datetime.now() + dt.timedelta(
             seconds=self._timeout
         )
@@ -45,3 +46,7 @@ class TibberWebsocketsTransport(WebsocketsTransport):
             raise
         self.reconnect_at = dt.datetime.now() + dt.timedelta(seconds=self._timeout)
         return msg
+
+    async def close(self) -> None:
+        await self._fail(TransportClosed("Tibber websocket closed by pyTibber"))
+        await self.wait_closed()

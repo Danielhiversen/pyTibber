@@ -127,18 +127,16 @@ class Tibber:
                 await asyncio.sleep(5)
                 continue
 
-            assert self.sub_manager is not None
-            assert isinstance(self.sub_manager.transport, TibberWebsocketsTransport)
-            _LOGGER.error(
-                "Watchdog: Connection is down, %s",
-                self.sub_manager.transport.reconnect_at,
-            )
+            _LOGGER.error("Watchdog: Connection is down")
 
             try:
-                if hasattr(self.sub_manager, "session"):
+                if self.sub_manager is not None and hasattr(
+                    self.sub_manager, "session"
+                ):
                     await self.sub_manager.close_async()
             except Exception:  # pylint: disable=broad-except
                 _LOGGER.exception("Error in watchdog close")
+            self.sub_manager = None
 
             delay_seconds = min(
                 random.SystemRandom().randint(1, 60) + _retry_count**2,
@@ -146,8 +144,6 @@ class Tibber:
             )
             _retry_count += 1
             await asyncio.sleep(delay_seconds)
-
-            self.sub_manager = None
 
             try:
                 await self.rt_connect()
