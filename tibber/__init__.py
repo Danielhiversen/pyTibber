@@ -111,15 +111,28 @@ class Tibber:
         await asyncio.sleep(60)
 
         _retry_count = 0
+        next_is_running_test = dt.datetime.now()
         while self._watchdog_running:
             if (
                 self.sub_manager.transport.running
                 and self.sub_manager.transport.reconnect_at > dt.datetime.now()
             ):
-                _retry_count = 0
-                _LOGGER.debug("Watchdog: Connection is alive")
-                await asyncio.sleep(5)
-                continue
+                is_running = True
+                if next_is_running_test > dt.datetime.now():
+                    for home in self.get_homes(False):
+                        if not home.has_real_time_consumption:
+                            continue
+                        if not home.rt_subscription_running:
+                            is_running = False
+                            next_is_running_test = dt.datetime.now() + dt.timedelta(
+                                seconds=60
+                            )
+                            break
+                if is_running:
+                    _retry_count = 0
+                    _LOGGER.debug("Watchdog: Connection is alive")
+                    await asyncio.sleep(5)
+                    continue
 
             _LOGGER.error(
                 "Watchdog: Connection is down, %s",
