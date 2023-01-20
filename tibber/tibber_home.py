@@ -422,8 +422,9 @@ class TibberHome:
                         callback(data)
                         self._last_rt_data_received = dt.datetime.now()
                         _LOGGER.debug(
-                            "Data received for %s",
+                            "Data received for %s: %s",
                             self.home_id,
+                            data,
                         )
                 except Exception:  # pylint: disable=broad-except
                     if self.rt_subscription_running:
