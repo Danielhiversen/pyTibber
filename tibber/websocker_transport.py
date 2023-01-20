@@ -5,8 +5,8 @@ import asyncio
 import datetime as dt
 import logging
 
-from gql.transport.websockets import WebsocketsTransport
 from gql.transport.exceptions import TransportClosed
+from gql.transport.websockets import WebsocketsTransport
 
 _LOGGER = logging.getLogger(__name__)
 
