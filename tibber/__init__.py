@@ -139,9 +139,6 @@ class Tibber:
                     _LOGGER.debug("Watchdog: Connection is alive")
                     await asyncio.sleep(5)
                     continue
-                _LOGGER.debug("Watchdog: Connection is alive")
-                await asyncio.sleep(5)
-                continue
 
             _LOGGER.error("Watchdog: Connection is down")
 
