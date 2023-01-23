@@ -1,6 +1,4 @@
 """Library to handle connection with Tibber API."""
-from __future__ import annotations
-
 import asyncio
 import datetime as dt
 import logging
