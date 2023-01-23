@@ -4,7 +4,8 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
-from typing import TYPE_CHECKING, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from dateutil.parser import parse
 from gql import gql
