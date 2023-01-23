@@ -2,8 +2,8 @@
 import asyncio
 import datetime as dt
 import logging
-from typing import TYPE_CHECKING
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from dateutil.parser import parse
 from gql import gql
