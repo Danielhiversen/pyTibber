@@ -2,7 +2,7 @@
 from http import HTTPStatus
 from typing import Final
 
-__version__ = "0.26.8"
+__version__ = "0.27.0"
 
 RESOLUTION_HOURLY: Final = "HOURLY"
 RESOLUTION_DAILY: Final = "DAILY"
