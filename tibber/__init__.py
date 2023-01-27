@@ -2,6 +2,7 @@
 import asyncio
 import datetime as dt
 import logging
+import random
 import zoneinfo
 
 import async_timeout
@@ -66,6 +67,8 @@ class Tibber:
         self.sub_manager: Client | None = None
         self.api_endpoint: str = api_endpoint
         self.sub_endpoint: str | None = None
+        self._watchdog_runner: None | asyncio.Task = None
+        self._watchdog_running: bool = False
 
     async def close_connection(self) -> None:
         """Close the Tibber connection.
@@ -76,9 +79,17 @@ class Tibber:
         """Stop subscription manager.
         This method simply calls the stop method of the SubscriptionManager if it is defined.
         """
+        if self._watchdog_runner is not None:
+            _LOGGER.debug("Stopping watchdog")
+            self._watchdog_running = False
+            self._watchdog_runner.cancel()
+            self._watchdog_runner = None
         if self.sub_manager is None or not hasattr(self.sub_manager, "session"):
             return
-        await self.sub_manager.close_async()
+        try:
+            await self.sub_manager.close_async()
+        finally:
+            self.sub_manager = None
 
     async def rt_connect(self) -> None:
         """Start subscription manager."""
@@ -97,7 +108,65 @@ class Tibber:
         async with LOCK_RT_CONNECT:
             if self.rt_subscription_running:
                 return
+            if self._watchdog_runner is None:
+                _LOGGER.debug("Starting watchdog")
+                self._watchdog_running = True
+                self._watchdog_runner = asyncio.create_task(self._rt_watchdog())
             await self.sub_manager.connect_async()
+
+    async def _rt_watchdog(self) -> None:
+        """Watchdog to keep connection alive."""
+        await asyncio.sleep(60)
+
+        next_is_running_test = dt.datetime.now()
+        _retry_count = 0
+        while self._watchdog_running:
+            if self.rt_subscription_running:
+                is_running = True
+                if next_is_running_test > dt.datetime.now():
+                    for home in self.get_homes(False):
+                        if not home.has_real_time_consumption:
+                            continue
+                        if not home.rt_subscription_running:
+                            is_running = False
+                            next_is_running_test = dt.datetime.now() + dt.timedelta(
+                                seconds=60
+                            )
+                            break
+                if is_running:
+                    _LOGGER.debug("Watchdog: Connection is alive")
+                    await asyncio.sleep(5)
+                    continue
+
+            _LOGGER.error("Watchdog: Connection is down")
+
+            try:
+                if self.sub_manager is not None and hasattr(
+                    self.sub_manager, "session"
+                ):
+                    await self.sub_manager.close_async()
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.exception("Error in watchdog close")
+            self.sub_manager = None
+
+            delay_seconds = min(
+                random.SystemRandom().randint(1, 60) + _retry_count**2,
+                60 * 60,
+            )
+            _retry_count += 1
+            await asyncio.sleep(delay_seconds)
+
+            try:
+                await self.rt_connect()
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.error(
+                    "Error in watchdog connect, will retry. Retry count: %s",
+                    _retry_count,
+                    exc_info=_retry_count > 1,
+                )
+            else:
+                _LOGGER.info("Watchdog: Reconnected successfully")
+                await asyncio.sleep(60)
 
     async def execute(
         self,
