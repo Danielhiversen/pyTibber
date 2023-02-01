@@ -51,6 +51,7 @@ class Tibber:
         elif user_agent is None:
             user_agent = websession.headers.get(aiohttp.hdrs.USER_AGENT)
         if user_agent is None:
+            # pylint: disable=broad-exception-raised
             raise Exception(
                 "Please provide value for HTTP user agent. Example: MyHomeAutomationServer/1.2.3"
             )
