@@ -161,6 +161,7 @@ class Tibber:
 
             try:
                 await self.sub_manager.connect_async()
+                await self._resubscribe_homes()
             except Exception:  # pylint: disable=broad-except
                 delay_seconds = min(
                     random.SystemRandom().randint(1, 60) + _retry_count**2,
@@ -341,6 +342,13 @@ class Tibber:
                 tasks.append(home.fetch_production_data())
         await asyncio.gather(*tasks)
 
+    async def _resubscribe_homes(self):
+        """Resubscribe to all homes."""
+        for home in self.get_homes(False):
+            if not home.has_real_time_consumption:
+                continue
+            await home.rt_resubscribe()
+
     @property
     def rt_subscription_running(self) -> bool:
         """Is real time subscription running."""
@@ -378,7 +386,7 @@ class TibberWebsocketsTransport(WebsocketsTransport):
             url=url,
             init_payload={"token": access_token},
             headers={"User-Agent": user_agent},
-            ping_interval=10,
+            ping_interval=30,
         )
         self.reconnect_at: dt.datetime = dt.datetime.now() + dt.timedelta(seconds=90)
         self._timeout: int = 90
