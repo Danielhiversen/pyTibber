@@ -474,7 +474,7 @@ class TibberHome:
                 cons_or_prod_str,
                 resolution,
                 _n_data,
-                "profit" if production else "totalCost cost",
+                "profit" if production else "cost",
                 cursor,
             )
             if not (data := await self._tibber_control.execute(query, timeout=30)):
@@ -483,6 +483,11 @@ class TibberHome:
             data = data["viewer"]["home"][cons_or_prod_str]
             if data is None:
                 continue
+            if not production:
+                for node in data["nodes"]:
+                    if "cost" in node:
+                        node["totalCost"] = node["cost"]
+
             res.extend(data["nodes"])
             n_data -= len(data["nodes"])
             if (
