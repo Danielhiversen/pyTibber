@@ -86,11 +86,14 @@ class Tibber:
         """Stop subscription manager.
         This method simply calls the stop method of the SubscriptionManager if it is defined.
         """
+        _LOGGER.debug("Stopping subscription manager")
         if self._watchdog_runner is not None:
             _LOGGER.debug("Stopping watchdog")
             self._watchdog_running = False
             self._watchdog_runner.cancel()
             self._watchdog_runner = None
+        for home in self.get_homes(False):
+            home.rt_unsubscribe()
         if not hasattr(self.sub_manager, "session"):
             return
         await self.sub_manager.close_async()
@@ -112,21 +115,27 @@ class Tibber:
         await asyncio.sleep(60)
 
         _retry_count = 0
-        next_is_running_test = dt.datetime.now()
+        next_test_all_homes_running = dt.datetime.now()
         while self._watchdog_running:
             if (
                 self.sub_manager.transport.running
                 and self.sub_manager.transport.reconnect_at > dt.datetime.now()
             ):
                 is_running = True
-                if next_is_running_test > dt.datetime.now():
+                if dt.datetime.now() > next_test_all_homes_running:
                     for home in self.get_homes(False):
+                        _LOGGER.debug(
+                            "Watchdog: Checking if home %s is alive, %s, %s",
+                            home.home_id,
+                            home.has_real_time_consumption,
+                            home.rt_subscription_running,
+                        )
                         if not home.has_real_time_consumption:
                             continue
                         if not home.rt_subscription_running:
                             is_running = False
-                            next_is_running_test = dt.datetime.now() + dt.timedelta(
-                                seconds=60
+                            next_test_all_homes_running = (
+                                dt.datetime.now() + dt.timedelta(seconds=60)
                             )
                             break
                 if is_running:

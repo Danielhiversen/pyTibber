@@ -67,6 +67,7 @@ class TibberHome:
         self._last_rt_data_received: dt.datetime = dt.datetime.now()
         self._rt_listener: None | asyncio.Task = None
         self._rt_callback: Callable | None = None
+        self._rt_stopped: bool = True
 
     async def _fetch_data(self, hourly_data: HourlyData) -> None:
         """Update hourly consumption or production data asynchronously."""
@@ -415,6 +416,9 @@ class TibberHome:
                 while not self._tibber_control.rt_subscription_running:
                     _LOGGER.debug("Waiting for rt_connect")
                     await asyncio.sleep(1)
+                if self._rt_stopped:
+                    _LOGGER.debug("Stopping rt_subscribe")
+                    return
                 try:
                     async for data in self._tibber_control.sub_manager.session.subscribe(
                         gql(LIVE_SUBSCRIBE % self.home_id)
@@ -431,24 +435,35 @@ class TibberHome:
                             self.home_id,
                             data,
                         )
+                        if self._rt_stopped:
+                            _LOGGER.debug("Stopping rt_subscribe loop")
+                            return
                 except Exception:  # pylint: disable=broad-except
                     _LOGGER.exception("Error in rt_subscribe")
                     await asyncio.sleep(10)
 
         self._rt_callback = callback
         self._rt_listener = asyncio.create_task(_start())
+        self._rt_stopped = False
         await self._tibber_control.rt_connect()
 
     async def rt_resubscribe(self) -> None:
         """Resubscribe to Tibber data."""
-        _LOGGER.debug("Resubscribe")
+        _LOGGER.debug("Resubscribe, %s", self.home_id)
+        self.rt_unsubscribe()
         if self._rt_callback is None:
             _LOGGER.warning("No callback set for rt_resubscribe")
             return
-        if self._rt_listener is not None:
-            self._rt_listener.cancel()
-            self._rt_listener = None
         await self.rt_subscribe(self._rt_callback)
+
+    def rt_unsubscribe(self) -> None:
+        """Unsubscribe to Tibber data."""
+        _LOGGER.debug("Unsubscribe, %s", self.home_id)
+        self._rt_stopped = True
+        if self._rt_listener is None:
+            return
+        self._rt_listener.cancel()
+        self._rt_listener = None
 
     @property
     def rt_subscription_running(self) -> bool:
