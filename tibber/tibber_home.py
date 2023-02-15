@@ -440,8 +440,8 @@ class TibberHome:
                         _LOGGER.error("No real time device for %s", self.home_id)
                         return
 
-        asyncio.create_task(_start())
         await self._tibber_control.rt_connect()
+        asyncio.create_task(_start())
 
     @property
     def rt_subscription_running(self) -> bool:

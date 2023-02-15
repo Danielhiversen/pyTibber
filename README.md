@@ -29,20 +29,28 @@ pip3 install pyTibber
 ```python
 import tibber.const
 import tibber
+import asyncio
 
 access_token = tibber.const.DEMO_TOKEN
 tibber_connection = tibber.Tibber(access_token, user_agent="change_this")
-await tibber_connection.update_info()
-print(tibber_connection.name)
 
-home = tibber_connection.get_homes()[0]
-await home.update_info()
-print(home.address1)
+async def home_data():
+  home = tibber_connection.get_homes()[0]
+  await home.fetch_consumption_data()
+  await home.update_info()
+  print(home.address1)
 
-await home.update_price_info()
-print(home.current_price_info)
+  await home.update_price_info()
+  print(home.current_price_info)
 
-await tibber_connection.close_connection()
+async def start():
+  await tibber_connection.update_info()
+  print(tibber_connection.name)
+  await home_data()
+  await tibber_connection.close_connection()
+
+loop = asyncio.get_event_loop()
+loop.run_until_complete(start())
 ```
 
 
@@ -59,8 +67,8 @@ import tibber
 
 ACCESS_TOKEN = tibber.const.DEMO_TOKEN
 
-
 def _callback(pkg):
+    print(pkg)
     data = pkg.get("data")
     if data is None:
         return
@@ -70,10 +78,15 @@ def _callback(pkg):
 async def run():
     async with aiohttp.ClientSession() as session:
         tibber_connection = tibber.Tibber(ACCESS_TOKEN, websession=session, user_agent="change_this")
-        await tibber_connection.update_info()
+        await tibber_connection.update_info()        
     home = tibber_connection.get_homes()[0]
-    await home.rt_subscribe(_callback)
+    await home.rt_subscribe(_callback)    
 
+    while True:
+      await asyncio.sleep(10)
+
+loop = asyncio.get_event_loop()
+loop.run_until_complete(run())
 ```
 
 The library is used as part of Home Assistant.
