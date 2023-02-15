@@ -66,6 +66,9 @@ class TibberHome:
         self._hourly_consumption_data: HourlyData = HourlyData()
         self._hourly_production_data: HourlyData = HourlyData(production=True)
         self._last_rt_data_received: dt.datetime = dt.datetime.now()
+        self._rt_listener: None | asyncio.Task = None
+        self._rt_callback: Callable | None = None
+        self._rt_stopped: bool = True
 
     async def _fetch_data(self, hourly_data: HourlyData) -> None:
         """Update hourly consumption or production data asynchronously."""
@@ -442,6 +445,24 @@ class TibberHome:
 
         asyncio.create_task(_start())
         await self._tibber_control.rt_connect()
+
+    async def rt_resubscribe(self) -> None:
+        """Resubscribe to Tibber data."""
+        _LOGGER.debug("Resubscribe, %s", self.home_id)
+        self.rt_unsubscribe()
+        if self._rt_callback is None:
+            _LOGGER.warning("No callback set for rt_resubscribe")
+            return
+        await self.rt_subscribe(self._rt_callback)
+
+    def rt_unsubscribe(self) -> None:
+        """Unsubscribe to Tibber data."""
+        _LOGGER.debug("Unsubscribe, %s", self.home_id)
+        self._rt_stopped = True
+        if self._rt_listener is None:
+            return
+        self._rt_listener.cancel()
+        self._rt_listener = None
 
     @property
     def rt_subscription_running(self) -> bool:

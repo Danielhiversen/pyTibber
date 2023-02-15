@@ -18,22 +18,15 @@ class TibberWebsocketsTransport(WebsocketsTransport):
             url=url,
             init_payload={"token": access_token},
             headers={"User-Agent": user_agent},
-            ping_interval=10,
+            ping_interval=30,
         )
+        self.reconnect_at: dt.datetime = dt.datetime.now() + dt.timedelta(seconds=90)
         self._timeout: int = 90
-        self.reconnect_at: dt.datetime = dt.datetime.now() + dt.timedelta(
-            seconds=self._timeout
-        )
 
     @property
     def running(self) -> bool:
         """Is real time subscription running."""
-        return (
-            self.websocket is not None
-            and self.websocket.open
-            and self.reconnect_at > dt.datetime.now()
-            and self.receive_data_task in asyncio.all_tasks()
-        )
+        return self.websocket is not None and self.websocket.open
 
     async def _receive(self) -> str:
         """Wait the next message from the websocket connection."""
