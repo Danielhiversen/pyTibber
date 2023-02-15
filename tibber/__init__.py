@@ -50,7 +50,7 @@ class Tibber:
         elif user_agent is None:
             user_agent = websession.headers.get(hdrs.USER_AGENT)
         if user_agent is None:
-            # pylint: broad-exception-raised
+            # pylint: disable=broad-exception-raised
             raise Exception(
                 "Please provide value for HTTP user agent. Example: MyHomeAutomationServer/1.2.3"
             )
@@ -95,7 +95,7 @@ class Tibber:
     async def rt_connect(self) -> None:
         """Start subscription manager."""
         if self.sub_endpoint is None:
-            # pylint: broad-exception-raised
+            # pylint: disable=broad-exception-raised
             raise Exception("Subscription endpoint not initialized")
 
         if self.sub_manager is None:
