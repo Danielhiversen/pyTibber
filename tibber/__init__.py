@@ -218,7 +218,6 @@ class Tibber:
             return await extract_response_data(resp)
 
         except ClientError as err:
-
             if retry > 0:
                 return await self._execute(
                     document,
