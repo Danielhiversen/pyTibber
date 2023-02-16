@@ -80,7 +80,7 @@ async def run():
         tibber_connection = tibber.Tibber(ACCESS_TOKEN, websession=session, user_agent="change_this")
         await tibber_connection.update_info()
     home = tibber_connection.get_homes()[0]
-    await home.rt_subscribe(_callback)    
+    await home.rt_subscribe(_callback)
 
     while True:
       await asyncio.sleep(10)
