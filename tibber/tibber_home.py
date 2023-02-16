@@ -429,16 +429,20 @@ class TibberHome:
                 except Exception:  # pylint: disable=broad-except
                     if self.rt_subscription_running:
                         _LOGGER.exception("Error in rt_subscribe")
-                    await asyncio.sleep(10)
-                    await asyncio.gather(
-                        *[
-                            self.update_info(),
-                            self._tibber_control.update_info(),
-                        ]
-                    )
+                    try:
+                        await asyncio.sleep(10)
+                        await asyncio.gather(
+                            *[
+                                self.update_info(),
+                                self._tibber_control.update_info(),
+                            ]
+                        )
+                    except Exception:
+                        await asyncio.sleep(10)
+
                     if not self.has_real_time_consumption:
                         _LOGGER.error("No real time device for %s", self.home_id)
-                        return
+                        continue
 
         await self._tibber_control.rt_connect()
         asyncio.create_task(_start())
