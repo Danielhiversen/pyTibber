@@ -413,6 +413,12 @@ class TibberHome:
 
         async def _start():
             """Subscribe to Tibber."""
+            while not self._tibber_control.rt_subscription_running:
+                _LOGGER.debug("Waiting for rt_connect")
+                await asyncio.sleep(1)
+            if self._rt_stopped:
+                _LOGGER.debug("Stopping rt_subscribe")
+                return
             while True:
                 try:
                     async for data in self._tibber_control.sub_manager.session.subscribe(
@@ -426,12 +432,15 @@ class TibberHome:
                         callback(data)
                         self._last_rt_data_received = dt.datetime.now()
                         _LOGGER.debug(
-                            "Data received for %s",
+                            "Data received for %s: %s",
                             self.home_id,
+                            data,
                         )
+                        if self._rt_stopped:
+                            _LOGGER.debug("Stopping rt_subscribe loop")
+                            return
                 except Exception:  # pylint: disable=broad-except
-                    if self.rt_subscription_running:
-                        _LOGGER.exception("Error in rt_subscribe")
+                    _LOGGER.exception("Error in rt_subscribe")
                     await asyncio.sleep(10)
                     await asyncio.gather(
                         *[
@@ -443,7 +452,9 @@ class TibberHome:
                         _LOGGER.error("No real time device for %s", self.home_id)
                         return
 
-        asyncio.create_task(_start())
+        self._rt_callback = callback
+        self._rt_listener = asyncio.create_task(_start())
+        self._rt_stopped = False
         await self._tibber_control.rt_connect()
 
     async def rt_resubscribe(self) -> None:
