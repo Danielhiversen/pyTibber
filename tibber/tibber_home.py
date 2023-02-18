@@ -301,12 +301,12 @@ class TibberHome:
         return sub in ["running", "awaiting market", "awaiting time restriction"]
 
     @property
-    def has_real_time_consumption(self) -> bool:
+    def has_real_time_consumption(self) -> None | bool:
         """Return home id."""
         try:
             return self.info["viewer"]["home"]["features"]["realTimeConsumptionEnabled"]
         except (KeyError, TypeError):
-            return False
+            return None
 
     @property
     def has_production(self) -> bool:
@@ -439,7 +439,7 @@ class TibberHome:
                             self._tibber_control.update_info(),
                         ]
                     )
-                    if not self.has_real_time_consumption:
+                    if self.has_real_time_consumption is False:
                         _LOGGER.error("No real time device for %s", self.home_id)
                         return
 
