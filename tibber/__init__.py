@@ -129,8 +129,8 @@ class Tibber:
         next_test_all_homes_running = dt.datetime.now()
         while self._watchdog_running:
             if (
-                    self.sub_manager.transport.running
-                    and self.sub_manager.transport.reconnect_at > dt.datetime.now()
+                self.sub_manager.transport.running
+                and self.sub_manager.transport.reconnect_at > dt.datetime.now()
             ):
                 is_running = True
                 if dt.datetime.now() > next_test_all_homes_running:
@@ -146,7 +146,7 @@ class Tibber:
                         if not home.rt_subscription_running:
                             is_running = False
                             next_test_all_homes_running = (
-                                    dt.datetime.now() + dt.timedelta(seconds=60)
+                                dt.datetime.now() + dt.timedelta(seconds=60)
                             )
                             break
                 if is_running:
@@ -185,7 +185,7 @@ class Tibber:
                 await self._resubscribe_homes()
             except Exception:  # pylint: disable=broad-except
                 delay_seconds = min(
-                    random.SystemRandom().randint(1, 60) + _retry_count ** 2,
+                    random.SystemRandom().randint(1, 60) + _retry_count**2,
                     20 * 60,
                 )
                 _retry_count += 1
@@ -248,7 +248,6 @@ class Tibber:
             return await extract_response_data(resp)
 
         except ClientError as err:
-
             if retry > 0:
                 return await self._execute(
                     document,
