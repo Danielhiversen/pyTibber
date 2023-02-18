@@ -578,15 +578,4 @@ class TibberHome:
         attr["off_peak_1"] = round(off_peak_1 / num1, 3) if num1 > 0 else 0
         attr["peak"] = round(peak / num0, 3) if num0 > 0 else 0
         attr["off_peak_2"] = round(off_peak_2 / num2, 3) if num2 > 0 else 0
-        if (
-            "glitre"
-            in (
-                self.info["viewer"]["home"]["meteringPointData"].get("gridCompany")
-                or ""
-            ).lower()
-        ):
-            _LOGGER.warning(
-                "Grid price attribute is deprecated and removed. "
-                "Use https://github.com/Danielhiversen/home_assistant_glitre"
-            )
         return attr
