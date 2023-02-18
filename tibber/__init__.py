@@ -5,8 +5,8 @@ import logging
 import random
 import zoneinfo
 
+import aiohttp
 import async_timeout
-from aiohttp import ClientError, ClientSession, hdrs
 from gql import Client
 
 from .const import API_ENDPOINT, DEMO_TOKEN, __version__
@@ -31,7 +31,7 @@ class Tibber:
         self,
         access_token: str = DEMO_TOKEN,
         timeout: int = DEFAULT_TIMEOUT,
-        websession: ClientSession | None = None,
+        websession: aiohttp.ClientSession | None = None,
         time_zone: dt.tzinfo | None = None,
         user_agent: str | None = None,
         api_endpoint: str = API_ENDPOINT,
@@ -46,9 +46,9 @@ class Tibber:
         """
 
         if websession is None:
-            websession = ClientSession()
+            websession = aiohttp.ClientSession()
         elif user_agent is None:
-            user_agent = websession.headers.get(hdrs.USER_AGENT)
+            user_agent = websession.headers.get(aiohttp.hdrs.USER_AGENT)
         if user_agent is None:
             raise Exception(
                 "Please provide value for HTTP user agent. Example: MyHomeAutomationServer/1.2.3"
@@ -98,17 +98,7 @@ class Tibber:
 
     async def rt_connect(self) -> None:
         """Start subscription manager."""
-        if self.sub_endpoint is None:
-            raise Exception("Subscription endpoint not initialized")
-
-        if self.sub_manager is None:
-            self.sub_manager = Client(
-                transport=TibberWebsocketsTransport(
-                    self.sub_endpoint,
-                    self._access_token,
-                    self.user_agent,
-                ),
-            )
+        self._create_sub_manager()
 
         async with LOCK_RT_CONNECT:
             if self.rt_subscription_running:
@@ -118,6 +108,19 @@ class Tibber:
                 self._watchdog_running = True
                 self._watchdog_runner = asyncio.create_task(self._rt_watchdog())
             await self.sub_manager.connect_async()
+
+    def _create_sub_manager(self):
+        if self.sub_endpoint is None:
+            raise Exception("Subscription endpoint not initialized")
+        if self.sub_manager is not None:
+            return
+        self.sub_manager = Client(
+            transport=TibberWebsocketsTransport(
+                self.sub_endpoint,
+                self._access_token,
+                self.user_agent,
+            ),
+        )
 
     async def _rt_watchdog(self) -> None:
         """Watchdog to keep connection alive."""
@@ -172,14 +175,7 @@ class Tibber:
             if not self._watchdog_running:
                 return
 
-            self.sub_manager = Client(
-                transport=TibberWebsocketsTransport(
-                    self.sub_endpoint,
-                    self._access_token,
-                    self.user_agent,
-                ),
-            )
-
+            self._create_sub_manager()
             try:
                 await self.sub_manager.connect_async()
                 await self._resubscribe_homes()
@@ -237,7 +233,7 @@ class Tibber:
         post_args = {
             "headers": {
                 "Authorization": "Bearer " + self._access_token,
-                hdrs.USER_AGENT: self.user_agent,
+                aiohttp.hdrs.USER_AGENT: self.user_agent,
             },
             "data": payload,
         }
@@ -247,7 +243,7 @@ class Tibber:
 
             return await extract_response_data(resp)
 
-        except ClientError as err:
+        except aiohttp.ClientError as err:
             if retry > 0:
                 return await self._execute(
                     document,
