@@ -100,6 +100,8 @@ class Tibber:
         """Start subscription manager."""
         self._create_sub_manager()
 
+        assert self.sub_manager is not None
+
         async with LOCK_RT_CONNECT:
             if self.rt_subscription_running:
                 return
