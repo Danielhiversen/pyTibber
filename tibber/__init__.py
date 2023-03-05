@@ -3,6 +3,7 @@ import asyncio
 import datetime as dt
 import logging
 import zoneinfo
+from typing import Any
 
 import aiohttp
 import async_timeout
@@ -15,9 +16,9 @@ from .exceptions import (
     UserAgentMissing,
 )
 from .gql_queries import INFO, PUSH_NOTIFICATION
-from .tibber_home import TibberHome
-from .tibber_response_handler import extract_response_data
-from .tibber_rt import TibberRT
+from .home import TibberHome
+from .realtime import TibberRT
+from .response_handler import extract_response_data
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -76,10 +77,10 @@ class Tibber:
     async def execute(
         self,
         document: str,
-        variable_values: dict | None = None,
+        variable_values: dict[Any, Any] | None = None,
         timeout: int | None = None,
         retry: int = 3,
-    ) -> dict | None:
+    ) -> dict[Any, Any] | None:
         """Execute a GraphQL query and return the data.
 
         :param document: The GraphQL query to request.

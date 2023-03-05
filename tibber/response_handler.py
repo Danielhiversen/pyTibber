@@ -1,6 +1,7 @@
 """Tibber API response handler"""
 
 from http import HTTPStatus
+from typing import Any
 
 from aiohttp import ClientResponse
 
@@ -13,14 +14,14 @@ from .const import (
 from .exceptions import FatalHttpException, InvalidLogin, RetryableHttpException
 
 
-def extract_error_details(errors: list, default_message: str) -> tuple[str, str]:
+def extract_error_details(errors: list[Any], default_message: str) -> tuple[str, str]:
     """Tries to extract the error message and code from the provided 'errors' dictionary"""
     if not errors:
         return API_ERR_CODE_UNKNOWN, default_message
     return errors[0].get("extensions").get("code"), errors[0].get("message")
 
 
-async def extract_response_data(response: ClientResponse) -> dict:
+async def extract_response_data(response: ClientResponse) -> dict[Any, Any]:
     """Extracts the response as JSON or throws a HttpException"""
     result = await response.json()
 

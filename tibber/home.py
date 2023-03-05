@@ -5,7 +5,7 @@ import asyncio
 import datetime as dt
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from dateutil.parser import parse
 from gql import gql
@@ -37,7 +37,7 @@ class HourlyData:
         self.peak_hour: float | None = None
         self.peak_hour_time: dt.datetime | None = None
         self.last_data_timestamp: dt.datetime | None = None
-        self.data: list[dict] = []
+        self.data: list[dict[Any, Any]] = []
 
     @property
     def direction_name(self) -> str:
@@ -73,14 +73,14 @@ class TibberHome:
         self._price_info: dict[str, float] = {}
         self._level_info: dict[str, str] = {}
         self._rt_power: list[tuple[dt.datetime, float]] = []
-        self.info: dict[str, dict] = {}
+        self.info: dict[str, dict[Any, Any]] = {}
         self.last_data_timestamp: dt.datetime | None = None
 
         self._hourly_consumption_data: HourlyData = HourlyData()
         self._hourly_production_data: HourlyData = HourlyData(production=True)
         self._last_rt_data_received: dt.datetime = dt.datetime.now()
-        self._rt_listener: None | asyncio.Task = None
-        self._rt_callback: Callable | None = None
+        self._rt_listener: None | asyncio.Task[Any] = None
+        self._rt_callback: Callable[..., Any] | None = None
         self._rt_stopped: bool = True
 
     async def _fetch_data(self, hourly_data: HourlyData) -> None:
@@ -195,12 +195,12 @@ class TibberHome:
         return self._hourly_consumption_data.last_data_timestamp
 
     @property
-    def hourly_consumption_data(self) -> list[dict]:
+    def hourly_consumption_data(self) -> list[dict[Any, Any]]:
         """Get consumption data for the last 30 days."""
         return self._hourly_consumption_data.data
 
     @property
-    def hourly_production_data(self) -> list[dict]:
+    def hourly_production_data(self) -> list[dict[Any, Any]]:
         """Get production data for the last 30 days."""
         return self._hourly_production_data.data
 
@@ -240,7 +240,7 @@ class TibberHome:
         if price_info := await self._tibber_control.execute(PRICE_INFO % self.home_id):
             self._process_price_info(price_info)
 
-    def _process_price_info(self, price_info: dict) -> None:
+    def _process_price_info(self, price_info: dict[str, dict[str, Any]]) -> None:
         """Processes price information retrieved from a GraphQL query.
         The information from the provided dictionary is extracted, then the
         properties of this TibberHome object is updated with this data.
@@ -280,7 +280,7 @@ class TibberHome:
         return self._current_price_info.get("total")
 
     @property
-    def current_price_info(self) -> dict:
+    def current_price_info(self) -> dict[str, float]:
         """Get current price info."""
         return self._current_price_info
 
@@ -386,13 +386,13 @@ class TibberHome:
                 return round(price_total, 3), self.price_level[key], price_time
         return None, None, None
 
-    async def rt_subscribe(self, callback: Callable) -> None:
+    async def rt_subscribe(self, callback: Callable[..., Any]) -> None:
         """Connect to Tibber and subscribe to Tibber real time subscription.
 
         :param callback: The function to call when data is received.
         """
 
-        def _add_extra_data(data: dict) -> dict:
+        def _add_extra_data(data: dict[str, Any]) -> dict[str, Any]:
             live_data = data["data"]["liveMeasurement"]
             _time = parse(live_data["timestamp"]).astimezone(
                 self._tibber_control.time_zone
@@ -419,7 +419,7 @@ class TibberHome:
                     self._hourly_consumption_data.peak_hour_time = _time
             return data
 
-        async def _start():
+        async def _start() -> None:
             """Subscribe to Tibber."""
             while not self._tibber_control.realtime.subscription_running:
                 _LOGGER.debug("Waiting for rt_connect")
@@ -427,6 +427,7 @@ class TibberHome:
             if self._rt_stopped:
                 _LOGGER.debug("Stopping rt_subscribe")
                 return
+            assert self._tibber_control.realtime.sub_manager is not None
             while not self._rt_stopped:
                 try:
                     async for data in self._tibber_control.realtime.sub_manager.session.subscribe(
@@ -444,7 +445,10 @@ class TibberHome:
                             self.home_id,
                             data,
                         )
-                        if self._rt_stopped:
+                        if (
+                            self._rt_stopped
+                            or not self._tibber_control.realtime.subscription_running
+                        ):
                             _LOGGER.debug("Stopping rt_subscribe loop")
                             return
                 except Exception:  # pylint: disable=broad-except
@@ -498,7 +502,7 @@ class TibberHome:
 
     async def get_historic_data(
         self, n_data: int, resolution: str = RESOLUTION_HOURLY, production: bool = False
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """Get historic data.
 
         :param n_data: The number of nodes to get from history. e.g. 5 would give 5 nodes
@@ -507,7 +511,6 @@ class TibberHome:
             DAILY, WEEKLY, MONTHLY or ANNUAL
         :param production: True to get production data instead of consumption
         """
-        cursor = ""
         cons_or_prod_str = "production" if production else "consumption"
         query = HISTORIC_DATA.format(
             self.home_id,
@@ -515,7 +518,7 @@ class TibberHome:
             resolution,
             n_data,
             "profit" if production else "totalCost cost",
-            cursor,
+            "",
         )
         if not (data := await self._tibber_control.execute(query, timeout=30)):
             _LOGGER.error("Could not get the data.")
@@ -528,7 +531,7 @@ class TibberHome:
     async def get_historic_price_data(
         self,
         resolution: str = RESOLUTION_HOURLY,
-    ) -> list[dict] | None:
+    ) -> list[dict[Any, Any]] | None:
         """Get historic price data.
         :param resolution: The resolution of the data. Can be HOURLY,
             DAILY, WEEKLY, MONTHLY or ANNUAL
@@ -545,7 +548,7 @@ class TibberHome:
             "entries"
         ]
 
-    def current_attributes(self) -> dict:
+    def current_attributes(self) -> dict[str, float]:
         """Get current attributes."""
         # pylint: disable=too-many-locals
         max_price = 0.0

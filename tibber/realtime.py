@@ -3,12 +3,12 @@ import asyncio
 import datetime as dt
 import logging
 import random
+from typing import Any
 
 from gql import Client
 
-from .const import DEFAULT_TIMEOUT, DEMO_TOKEN
 from .exceptions import SubscriptionEndpointMissing
-from .tibber_home import TibberHome
+from .home import TibberHome
 from .websocker_transport import TibberWebsocketsTransport
 
 LOCK_CONNECT = asyncio.Lock()
@@ -22,9 +22,9 @@ class TibberRT:
     # pylint: disable=too-many-instance-attributes
     def __init__(
         self,
-        access_token: str = DEMO_TOKEN,
-        timeout: int = DEFAULT_TIMEOUT,
-        user_agent: str | None = None,
+        access_token: str,
+        timeout: int,
+        user_agent: str,
     ):
         """Initialize the Tibber connection.
 
@@ -34,11 +34,11 @@ class TibberRT:
         """
         self._access_token: str = access_token
         self._timeout: int = timeout
-        self._user_agent: str | None = user_agent
+        self._user_agent: str = user_agent
 
         self._sub_endpoint: str | None = None
         self._homes: list[TibberHome] = []
-        self._watchdog_runner: None | asyncio.Task = None
+        self._watchdog_runner: None | asyncio.Task[Any] = None
         self._watchdog_running: bool = False
 
         self.sub_manager: Client | None = None
@@ -79,7 +79,7 @@ class TibberRT:
                 self._watchdog_runner = asyncio.create_task(self._watchdog())
             await self.sub_manager.connect_async()
 
-    def _create_sub_manager(self):
+    def _create_sub_manager(self) -> None:
         if self.sub_endpoint is None:
             raise SubscriptionEndpointMissing("Subscription endpoint not initialized")
         if self.sub_manager is not None:
@@ -167,11 +167,11 @@ class TibberRT:
                 _LOGGER.debug("Watchdog: Reconnected successfully")
                 await asyncio.sleep(60)
 
-    async def _resubscribe_homes(self):
+    async def _resubscribe_homes(self) -> None:
         """Resubscribe to all homes."""
         await asyncio.gather(
             *[
-                home
+                home.rt_resubscribe()
                 for home in self._homes
                 if home.has_real_time_consumption is not False
             ]
