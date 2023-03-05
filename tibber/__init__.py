@@ -2,24 +2,24 @@
 import asyncio
 import datetime as dt
 import logging
-import random
 import zoneinfo
 
 import aiohttp
 import async_timeout
-from gql import Client
 
-from .const import API_ENDPOINT, DEMO_TOKEN, __version__
-from .exceptions import FatalHttpException, InvalidLogin, RetryableHttpException
+from .const import API_ENDPOINT, DEFAULT_TIMEOUT, DEMO_TOKEN, __version__
+from .exceptions import (
+    FatalHttpException,
+    InvalidLogin,
+    RetryableHttpException,
+    UserAgentMissing,
+)
 from .gql_queries import INFO, PUSH_NOTIFICATION
 from .tibber_home import TibberHome
 from .tibber_response_handler import extract_response_data
-from .websocker_transport import TibberWebsocketsTransport
-
-DEFAULT_TIMEOUT = 10
+from .tibber_rt import TibberRT
 
 _LOGGER = logging.getLogger(__name__)
-LOCK_RT_CONNECT = asyncio.Lock()
 
 
 class Tibber:
@@ -34,15 +34,14 @@ class Tibber:
         websession: aiohttp.ClientSession | None = None,
         time_zone: dt.tzinfo | None = None,
         user_agent: str | None = None,
-        api_endpoint: str = API_ENDPOINT,
     ):
         """Initialize the Tibber connection.
 
         :param access_token: The access token to access the Tibber API with.
+        :param timeout: The timeout in seconds to use when communicating with the Tibber API.
         :param websession: The websession to use when communicating with the Tibber API.
         :param time_zone: The time zone to display times in and to use.
         :param user_agent: User agent identifier for the platform running this. Required if websession is None.
-        :param api_endpoint: Allow overriding API endpoint for easy testing
         """
 
         if websession is None:
@@ -50,183 +49,43 @@ class Tibber:
         elif user_agent is None:
             user_agent = websession.headers.get(aiohttp.hdrs.USER_AGENT)
         if user_agent is None:
-            raise Exception(
-                "Please provide value for HTTP user agent. Example: MyHomeAutomationServer/1.2.3"
-            )
-        self.user_agent = f"{user_agent} pyTibber/{__version__}"
+            raise UserAgentMissing("Please provide value for HTTP user agent")
+        self._user_agent: str = f"{user_agent} pyTibber/{__version__}"
         self.websession = websession
-
         self._timeout: int = timeout
         self._access_token: str = access_token
+
+        self.realtime: TibberRT = TibberRT(
+            self._access_token,
+            self._timeout,
+            self._user_agent,
+        )
+
         self.time_zone: dt.tzinfo = time_zone or zoneinfo.ZoneInfo("UTC")
         self._name: str = ""
         self._user_id: str | None = None
         self._active_home_ids: list[str] = []
         self._all_home_ids: list[str] = []
         self._homes: dict[str, TibberHome] = {}
-        self.sub_manager: Client | None = None
-        self.api_endpoint: str = api_endpoint
-        self.sub_endpoint: str | None = None
-        self._watchdog_runner: None | asyncio.Task = None
-        self._watchdog_running: bool = False
 
     async def close_connection(self) -> None:
         """Close the Tibber connection.
         This method simply closes the websession used by the object."""
         await self.websession.close()
 
-    async def rt_disconnect(self) -> None:
-        """Stop subscription manager.
-        This method simply calls the stop method of the SubscriptionManager if it is defined.
-        """
-        _LOGGER.debug("Stopping subscription manager")
-        if self._watchdog_runner is not None:
-            _LOGGER.debug("Stopping watchdog")
-            self._watchdog_running = False
-            self._watchdog_runner.cancel()
-            self._watchdog_runner = None
-        for home in self.get_homes(False):
-            home.rt_unsubscribe()
-        if self.sub_manager is None or not hasattr(self.sub_manager, "session"):
-            return
-        if not hasattr(self.sub_manager, "session"):
-            return
-        try:
-            await self.sub_manager.close_async()
-        finally:
-            self.sub_manager = None
-
-    async def rt_connect(self) -> None:
-        """Start subscription manager."""
-        self._create_sub_manager()
-
-        assert self.sub_manager is not None
-
-        async with LOCK_RT_CONNECT:
-            if self.rt_subscription_running:
-                return
-            if self._watchdog_runner is None:
-                _LOGGER.debug("Starting watchdog")
-                self._watchdog_running = True
-                self._watchdog_runner = asyncio.create_task(self._rt_watchdog())
-            await self.sub_manager.connect_async()
-
-    def _create_sub_manager(self):
-        if self.sub_endpoint is None:
-            raise Exception("Subscription endpoint not initialized")
-        if self.sub_manager is not None:
-            return
-        self.sub_manager = Client(
-            transport=TibberWebsocketsTransport(
-                self.sub_endpoint,
-                self._access_token,
-                self.user_agent,
-            ),
-        )
-
-    async def _rt_watchdog(self) -> None:
-        """Watchdog to keep connection alive."""
-        assert self.sub_manager is not None
-        assert isinstance(self.sub_manager.transport, TibberWebsocketsTransport)
-        await asyncio.sleep(60)
-
-        _retry_count = 0
-        next_test_all_homes_running = dt.datetime.now()
-        while self._watchdog_running:
-            if (
-                self.sub_manager.transport.running
-                and self.sub_manager.transport.reconnect_at > dt.datetime.now()
-            ):
-                is_running = True
-                if dt.datetime.now() > next_test_all_homes_running:
-                    for home in self.get_homes(False):
-                        _LOGGER.debug(
-                            "Watchdog: Checking if home %s is alive, %s, %s",
-                            home.home_id,
-                            home.has_real_time_consumption,
-                            home.rt_subscription_running,
-                        )
-                        if not home.has_real_time_consumption:
-                            continue
-                        if not home.rt_subscription_running:
-                            is_running = False
-                            next_test_all_homes_running = (
-                                dt.datetime.now() + dt.timedelta(seconds=60)
-                            )
-                            break
-                if is_running:
-                    _retry_count = 0
-                    _LOGGER.debug("Watchdog: Connection is alive")
-                    await asyncio.sleep(5)
-                    continue
-
-            _LOGGER.error(
-                "Watchdog: Connection is down, %s",
-                self.sub_manager.transport.reconnect_at,
-            )
-            self.sub_manager.transport.reconnect_at = dt.datetime.now() + dt.timedelta(
-                seconds=self._timeout
-            )
-
-            try:
-                if hasattr(self.sub_manager, "session"):
-                    await self.sub_manager.close_async()
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Error in watchdog close")
-
-            if not self._watchdog_running:
-                return
-
-            self._create_sub_manager()
-            try:
-                await self.sub_manager.connect_async()
-                await self._resubscribe_homes()
-            except Exception:  # pylint: disable=broad-except
-                delay_seconds = min(
-                    random.SystemRandom().randint(1, 60) + _retry_count**2,
-                    20 * 60,
-                )
-                _retry_count += 1
-                _LOGGER.error(
-                    "Error in watchdog connect, retrying in %s seconds, %s",
-                    delay_seconds,
-                    _retry_count,
-                    exc_info=_retry_count > 1,
-                )
-                await asyncio.sleep(delay_seconds)
-            else:
-                _LOGGER.debug("Watchdog: Reconnected successfully")
-                await asyncio.sleep(60)
-
     async def execute(
         self,
         document: str,
         variable_values: dict | None = None,
         timeout: int | None = None,
+        retry: int = 3,
     ) -> dict | None:
         """Execute a GraphQL query and return the data.
 
         :param document: The GraphQL query to request.
         :param variable_values: The GraphQL variables to parse with the request.
         :param timeout: The timeout to use for the request.
-        """
-        if (
-            res := await self._execute(document, variable_values, timeout=timeout)
-        ) is None:
-            return None
-        return res.get("data")
-
-    async def _execute(
-        self,
-        document: str,
-        variable_values: dict | None = None,
-        retry: int = 2,
-        timeout: int | None = None,
-    ) -> dict | None:
-        """Execute a GraphQL query and return the result as a dict loaded from the json response.
-
-        :param document: The GraphQL query to request.
-        :param variable_values: The GraphQL variables to parse with the request.
+        :param retry: The number of times to retry the request.
         """
         timeout = timeout or self._timeout
 
@@ -235,19 +94,18 @@ class Tibber:
         post_args = {
             "headers": {
                 "Authorization": "Bearer " + self._access_token,
-                aiohttp.hdrs.USER_AGENT: self.user_agent,
+                aiohttp.hdrs.USER_AGENT: self._user_agent,
             },
             "data": payload,
         }
         try:
             async with async_timeout.timeout(timeout):
-                resp = await self.websession.post(self.api_endpoint, **post_args)
-
-            return await extract_response_data(resp)
+                resp = await self.websession.post(API_ENDPOINT, **post_args)
+            return (await extract_response_data(resp)).get("data")
 
         except aiohttp.ClientError as err:
             if retry > 0:
-                return await self._execute(
+                return await self.execute(
                     document,
                     variable_values,
                     retry - 1,
@@ -257,7 +115,7 @@ class Tibber:
             raise
         except asyncio.TimeoutError:
             if retry > 0:
-                return await self._execute(
+                return await self.execute(
                     document,
                     variable_values,
                     retry - 1,
@@ -284,24 +142,15 @@ class Tibber:
 
     async def update_info(self) -> None:
         """Updates home info asynchronously."""
-        if (res := await self._execute(INFO)) is None:
-            return
-
-        if not (data := res.get("data")):
+        if (data := await self.execute(INFO)) is None:
             return
 
         if not (viewer := data.get("viewer")):
             return
 
-        if not (sub_endpoint := viewer.get("websocketSubscriptionUrl")):
-            return
-
-        _LOGGER.debug("Using websocket subscription url %s", sub_endpoint)
-        self.sub_endpoint = sub_endpoint
-        if self.sub_manager is not None and isinstance(
-            self.sub_manager.transport, TibberWebsocketsTransport
-        ):
-            self.sub_manager.transport.url = sub_endpoint
+        if sub_endpoint := viewer.get("websocketSubscriptionUrl"):
+            _LOGGER.debug("Using websocket subscription url %s", sub_endpoint)
+            self.realtime.sub_endpoint = sub_endpoint
 
         self._name = viewer.get("name")
         self._user_id = viewer.get("userId")
@@ -382,21 +231,11 @@ class Tibber:
                 tasks.append(home.fetch_production_data())
         await asyncio.gather(*tasks)
 
-    async def _resubscribe_homes(self):
-        """Resubscribe to all homes."""
-        for home in self.get_homes(False):
-            if not home.has_real_time_consumption:
-                continue
-            await home.rt_resubscribe()
-
-    @property
-    def rt_subscription_running(self) -> bool:
-        """Is real time subscription running."""
-        return (
-            self.sub_manager is not None
-            and isinstance(self.sub_manager.transport, TibberWebsocketsTransport)
-            and self.sub_manager.transport.running
-        )
+    async def rt_disconnect(self) -> None:  # Todo: remove?
+        """Stop subscription manager.
+        This method simply calls the stop method of the SubscriptionManager if it is defined.
+        """
+        return await self.realtime.disconnect()
 
     @property
     def user_id(self) -> str | None:

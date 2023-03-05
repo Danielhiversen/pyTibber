@@ -3,6 +3,14 @@
 from .const import API_ERR_CODE_UNKNOWN
 
 
+class SubscriptionEndpointMissing(Exception):
+    """Exception raised when subscription endpoint is missing"""
+
+
+class UserAgentMissing(Exception):
+    """Exception raised when user agent is missing"""
+
+
 class HttpException(Exception):
     """Exception base for HTTP errors
 

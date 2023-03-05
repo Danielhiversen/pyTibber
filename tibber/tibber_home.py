@@ -30,7 +30,6 @@ _LOGGER = logging.getLogger(__name__)
 class HourlyData:
     """Holds hourly data for consumption or production."""
 
-    # pylint: disable=too-few-public-methods
     def __init__(self, production: bool = False):
         self.is_production: bool = production
         self.month_energy: float | None = None
@@ -39,6 +38,20 @@ class HourlyData:
         self.peak_hour_time: dt.datetime | None = None
         self.last_data_timestamp: dt.datetime | None = None
         self.data: list[dict] = []
+
+    @property
+    def direction_name(self) -> str:
+        """Return the direction name."""
+        if self.is_production:
+            return "production"
+        return "consumption"
+
+    @property
+    def money_name(self) -> str:
+        """Return the money name."""
+        if self.is_production:
+            return "profit"
+        return "cost"
 
 
 class TibberHome:
@@ -72,7 +85,7 @@ class TibberHome:
 
     async def _fetch_data(self, hourly_data: HourlyData) -> None:
         """Update hourly consumption or production data asynchronously."""
-        # pylint: disable=too-many-branches,too-many-statements,too-many-locals
+        # pylint: disable=too-many-branches
 
         now = dt.datetime.utcnow().replace(tzinfo=dt.timezone.utc)
         local_now = now.astimezone(self._tibber_control.time_zone)
@@ -101,18 +114,13 @@ class TibberHome:
             hourly_data.data = []
 
         data = await self.get_historic_data(
-            n_hours, resolution=RESOLUTION_HOURLY, production=hourly_data.is_production
+            n_hours,
+            resolution=RESOLUTION_HOURLY,
+            production=hourly_data.is_production,
         )
 
-        if hourly_data.is_production:
-            direction_name = "production"
-            money_name = "profit"
-        else:
-            direction_name = "consumption"
-            money_name = "cost"
-
         if not data:
-            _LOGGER.error("Could not find %s data.", direction_name)
+            _LOGGER.error("Could not find %s data.", hourly_data.direction_name)
             return None
 
         if not hourly_data.data:
@@ -132,7 +140,7 @@ class TibberHome:
             _time = parse(node["from"])
             if _time.month != local_now.month or _time.year != local_now.year:
                 continue
-            if (energy := node.get(direction_name)) is None:
+            if (energy := node.get(hourly_data.direction_name)) is None:
                 continue
 
             if (
@@ -145,8 +153,8 @@ class TibberHome:
                 _month_hour_max_month_hour = _time
             _month_energy += energy
 
-            if node.get(money_name) is not None:
-                _month_money += node[money_name]
+            if node.get(hourly_data.money_name) is not None:
+                _month_money += node[hourly_data.money_name]
 
         hourly_data.month_energy = round(_month_energy, 2)
         hourly_data.month_money = round(_month_money, 2)
@@ -413,15 +421,15 @@ class TibberHome:
 
         async def _start():
             """Subscribe to Tibber."""
-            while not self._tibber_control.rt_subscription_running:
+            while not self._tibber_control.realtime.subscription_running:
                 _LOGGER.debug("Waiting for rt_connect")
                 await asyncio.sleep(1)
             if self._rt_stopped:
                 _LOGGER.debug("Stopping rt_subscribe")
                 return
-            while True:
+            while not self._rt_stopped:
                 try:
-                    async for data in self._tibber_control.sub_manager.session.subscribe(
+                    async for data in self._tibber_control.realtime.sub_manager.session.subscribe(
                         gql(LIVE_SUBSCRIBE % self.home_id)
                     ):
                         data = {"data": data}
@@ -442,20 +450,21 @@ class TibberHome:
                 except Exception:  # pylint: disable=broad-except
                     _LOGGER.exception("Error in rt_subscribe")
                     await asyncio.sleep(10)
-                    await asyncio.gather(
-                        *[
-                            self.update_info(),
-                            self._tibber_control.update_info(),
-                        ]
-                    )
-                    if self.has_real_time_consumption is False:
-                        _LOGGER.error("No real time device for %s", self.home_id)
-                        return
+                await asyncio.gather(
+                    *[
+                        self.update_info(),
+                        self._tibber_control.update_info(),
+                    ]
+                )
+                if self.has_real_time_consumption is False:
+                    _LOGGER.error("No real time device for %s", self.home_id)
+                    return
 
         self._rt_callback = callback
         self._rt_listener = asyncio.create_task(_start())
         self._rt_stopped = False
-        await self._tibber_control.rt_connect()
+        await self._tibber_control.realtime.connect()
+        self._tibber_control.realtime.add_home(self)
 
     async def rt_resubscribe(self) -> None:
         """Resubscribe to Tibber data."""
@@ -463,6 +472,9 @@ class TibberHome:
         self.rt_unsubscribe()
         if self._rt_callback is None:
             _LOGGER.warning("No callback set for rt_resubscribe")
+            return
+        if self.has_real_time_consumption is False:
+            _LOGGER.error("No real time device for %s", self.home_id)
             return
         await self.rt_subscribe(self._rt_callback)
 
@@ -478,7 +490,7 @@ class TibberHome:
     @property
     def rt_subscription_running(self) -> bool:
         """Is real time subscription running."""
-        if not self._tibber_control.rt_subscription_running:
+        if not self._tibber_control.realtime.subscription_running:
             return False
         if self._last_rt_data_received < dt.datetime.now() - dt.timedelta(seconds=60):
             return False
@@ -496,40 +508,22 @@ class TibberHome:
         :param production: True to get production data instead of consumption
         """
         cursor = ""
-        res = []
-        max_n_data = 5000
-        while n_data > 0:
-            _n_data = min(max_n_data, n_data)
-            cons_or_prod_str = "production" if production else "consumption"
-            query = HISTORIC_DATA.format(
-                self.home_id,
-                cons_or_prod_str,
-                resolution,
-                _n_data,
-                "profit" if production else "totalCost cost",
-                cursor,
-            )
-            if not (data := await self._tibber_control.execute(query, timeout=30)):
-                _LOGGER.error("Could not get the data.")
-                continue
-            data = data["viewer"]["home"][cons_or_prod_str]
-            if data is None:
-                continue
-            res.extend(data["nodes"])
-            n_data -= len(data["nodes"])
-            if (
-                not data["pageInfo"]["hasPreviousPage"]
-                or not data["pageInfo"]["startCursor"]
-            ):
-                if n_data > 0:
-                    max_n_data = max_n_data // 10
-                    if max_n_data < 1:
-                        _LOGGER.warning("Found less data than requested")
-                        break
-                    continue
-                break
-            cursor = data["pageInfo"]["startCursor"]
-        return res
+        cons_or_prod_str = "production" if production else "consumption"
+        query = HISTORIC_DATA.format(
+            self.home_id,
+            cons_or_prod_str,
+            resolution,
+            n_data,
+            "profit" if production else "totalCost cost",
+            cursor,
+        )
+        if not (data := await self._tibber_control.execute(query, timeout=30)):
+            _LOGGER.error("Could not get the data.")
+            return []
+        data = data["viewer"]["home"][cons_or_prod_str]
+        if data is None:
+            return []
+        return data["nodes"]
 
     async def get_historic_price_data(
         self,
@@ -539,16 +533,17 @@ class TibberHome:
         :param resolution: The resolution of the data. Can be HOURLY,
             DAILY, WEEKLY, MONTHLY or ANNUAL
         """
+        resolution = resolution.lower()
         query = HISTORIC_PRICE.format(
             self.home_id,
-            resolution.lower(),
+            resolution,
         )
         if not (data := await self._tibber_control.execute(query)):
             _LOGGER.error("Could not get the price data.")
             return None
-        return data["viewer"]["home"]["currentSubscription"]["priceRating"][
-            resolution.lower()
-        ]["entries"]
+        return data["viewer"]["home"]["currentSubscription"]["priceRating"][resolution][
+            "entries"
+        ]
 
     def current_attributes(self) -> dict:
         """Get current attributes."""
