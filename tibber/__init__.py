@@ -231,7 +231,7 @@ class Tibber:
                 tasks.append(home.fetch_production_data())
         await asyncio.gather(*tasks)
 
-    async def rt_disconnect(self) -> None:  # Todo: remove?
+    async def rt_disconnect(self) -> None:
         """Stop subscription manager.
         This method simply calls the stop method of the SubscriptionManager if it is defined.
         """
