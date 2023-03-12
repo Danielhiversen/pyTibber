@@ -103,8 +103,7 @@ class Tibber:
             async with async_timeout.timeout(timeout):
                 resp = await self.websession.post(API_ENDPOINT, **post_args)
             return (await extract_response_data(resp)).get("data")
-
-        except aiohttp.ClientError as err:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
             if retry > 0:
                 return await self.execute(
                     document,
@@ -112,17 +111,10 @@ class Tibber:
                     retry - 1,
                     timeout,
                 )
-            _LOGGER.error("Error connecting to Tibber: %s ", err, exc_info=True)
-            raise
-        except asyncio.TimeoutError:
-            if retry > 0:
-                return await self.execute(
-                    document,
-                    variable_values,
-                    retry - 1,
-                    timeout,
-                )
-            _LOGGER.error("Timed out when connecting to Tibber")
+            if isinstance(err, asyncio.TimeoutError):
+                _LOGGER.error("Timed out when connecting to Tibber")
+            else:
+                _LOGGER.error("Error connecting to Tibber", exc_info=True)
             raise
         except (InvalidLogin, FatalHttpException) as err:
             _LOGGER.error(
