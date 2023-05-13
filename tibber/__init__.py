@@ -212,16 +212,16 @@ class Tibber:
     async def fetch_consumption_data_active_homes(self) -> None:
         """Fetch consumption data for active homes."""
         tasks = []
-        for home in self.get_homes(only_active=True):
-            tasks.append(home.fetch_consumption_data())
+        for tibber_home in self.get_homes(only_active=True):
+            tasks.append(tibber_home.fetch_consumption_data())
         await asyncio.gather(*tasks)
 
     async def fetch_production_data_active_homes(self) -> None:
         """Fetch production data for active homes."""
         tasks = []
-        for home in self.get_homes(only_active=True):
-            if home.has_production:
-                tasks.append(home.fetch_production_data())
+        for tibber_home in self.get_homes(only_active=True):
+            if tibber_home.has_production:
+                tasks.append(tibber_home.fetch_production_data())
         await asyncio.gather(*tasks)
 
     async def rt_disconnect(self) -> None:
