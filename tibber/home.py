@@ -91,27 +91,20 @@ class TibberHome:
         local_now = now.astimezone(self._tibber_control.time_zone)
         n_hours = 60 * 24
 
-        if self.has_real_time_consumption:
-            if (
-                not hourly_data.data
-                or hourly_data.last_data_timestamp is None
-                or parse(hourly_data.data[0]["from"])
-                < now - dt.timedelta(hours=n_hours + 24)
-            ):
-                hourly_data.data = []
-            else:
-                time_diff = now - hourly_data.last_data_timestamp
-                seconds_diff = time_diff.total_seconds()
-                n_hours = int(seconds_diff / 3600)
-                if n_hours < 1:
-                    return
-                n_hours = max(2, int(n_hours))
-        else:
-            if hourly_data.last_data_timestamp is not None and (
-                now - hourly_data.last_data_timestamp
-            ) < dt.timedelta(hours=24):
-                return
+        if (
+            not hourly_data.data
+            or hourly_data.last_data_timestamp is None
+            or parse(hourly_data.data[0]["from"])
+            < now - dt.timedelta(hours=n_hours + 24)
+        ):
             hourly_data.data = []
+        else:
+            time_diff = now - hourly_data.last_data_timestamp
+            seconds_diff = time_diff.total_seconds()
+            n_hours = int(seconds_diff / 3600)
+            if n_hours < 1:
+                return
+            n_hours = max(2, int(n_hours))
 
         data = await self.get_historic_data(
             n_hours,
@@ -394,21 +387,21 @@ class TibberHome:
 
         def _add_extra_data(data: dict[str, Any]) -> dict[str, Any]:
             live_data = data["data"]["liveMeasurement"]
-            _time = parse(live_data["timestamp"]).astimezone(
+            _timestamp = parse(live_data["timestamp"]).astimezone(
                 self._tibber_control.time_zone
             )
-            while self._rt_power and self._rt_power[0][0] < _time - dt.timedelta(
+            while self._rt_power and self._rt_power[0][0] < _timestamp - dt.timedelta(
                 minutes=5
             ):
                 self._rt_power.pop(0)
 
-            self._rt_power.append((_time, live_data["power"] / 1000))
+            self._rt_power.append((_timestamp, live_data["power"] / 1000))
             current_hour = live_data["accumulatedConsumptionLastHour"]
             if current_hour is not None:
                 power = sum(p[1] for p in self._rt_power) / len(self._rt_power)
                 live_data["estimatedHourConsumption"] = round(
                     current_hour
-                    + power * (3600 - (_time.minute * 60 + _time.second)) / 3600,
+                    + power * (3600 - (_timestamp.minute * 60 + _timestamp.second)) / 3600,
                     3,
                 )
                 if (
@@ -416,12 +409,14 @@ class TibberHome:
                     and current_hour > self._hourly_consumption_data.peak_hour
                 ):
                     self._hourly_consumption_data.peak_hour = round(current_hour, 2)
-                    self._hourly_consumption_data.peak_hour_time = _time
+                    self._hourly_consumption_data.peak_hour_time = _timestamp
             return data
 
         async def _start() -> None:
             """Subscribe to Tibber."""
-            while not self._tibber_control.realtime.subscription_running:
+            for _ in range(30):
+                if self._tibber_control.realtime.subscription_running or self._rt_stopped:
+                    break
                 _LOGGER.debug("Waiting for rt_connect")
                 await asyncio.sleep(1)
             if self._rt_stopped:
