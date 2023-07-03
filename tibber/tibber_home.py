@@ -448,7 +448,7 @@ class TibberHome:
     ) -> list[dict]:
         """Get historic data.
 
-        :param n_data: The number of nodes to get from history. e.g. 5 would give 5 nodes
+        :param n_data: The maximum number of nodes to get from history. e.g. 5 would give at most 5 nodes
             and resolution = hourly would give the 5 last hours of historic data
         :param resolution: The resolution of the data. Can be HOURLY,
             DAILY, WEEKLY, MONTHLY or ANNUAL
@@ -481,17 +481,16 @@ class TibberHome:
 
             res.extend(data["nodes"])
             n_data -= len(data["nodes"])
-            if (
-                not data["pageInfo"]["hasPreviousPage"]
-                or not data["pageInfo"]["startCursor"]
-            ):
-                if n_data > 0:
-                    max_n_data = max_n_data // 10
-                    if max_n_data < 1:
-                        _LOGGER.warning("Found less data than requested")
-                        break
-                    continue
+            
+            if n_data == 0:
                 break
+            
+            hasPreviousPage = data["pageInfo"]["hasPreviousPage"]
+            
+            if not hasPreviousPage or not data["pageInfo"]["startCursor"]:
+                _LOGGER.warning("Found less data than requested")
+                break # Return as much as we got
+
             cursor = data["pageInfo"]["startCursor"]
         return res
 
