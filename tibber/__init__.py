@@ -53,12 +53,12 @@ class Tibber:
             raise UserAgentMissing("Please provide value for HTTP user agent")
         self._user_agent: str = f"{user_agent} pyTibber/{__version__}"
         self.websession = websession
-        self._timeout: int = timeout
+        self.timeout: int = timeout
         self._access_token: str = access_token
 
         self.realtime: TibberRT = TibberRT(
             self._access_token,
-            self._timeout,
+            self.timeout,
             self._user_agent,
         )
 
@@ -88,7 +88,7 @@ class Tibber:
         :param timeout: The timeout to use for the request.
         :param retry: The number of times to retry the request.
         """
-        timeout = timeout or self._timeout
+        timeout = timeout or self.timeout
 
         payload = {"query": document, "variables": variable_values or {}}
 
