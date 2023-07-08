@@ -125,7 +125,8 @@ class TibberRT:
                             )
                             break
                         _LOGGER.debug(
-                            "Watchdog: Home %s is alive", home.home_id,
+                            "Watchdog: Home %s is alive",
+                            home.home_id,
                         )
                     if is_running:
                         _retry_count = 0

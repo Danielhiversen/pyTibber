@@ -401,7 +401,9 @@ class TibberHome:
                 power = sum(p[1] for p in self._rt_power) / len(self._rt_power)
                 live_data["estimatedHourConsumption"] = round(
                     current_hour
-                    + power * (3600 - (_timestamp.minute * 60 + _timestamp.second)) / 3600,
+                    + power
+                    * (3600 - (_timestamp.minute * 60 + _timestamp.second))
+                    / 3600,
                     3,
                 )
                 if (
@@ -415,7 +417,10 @@ class TibberHome:
         async def _start() -> None:
             """Subscribe to Tibber."""
             for _ in range(30):
-                if self._tibber_control.realtime.subscription_running or self._rt_stopped:
+                if (
+                    self._tibber_control.realtime.subscription_running
+                    or self._rt_stopped
+                ):
                     break
                 _LOGGER.debug("Waiting for rt_connect")
                 await asyncio.sleep(1)
