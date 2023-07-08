@@ -60,7 +60,7 @@ class TibberRT:
         try:
             if not hasattr(self.sub_manager, "session"):
                 return
-            await self.sub_manager.close_async()
+            await self.sub_manager.close_async()  # type: ignore
         finally:
             self.sub_manager = None
 
@@ -77,7 +77,7 @@ class TibberRT:
                 _LOGGER.debug("Starting watchdog")
                 self._watchdog_running = True
                 self._watchdog_runner = asyncio.create_task(self._watchdog())
-            await self.sub_manager.connect_async()
+            await self.sub_manager.connect_async()  # type: ignore
 
     def _create_sub_manager(self) -> None:
         if self.sub_endpoint is None:
@@ -102,12 +102,13 @@ class TibberRT:
         _retry_count = 0
         next_test_all_homes_running = dt.datetime.now()
         while self._watchdog_running:
+            await asyncio.sleep(5)
             if (
                 self.sub_manager.transport.running
                 and self.sub_manager.transport.reconnect_at > dt.datetime.now()
             ):
-                is_running = True
                 if dt.datetime.now() > next_test_all_homes_running:
+                    is_running = True
                     for home in self._homes:
                         _LOGGER.debug(
                             "Watchdog: Checking if home %s is alive, %s, %s",
@@ -123,11 +124,13 @@ class TibberRT:
                                 dt.datetime.now() + dt.timedelta(seconds=60)
                             )
                             break
-                if is_running:
-                    _retry_count = 0
-                    _LOGGER.debug("Watchdog: Connection is alive")
-                    await asyncio.sleep(5)
-                    continue
+                        _LOGGER.debug(
+                            "Watchdog: Home %s is alive", home.home_id,
+                        )
+                    if is_running:
+                        _retry_count = 0
+                        _LOGGER.debug("Watchdog: Connection is alive")
+                        continue
 
             _LOGGER.error(
                 "Watchdog: Connection is down, %s",
@@ -139,7 +142,7 @@ class TibberRT:
 
             try:
                 if hasattr(self.sub_manager, "session"):
-                    await self.sub_manager.close_async()
+                    await self.sub_manager.close_async()  # type: ignore
             except Exception:  # pylint: disable=broad-except
                 _LOGGER.exception("Error in watchdog close")
 
@@ -148,7 +151,7 @@ class TibberRT:
 
             self._create_sub_manager()
             try:
-                await self.sub_manager.connect_async()
+                await self.sub_manager.connect_async()  # type: ignore
                 await self._resubscribe_homes()
             except Exception:  # pylint: disable=broad-except
                 delay_seconds = min(
