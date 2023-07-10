@@ -18,8 +18,9 @@ class TibberWebsocketsTransport(WebsocketsTransport):
             url=url,
             init_payload={"token": access_token},
             headers={"User-Agent": user_agent},
-            ping_interval=10,
+            ping_interval=30,
         )
+        self._user_agent: str = user_agent
         self._timeout: int = 90
         self.reconnect_at: dt.datetime = dt.datetime.now() + dt.timedelta(
             seconds=self._timeout
@@ -28,12 +29,7 @@ class TibberWebsocketsTransport(WebsocketsTransport):
     @property
     def running(self) -> bool:
         """Is real time subscription running."""
-        return (
-            self.websocket is not None
-            and self.websocket.open
-            and self.reconnect_at > dt.datetime.now()
-            and self.receive_data_task in asyncio.all_tasks()
-        )
+        return self.websocket is not None and self.websocket.open
 
     async def _receive(self) -> str:
         """Wait the next message from the websocket connection."""
@@ -46,5 +42,8 @@ class TibberWebsocketsTransport(WebsocketsTransport):
         return msg
 
     async def close(self) -> None:
-        await self._fail(TransportClosed("Tibber websocket closed by pyTibber"))
+        """Close the websocket connection."""
+        await self._fail(
+            TransportClosed(f"Tibber websocket closed by {self._user_agent}")
+        )
         await self.wait_closed()

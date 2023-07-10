@@ -1,6 +1,7 @@
 """Tibber API response handler"""
 
 from http import HTTPStatus
+from typing import Any
 
 from aiohttp import ClientResponse
 
@@ -13,22 +14,14 @@ from .const import (
 from .exceptions import FatalHttpException, InvalidLogin, RetryableHttpException
 
 
-def extract_error_details(errors: dict, default_message: str = "") -> tuple[str, str]:
+def extract_error_details(errors: list[Any], default_message: str) -> tuple[str, str]:
     """Tries to extract the error message and code from the provided 'errors' dictionary"""
-    error_code = API_ERR_CODE_UNKNOWN
-    if default_message:
-        error_message = default_message
-    else:
-        error_message = "N/A"
-
-    if errors:
-        error_code = errors[0].get("extensions").get("code")
-        error_message = errors[0].get("message")
-
-    return error_code, error_message
+    if not errors:
+        return API_ERR_CODE_UNKNOWN, default_message
+    return errors[0].get("extensions").get("code"), errors[0].get("message")
 
 
-async def extract_response_data(response: ClientResponse) -> dict:
+async def extract_response_data(response: ClientResponse) -> dict[Any, Any]:
     """Extracts the response as JSON or throws a HttpException"""
     result = await response.json()
 
@@ -53,7 +46,7 @@ async def extract_response_data(response: ClientResponse) -> dict:
 
         raise FatalHttpException(response.status, error_message, error_code)
 
-    error_code, error_message = extract_error_details(result.get("errors", []))
+    error_code, error_message = extract_error_details(result.get("errors", []), "N/A")
     # if reached here the HTTP response code is not currently handled
     raise FatalHttpException(
         response.status, f"Unhandled error: {error_message}", error_code

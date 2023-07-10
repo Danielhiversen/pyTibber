@@ -37,9 +37,12 @@ jobs:
             isort  --check-only **/*.py
       - name: Pylint Code Linter
         run: |
-            pylint $SRC_FOLDER
+            pylint --enable useless-suppression $SRC_FOLDER
       - name: MyPy
         run: |
-            mypy --disallow-incomplete-defs --no-implicit-optional $SRC_FOLDER
+            mypy --disallow-incomplete-defs --no-implicit-optional  --strict --no-warn-return-any $SRC_FOLDER
       - name: black
         run: black --check $SRC_FOLDER
+      - name: pytest
+        run: |
+            pytest test/test.py
