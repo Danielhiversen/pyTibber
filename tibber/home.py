@@ -459,13 +459,6 @@ class TibberHome:
                         return
             except Exception:  # pylint: disable=broad-except
                 _LOGGER.exception("Error in rt_subscribe")
-                await asyncio.sleep(10)
-            await asyncio.gather(
-                *[
-                    self.update_info(),
-                    self._tibber_control.update_info(),
-                ]
-            )
 
         self._rt_callback = callback
         self._rt_listener = asyncio.create_task(_start())
@@ -477,6 +470,12 @@ class TibberHome:
         """Resubscribe to Tibber data."""
         self.rt_unsubscribe()
         _LOGGER.debug("Resubscribe, %s", self.home_id)
+        await asyncio.gather(
+            *[
+                self.update_info(),
+                self._tibber_control.update_info(),
+            ]
+        )
         if self._rt_callback is None:
             _LOGGER.warning("No callback set for rt_resubscribe")
             return
