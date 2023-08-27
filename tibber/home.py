@@ -422,52 +422,43 @@ class TibberHome:
         async def _start() -> None:
             """Subscribe to Tibber."""
             for _ in range(30):
-                if (
-                    self._tibber_control.realtime.subscription_running
-                    or self._rt_stopped
-                ):
+                if self._rt_stopped:
+                    _LOGGER.debug("Stopping rt_subscribe")
+                    return
+                if self._tibber_control.realtime.subscription_running:
                     break
+
                 _LOGGER.debug("Waiting for rt_connect")
                 await asyncio.sleep(1)
-            if self._rt_stopped:
-                _LOGGER.debug("Stopping rt_subscribe")
+            else:
+                _LOGGER.error("rt not running")
                 return
             assert self._tibber_control.realtime.sub_manager is not None
-            while not self._rt_stopped:
-                try:
-                    async for data in self._tibber_control.realtime.sub_manager.session.subscribe(
-                        gql(LIVE_SUBSCRIBE % self.home_id)
+
+            try:
+                async for data in self._tibber_control.realtime.sub_manager.session.subscribe(
+                    gql(LIVE_SUBSCRIBE % self.home_id)
+                ):
+                    data = {"data": data}
+                    try:
+                        data = _add_extra_data(data)
+                    except KeyError:
+                        pass
+                    callback(data)
+                    self._last_rt_data_received = dt.datetime.now()
+                    _LOGGER.debug(
+                        "Data received for %s: %s",
+                        self.home_id,
+                        data,
+                    )
+                    if (
+                        self._rt_stopped
+                        or not self._tibber_control.realtime.subscription_running
                     ):
-                        data = {"data": data}
-                        try:
-                            data = _add_extra_data(data)
-                        except KeyError:
-                            pass
-                        callback(data)
-                        self._last_rt_data_received = dt.datetime.now()
-                        _LOGGER.debug(
-                            "Data received for %s: %s",
-                            self.home_id,
-                            data,
-                        )
-                        if (
-                            self._rt_stopped
-                            or not self._tibber_control.realtime.subscription_running
-                        ):
-                            _LOGGER.debug("Stopping rt_subscribe loop")
-                            return
-                except Exception:  # pylint: disable=broad-except
-                    _LOGGER.exception("Error in rt_subscribe")
-                    await asyncio.sleep(10)
-                await asyncio.gather(
-                    *[
-                        self.update_info(),
-                        self._tibber_control.update_info(),
-                    ]
-                )
-                if self.has_real_time_consumption is False:
-                    _LOGGER.error("No real time device for %s", self.home_id)
-                    return
+                        _LOGGER.debug("Stopping rt_subscribe loop")
+                        return
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.exception("Error in rt_subscribe")
 
         self._rt_callback = callback
         self._rt_listener = asyncio.create_task(_start())
@@ -477,8 +468,14 @@ class TibberHome:
 
     async def rt_resubscribe(self) -> None:
         """Resubscribe to Tibber data."""
-        _LOGGER.debug("Resubscribe, %s", self.home_id)
         self.rt_unsubscribe()
+        _LOGGER.debug("Resubscribe, %s", self.home_id)
+        await asyncio.gather(
+            *[
+                self.update_info(),
+                self._tibber_control.update_info(),
+            ]
+        )
         if self._rt_callback is None:
             _LOGGER.warning("No callback set for rt_resubscribe")
             return

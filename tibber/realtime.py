@@ -133,12 +133,12 @@ class TibberRT:
                         _LOGGER.debug("Watchdog: Connection is alive")
                         continue
 
+            self.sub_manager.transport.reconnect_at = dt.datetime.now() + dt.timedelta(
+                seconds=self._timeout
+            )
             _LOGGER.error(
                 "Watchdog: Connection is down, %s",
                 self.sub_manager.transport.reconnect_at,
-            )
-            self.sub_manager.transport.reconnect_at = dt.datetime.now() + dt.timedelta(
-                seconds=self._timeout
             )
 
             try:
@@ -148,6 +148,7 @@ class TibberRT:
                 _LOGGER.exception("Error in watchdog close")
 
             if not self._watchdog_running:
+                _LOGGER.debug("Watchdog: Stopping")
                 return
 
             self._create_sub_manager()
@@ -173,17 +174,12 @@ class TibberRT:
 
     async def _resubscribe_homes(self) -> None:
         """Resubscribe to all homes."""
-        await asyncio.gather(
-            *[
-                home.rt_resubscribe()
-                for home in self._homes
-                if home.has_real_time_consumption is not False
-            ]
-        )
+        _LOGGER.debug("Resubscribing to homes")
+        await asyncio.gather(*[home.rt_resubscribe() for home in self._homes])
 
     def add_home(self, home: TibberHome) -> bool:
         """Add home to real time subscription."""
-        if home.has_real_time_consumption is not False:
+        if home.has_real_time_consumption is False:
             return False
         if home in self._homes:
             return False
