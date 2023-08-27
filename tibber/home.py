@@ -299,7 +299,7 @@ class TibberHome:
             sub = self.info["viewer"]["home"]["currentSubscription"]["status"]
         except (KeyError, TypeError):
             return False
-        return sub in ["running", "awaiting market", "awaiting time restriction"]
+        return sub in ["running", "awaiting market", "awaiting time restriction", "awaiting termination",]
 
     @property
     def has_real_time_consumption(self) -> None | bool:
@@ -417,14 +417,10 @@ class TibberHome:
         async def _start() -> None:
             """Subscribe to Tibber."""
             for _ in range(30):
-                print(_)
                 if self._rt_stopped:
                     _LOGGER.debug("Stopping rt_subscribe")
-                    print(self._rt_stopped)
                     return
                 if self._tibber_control.realtime.subscription_running:
-                    print("break")
-                    print(self._tibber_control.realtime.subscription_running, self._tibber_control.realtime.sub_manager)
                     break
 
                 _LOGGER.debug("Waiting for rt_connect")
@@ -435,7 +431,6 @@ class TibberHome:
             assert self._tibber_control.realtime.sub_manager is not None
 
             try:
-                print(self._tibber_control.realtime.sub_manager, self._tibber_control.realtime.subscription_running)
                 async for data in self._tibber_control.realtime.sub_manager.session.subscribe(
                     gql(LIVE_SUBSCRIBE % self.home_id)
                 ):
