@@ -175,12 +175,7 @@ class TibberRT:
     async def _resubscribe_homes(self) -> None:
         """Resubscribe to all homes."""
         _LOGGER.debug("Resubscribing to homes")
-        await asyncio.gather(
-            *[
-                home.rt_resubscribe()
-                for home in self._homes
-            ]
-        )
+        await asyncio.gather(*[home.rt_resubscribe() for home in self._homes])
 
     def add_home(self, home: TibberHome) -> bool:
         """Add home to real time subscription."""
