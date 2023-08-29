@@ -13,7 +13,6 @@ from .const import (
 )
 from .exceptions import FatalHttpException, InvalidLogin, RetryableHttpException
 
-
 _LOGGER = logging.getLogger(__name__)
 
 
