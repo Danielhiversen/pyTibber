@@ -1,5 +1,5 @@
 """Tibber API response handler"""
-
+import logging
 from http import HTTPStatus
 from typing import Any
 
@@ -13,6 +13,8 @@ from .const import (
 )
 from .exceptions import FatalHttpException, InvalidLogin, RetryableHttpException
 
+_LOGGER = logging.getLogger(__name__)
+
 
 def extract_error_details(errors: list[Any], default_message: str) -> tuple[str, str]:
     """Tries to extract the error message and code from the provided 'errors' dictionary"""
@@ -23,6 +25,15 @@ def extract_error_details(errors: list[Any], default_message: str) -> tuple[str,
 
 async def extract_response_data(response: ClientResponse) -> dict[Any, Any]:
     """Extracts the response as JSON or throws a HttpException"""
+    _LOGGER.debug("Response status: %s", response.status)
+
+    if response.content_type != "application/json":
+        raise FatalHttpException(
+            response.status,
+            f"Unexpected content type: {response.content_type}",
+            API_ERR_CODE_UNKNOWN,
+        )
+
     result = await response.json()
 
     if response.status == HTTPStatus.OK:
