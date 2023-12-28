@@ -95,8 +95,7 @@ class TibberHome:
         if (
             not hourly_data.data
             or hourly_data.last_data_timestamp is None
-            or parse(hourly_data.data[0]["from"])
-            < now - dt.timedelta(hours=n_hours + 24)
+            or parse(hourly_data.data[0]["from"]) < now - dt.timedelta(hours=n_hours + 24)
         ):
             hourly_data.data = []
         else:
@@ -120,9 +119,7 @@ class TibberHome:
         if not hourly_data.data:
             hourly_data.data = data
         else:
-            hourly_data.data = [
-                entry for entry in hourly_data.data if entry not in data
-            ]
+            hourly_data.data = [entry for entry in hourly_data.data if entry not in data]
             hourly_data.data.extend(data)
 
         _month_energy = 0
@@ -205,9 +202,7 @@ class TibberHome:
 
     async def update_info_and_price_info(self) -> None:
         """Update home info and all price info asynchronously."""
-        if data := await self._tibber_control.execute(
-            UPDATE_INFO_PRICE % self._home_id
-        ):
+        if data := await self._tibber_control.execute(UPDATE_INFO_PRICE % self._home_id):
             self.info = data
             self._process_price_info(self.info)
 
@@ -248,9 +243,7 @@ class TibberHome:
         self._level_info = {}
         for key in ["current", "today", "tomorrow"]:
             try:
-                price_info_k = price_info["viewer"]["home"]["currentSubscription"][
-                    "priceInfo"
-                ][key]
+                price_info_k = price_info["viewer"]["home"]["currentSubscription"]["priceInfo"][key]
             except (KeyError, TypeError):
                 _LOGGER.error("Could not find price info for %s.", key)
                 continue
@@ -260,10 +253,7 @@ class TibberHome:
             for data in price_info_k:
                 self._price_info[data.get("startsAt")] = data.get("total")
                 self._level_info[data.get("startsAt")] = data.get("level")
-                if (
-                    not self.last_data_timestamp
-                    or parse(data.get("startsAt")) > self.last_data_timestamp
-                ):
+                if not self.last_data_timestamp or parse(data.get("startsAt")) > self.last_data_timestamp:
                     self.last_data_timestamp = parse(data.get("startsAt"))
 
     @property
@@ -319,9 +309,7 @@ class TibberHome:
     def has_production(self) -> bool:
         """Return true if the home has a production metering point."""
         try:
-            return bool(
-                self.info["viewer"]["home"]["meteringPointData"]["productionEan"]
-            )
+            return bool(self.info["viewer"]["home"]["meteringPointData"]["productionEan"])
         except (KeyError, TypeError):
             return False
 
@@ -343,9 +331,7 @@ class TibberHome:
     def currency(self) -> str:
         """Return the currency."""
         try:
-            return self.info["viewer"]["home"]["currentSubscription"]["priceInfo"][
-                "current"
-            ]["currency"]
+            return self.info["viewer"]["home"]["currentSubscription"]["priceInfo"]["current"]["currency"]
         except (KeyError, TypeError, IndexError):
             _LOGGER.error("Could not find currency.")
         return ""
@@ -393,12 +379,8 @@ class TibberHome:
 
         def _add_extra_data(data: dict[str, Any]) -> dict[str, Any]:
             live_data = data["data"]["liveMeasurement"]
-            _timestamp = parse(live_data["timestamp"]).astimezone(
-                self._tibber_control.time_zone
-            )
-            while self._rt_power and self._rt_power[0][0] < _timestamp - dt.timedelta(
-                minutes=5
-            ):
+            _timestamp = parse(live_data["timestamp"]).astimezone(self._tibber_control.time_zone)
+            while self._rt_power and self._rt_power[0][0] < _timestamp - dt.timedelta(minutes=5):
                 self._rt_power.pop(0)
 
             self._rt_power.append((_timestamp, live_data["power"] / 1000))
@@ -406,16 +388,10 @@ class TibberHome:
             if current_hour is not None:
                 power = sum(p[1] for p in self._rt_power) / len(self._rt_power)
                 live_data["estimatedHourConsumption"] = round(
-                    current_hour
-                    + power
-                    * (3600 - (_timestamp.minute * 60 + _timestamp.second))
-                    / 3600,
+                    current_hour + power * (3600 - (_timestamp.minute * 60 + _timestamp.second)) / 3600,
                     3,
                 )
-                if (
-                    self._hourly_consumption_data.peak_hour
-                    and current_hour > self._hourly_consumption_data.peak_hour
-                ):
+                if self._hourly_consumption_data.peak_hour and current_hour > self._hourly_consumption_data.peak_hour:
                     self._hourly_consumption_data.peak_hour = round(current_hour, 2)
                     self._hourly_consumption_data.peak_hour_time = _timestamp
             return data
@@ -452,10 +428,7 @@ class TibberHome:
                         self.home_id,
                         data,
                     )
-                    if (
-                        self._rt_stopped
-                        or not self._tibber_control.realtime.subscription_running
-                    ):
+                    if self._rt_stopped or not self._tibber_control.realtime.subscription_running:
                         _LOGGER.debug("Stopping rt_subscribe loop")
                         return
             except Exception:  # pylint: disable=broad-except
@@ -547,9 +520,7 @@ class TibberHome:
         if not (data := await self._tibber_control.execute(query)):
             _LOGGER.error("Could not get the price data.")
             return None
-        return data["viewer"]["home"]["currentSubscription"]["priceRating"][resolution][
-            "entries"
-        ]
+        return data["viewer"]["home"]["currentSubscription"]["priceRating"][resolution]["entries"]
 
     def current_attributes(self) -> dict[str, float]:
         """Get current attributes."""

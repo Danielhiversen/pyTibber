@@ -22,9 +22,7 @@ class TibberWebsocketsTransport(WebsocketsTransport):
         )
         self._user_agent: str = user_agent
         self._timeout: int = 90
-        self.reconnect_at: dt.datetime = dt.datetime.now(tz=dt.UTC) + dt.timedelta(
-            seconds=self._timeout
-        )
+        self.reconnect_at: dt.datetime = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=self._timeout)
 
     @property
     def running(self) -> bool:
@@ -43,7 +41,5 @@ class TibberWebsocketsTransport(WebsocketsTransport):
 
     async def close(self) -> None:
         """Close the websocket connection."""
-        await self._fail(
-            TransportClosed(f"Tibber websocket closed by {self._user_agent}")
-        )
+        await self._fail(TransportClosed(f"Tibber websocket closed by {self._user_agent}"))
         await self.wait_closed()

@@ -44,18 +44,12 @@ async def extract_response_data(response: ClientResponse) -> dict[Any, Any]:
         return result
 
     if response.status in HTTP_CODES_RETRIABLE:
-        error_code, error_message = extract_error_details(
-            result.get("errors", []), str(response.content)
-        )
+        error_code, error_message = extract_error_details(result.get("errors", []), str(response.content))
 
-        raise RetryableHttpExceptionError(
-            response.status, message=error_message, extension_code=error_code
-        )
+        raise RetryableHttpExceptionError(response.status, message=error_message, extension_code=error_code)
 
     if response.status in HTTP_CODES_FATAL:
-        error_code, error_message = extract_error_details(
-            result.get("errors", []), "request failed"
-        )
+        error_code, error_message = extract_error_details(result.get("errors", []), "request failed")
         if error_code == API_ERR_CODE_UNAUTH:
             raise InvalidLoginError(response.status, error_message, error_code)
 
@@ -63,6 +57,4 @@ async def extract_response_data(response: ClientResponse) -> dict[Any, Any]:
 
     error_code, error_message = extract_error_details(result.get("errors", []), "N/A")
     # if reached here the HTTP response code is not currently handled
-    raise FatalHttpExceptionError(
-        response.status, f"Unhandled error: {error_message}", error_code
-    )
+    raise FatalHttpExceptionError(response.status, f"Unhandled error: {error_message}", error_code)

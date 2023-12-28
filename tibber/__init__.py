@@ -155,10 +155,7 @@ class Tibber:
             self._all_home_ids += [home_id]
             if not (subs := _home.get("subscriptions")):
                 continue
-            if (
-                subs[0].get("status") is not None
-                and subs[0]["status"].lower() == "running"
-            ):
+            if subs[0].get("status") is not None and subs[0]["status"].lower() == "running":
                 self._active_home_ids += [home_id]
 
     def get_home_ids(self, only_active: bool = True) -> list[str]:
@@ -169,11 +166,7 @@ class Tibber:
 
     def get_homes(self, only_active: bool = True) -> list[TibberHome]:
         """Return list of Tibber homes."""
-        return [
-            home
-            for home_id in self.get_home_ids(only_active)
-            if (home := self.get_home(home_id))
-        ]
+        return [home for home_id in self.get_home_ids(only_active) if (home := self.get_home(home_id))]
 
     def get_home(self, home_id: str) -> TibberHome | None:
         """Return an instance of TibberHome for given home id."""
@@ -211,8 +204,9 @@ class Tibber:
 
     async def fetch_consumption_data_active_homes(self) -> None:
         """Fetch consumption data for active homes."""
-        await asyncio.gather(*[tibber_home.fetch_consumption_data()
-                               for tibber_home in self.get_homes(only_active=True)])
+        await asyncio.gather(
+            *[tibber_home.fetch_consumption_data() for tibber_home in self.get_homes(only_active=True)]
+        )
 
     async def fetch_production_data_active_homes(self) -> None:
         """Fetch production data for active homes."""

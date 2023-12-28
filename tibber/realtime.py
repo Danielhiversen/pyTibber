@@ -103,9 +103,8 @@ class TibberRT:
         next_test_all_homes_running = dt.datetime.now(tz=dt.UTC)
         while self._watchdog_running:
             await asyncio.sleep(5)
-            if (
-                self.sub_manager.transport.running
-                and self.sub_manager.transport.reconnect_at > dt.datetime.now(tz=dt.UTC)
+            if self.sub_manager.transport.running and self.sub_manager.transport.reconnect_at > dt.datetime.now(
+                tz=dt.UTC
             ):
                 if dt.datetime.now(tz=dt.UTC) > next_test_all_homes_running:
                     is_running = True
@@ -120,9 +119,7 @@ class TibberRT:
                             continue
                         if not home.rt_subscription_running:
                             is_running = False
-                            next_test_all_homes_running = (
-                                dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=60)
-                            )
+                            next_test_all_homes_running = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=60)
                             break
                         _LOGGER.debug(
                             "Watchdog: Home %s is alive",
@@ -133,9 +130,7 @@ class TibberRT:
                         _LOGGER.debug("Watchdog: Connection is alive")
                         continue
 
-            self.sub_manager.transport.reconnect_at = dt.datetime.now(tz=dt.UTC) + dt.timedelta(
-                seconds=self._timeout
-            )
+            self.sub_manager.transport.reconnect_at = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=self._timeout)
             _LOGGER.error(
                 "Watchdog: Connection is down, %s",
                 self.sub_manager.transport.reconnect_at,
@@ -204,7 +199,5 @@ class TibberRT:
     def sub_endpoint(self, sub_endpoint: str) -> None:
         """Set subscription endpoint."""
         self._sub_endpoint = sub_endpoint
-        if self.sub_manager is not None and isinstance(
-            self.sub_manager.transport, TibberWebsocketsTransport
-        ):
+        if self.sub_manager is not None and isinstance(self.sub_manager.transport, TibberWebsocketsTransport):
             self.sub_manager.transport.url = sub_endpoint
