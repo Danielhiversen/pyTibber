@@ -6,7 +6,6 @@ import zoneinfo
 from typing import Any
 
 import aiohttp
-import async_timeout
 
 from .const import API_ENDPOINT, DEFAULT_TIMEOUT, DEMO_TOKEN, __version__
 from .exceptions import (
@@ -100,8 +99,7 @@ class Tibber:
             "data": payload,
         }
         try:
-            async with async_timeout.timeout(timeout):
-                resp = await self.websession.post(API_ENDPOINT, **post_args)
+            resp = await self.websession.post(API_ENDPOINT, **post_args, timeout=self.timeout)
             return (await extract_response_data(resp)).get("data")
         except (aiohttp.ClientError, asyncio.TimeoutError) as err:
             if retry > 0:
