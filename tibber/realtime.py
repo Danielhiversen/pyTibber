@@ -7,7 +7,7 @@ from typing import Any
 
 from gql import Client
 
-from .exceptions import SubscriptionEndpointMissing
+from .exceptions import SubscriptionEndpointMissingError
 from .home import TibberHome
 from .websocker_transport import TibberWebsocketsTransport
 
@@ -81,7 +81,7 @@ class TibberRT:
 
     def _create_sub_manager(self) -> None:
         if self.sub_endpoint is None:
-            raise SubscriptionEndpointMissing("Subscription endpoint not initialized")
+            raise SubscriptionEndpointMissingError("Subscription endpoint not initialized")
         if self.sub_manager is not None:
             return
         self.sub_manager = Client(
@@ -92,7 +92,7 @@ class TibberRT:
             ),
         )
 
-    async def _watchdog(self) -> None:
+    async def _watchdog(self) -> None:  # noqa: PLR0912
         """Watchdog to keep connection alive."""
         assert self.sub_manager is not None
         assert isinstance(self.sub_manager.transport, TibberWebsocketsTransport)
@@ -100,14 +100,13 @@ class TibberRT:
         await asyncio.sleep(60)
 
         _retry_count = 0
-        next_test_all_homes_running = dt.datetime.now()
+        next_test_all_homes_running = dt.datetime.now(tz=dt.UTC)
         while self._watchdog_running:
             await asyncio.sleep(5)
-            if (
-                self.sub_manager.transport.running
-                and self.sub_manager.transport.reconnect_at > dt.datetime.now()
+            if self.sub_manager.transport.running and self.sub_manager.transport.reconnect_at > dt.datetime.now(
+                tz=dt.UTC
             ):
-                if dt.datetime.now() > next_test_all_homes_running:
+                if dt.datetime.now(tz=dt.UTC) > next_test_all_homes_running:
                     is_running = True
                     for home in self._homes:
                         _LOGGER.debug(
@@ -120,9 +119,7 @@ class TibberRT:
                             continue
                         if not home.rt_subscription_running:
                             is_running = False
-                            next_test_all_homes_running = (
-                                dt.datetime.now() + dt.timedelta(seconds=60)
-                            )
+                            next_test_all_homes_running = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=60)
                             break
                         _LOGGER.debug(
                             "Watchdog: Home %s is alive",
@@ -133,9 +130,7 @@ class TibberRT:
                         _LOGGER.debug("Watchdog: Connection is alive")
                         continue
 
-            self.sub_manager.transport.reconnect_at = dt.datetime.now() + dt.timedelta(
-                seconds=self._timeout
-            )
+            self.sub_manager.transport.reconnect_at = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=self._timeout)
             _LOGGER.error(
                 "Watchdog: Connection is down, %s",
                 self.sub_manager.transport.reconnect_at,
@@ -204,7 +199,5 @@ class TibberRT:
     def sub_endpoint(self, sub_endpoint: str) -> None:
         """Set subscription endpoint."""
         self._sub_endpoint = sub_endpoint
-        if self.sub_manager is not None and isinstance(
-            self.sub_manager.transport, TibberWebsocketsTransport
-        ):
+        if self.sub_manager is not None and isinstance(self.sub_manager.transport, TibberWebsocketsTransport):
             self.sub_manager.transport.url = sub_endpoint
