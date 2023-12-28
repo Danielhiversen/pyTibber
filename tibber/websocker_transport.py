@@ -22,7 +22,7 @@ class TibberWebsocketsTransport(WebsocketsTransport):
         )
         self._user_agent: str = user_agent
         self._timeout: int = 90
-        self.reconnect_at: dt.datetime = dt.datetime.now() + dt.timedelta(
+        self.reconnect_at: dt.datetime = dt.datetime.now(tz=dt.UTC) + dt.timedelta(
             seconds=self._timeout
         )
 
@@ -38,7 +38,7 @@ class TibberWebsocketsTransport(WebsocketsTransport):
         except asyncio.TimeoutError:
             _LOGGER.error("No data received from Tibber for %s seconds", self._timeout)
             raise
-        self.reconnect_at = dt.datetime.now() + dt.timedelta(seconds=self._timeout)
+        self.reconnect_at = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=self._timeout)
         return msg
 
     async def close(self) -> None:

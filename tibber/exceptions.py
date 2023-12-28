@@ -3,15 +3,15 @@
 from .const import API_ERR_CODE_UNKNOWN
 
 
-class SubscriptionEndpointMissing(Exception):
+class SubscriptionEndpointMissingError(Exception):
     """Exception raised when subscription endpoint is missing"""
 
 
-class UserAgentMissing(Exception):
+class UserAgentMissingError(Exception):
     """Exception raised when user agent is missing"""
 
 
-class HttpException(Exception):
+class HttpExceptionError(Exception):
     """Exception base for HTTP errors
 
     :param status: http response code
@@ -31,13 +31,13 @@ class HttpException(Exception):
         super().__init__(self.message)
 
 
-class FatalHttpException(HttpException):
+class FatalHttpExceptionError(HttpExceptionError):
     """Exception raised for HTTP codes that are non-retriable"""
 
 
-class RetryableHttpException(HttpException):
+class RetryableHttpExceptionError(HttpExceptionError):
     """Exception raised for HTTP codes that are possible to retry"""
 
 
-class InvalidLogin(FatalHttpException):
+class InvalidLoginError(FatalHttpExceptionError):
     """Invalid login exception."""

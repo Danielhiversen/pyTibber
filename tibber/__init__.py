@@ -10,10 +10,10 @@ import async_timeout
 
 from .const import API_ENDPOINT, DEFAULT_TIMEOUT, DEMO_TOKEN, __version__
 from .exceptions import (
-    FatalHttpException,
-    InvalidLogin,
-    RetryableHttpException,
-    UserAgentMissing,
+    FatalHttpExceptionError,
+    InvalidLoginError,
+    RetryableHttpExceptionError,
+    UserAgentMissingError,
 )
 from .gql_queries import INFO, PUSH_NOTIFICATION
 from .home import TibberHome
@@ -50,7 +50,7 @@ class Tibber:
         elif user_agent is None:
             user_agent = websession.headers.get(aiohttp.hdrs.USER_AGENT)
         if user_agent is None:
-            raise UserAgentMissing("Please provide value for HTTP user agent")
+            raise UserAgentMissingError("Please provide value for HTTP user agent")
         self._user_agent: str = f"{user_agent} pyTibber/{__version__}"
         self.websession = websession
         self.timeout: int = timeout
@@ -114,9 +114,9 @@ class Tibber:
             if isinstance(err, asyncio.TimeoutError):
                 _LOGGER.error("Timed out when connecting to Tibber")
             else:
-                _LOGGER.error("Error connecting to Tibber", exc_info=True)
+                _LOGGER.exception("Error connecting to Tibber")
             raise
-        except (InvalidLogin, FatalHttpException) as err:
+        except (InvalidLoginError, FatalHttpExceptionError) as err:
             _LOGGER.error(
                 "Fatal error interacting with Tibber API, HTTP status: %s. API error: %s / %s",
                 err.status,
@@ -124,7 +124,7 @@ class Tibber:
                 err.message,
             )
             raise
-        except RetryableHttpException as err:
+        except RetryableHttpExceptionError as err:
             _LOGGER.warning(
                 "Temporary failure interacting with Tibber API, HTTP status: %s. API error: %s / %s",
                 err.status,
@@ -211,18 +211,11 @@ class Tibber:
 
     async def fetch_consumption_data_active_homes(self) -> None:
         """Fetch consumption data for active homes."""
-        tasks = []
-        for tibber_home in self.get_homes(only_active=True):
-            tasks.append(tibber_home.fetch_consumption_data())
-        await asyncio.gather(*tasks)
+        await asyncio.gather([tibber_home.fetch_consumption_data() for tibber_home in self.get_homes(only_active=True)])
 
     async def fetch_production_data_active_homes(self) -> None:
         """Fetch production data for active homes."""
-        tasks = []
-        for tibber_home in self.get_homes(only_active=True):
-            if tibber_home.has_production:
-                tasks.append(tibber_home.fetch_production_data())
-        await asyncio.gather(*tasks)
+        await asyncio.gather(*[tibber_home.fetch_production_data() for tibber_home in self.get_homes(only_active=True)])
 
     async def rt_disconnect(self) -> None:
         """Stop subscription manager.

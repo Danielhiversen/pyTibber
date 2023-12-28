@@ -1,0 +1,22 @@
+[tool.black]
+line-length = 120
+
+[tool.mypy]
+disallow_incomplete_defs = true
+implicit_optional = true
+strict_optional = false
+
+[tool.ruff]
+select = ["E", "F", "PL", "W", "ASYNC", "A", "DTZ", "G", "T20", "RET", "RUF", "TCH", "S", "B", "C90", "T10", "N", "PERF", "UP", "SLF", "TID", "TCH"]
+ignore = ["PLR0913", "C901", "S101"]
+line-length = 120
+target-version = "py311"
+
+[tool.pylint.main]
+max-line-length=120
+
+[tool.pylint."messages control"]
+enable = ["useless-suppression"]
+
+[tool.isort]
+profile = "black"

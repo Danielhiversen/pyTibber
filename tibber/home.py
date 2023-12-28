@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from dateutil.parser import parse
@@ -21,7 +20,11 @@ from .gql_queries import (
     UPDATE_INFO_PRICE,
 )
 
+MIN_IN_HOUR = 60
+
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from . import Tibber
 
 _LOGGER = logging.getLogger(__name__)
@@ -78,16 +81,14 @@ class TibberHome:
 
         self._hourly_consumption_data: HourlyData = HourlyData()
         self._hourly_production_data: HourlyData = HourlyData(production=True)
-        self._last_rt_data_received: dt.datetime = dt.datetime.now()
+        self._last_rt_data_received: dt.datetime = dt.datetime.now(tz=dt.UTC)
         self._rt_listener: None | asyncio.Task[Any] = None
         self._rt_callback: Callable[..., Any] | None = None
         self._rt_stopped: bool = True
 
     async def _fetch_data(self, hourly_data: HourlyData) -> None:
         """Update hourly consumption or production data asynchronously."""
-        # pylint: disable=too-many-branches
-
-        now = dt.datetime.utcnow().replace(tzinfo=dt.timezone.utc)
+        now = dt.datetime.now(tz=dt.UTC)
         local_now = now.astimezone(self._tibber_control.time_zone)
         n_hours = 60 * 24
 
@@ -114,7 +115,7 @@ class TibberHome:
 
         if not data:
             _LOGGER.error("Could not find %s data.", hourly_data.direction_name)
-            return None
+            return
 
         if not hourly_data.data:
             hourly_data.data = data
@@ -379,8 +380,8 @@ class TibberHome:
         now = dt.datetime.now(self._tibber_control.time_zone)
         for key, price_total in self.price_total.items():
             price_time = parse(key).astimezone(self._tibber_control.time_zone)
-            time_diff = (now - price_time).total_seconds() / 60
-            if 0 <= time_diff < 60:
+            time_diff = (now - price_time).total_seconds() / MIN_IN_HOUR
+            if 0 <= time_diff < MIN_IN_HOUR:
                 return round(price_total, 3), self.price_level[key], price_time
         return None, None, None
 
@@ -436,16 +437,16 @@ class TibberHome:
             assert self._tibber_control.realtime.sub_manager is not None
 
             try:
-                async for data in self._tibber_control.realtime.sub_manager.session.subscribe(
+                async for _data in self._tibber_control.realtime.sub_manager.session.subscribe(
                     gql(LIVE_SUBSCRIBE % self.home_id)
                 ):
-                    data = {"data": data}
+                    data = {"data": _data}
                     try:
                         data = _add_extra_data(data)
                     except KeyError:
                         pass
                     callback(data)
-                    self._last_rt_data_received = dt.datetime.now()
+                    self._last_rt_data_received = dt.datetime.now(tz=dt.UTC)
                     _LOGGER.debug(
                         "Data received for %s: %s",
                         self.home_id,
@@ -498,7 +499,7 @@ class TibberHome:
         """Is real time subscription running."""
         if not self._tibber_control.realtime.subscription_running:
             return False
-        if self._last_rt_data_received < dt.datetime.now() - dt.timedelta(seconds=60):
+        if self._last_rt_data_received < dt.datetime.now(tz=dt.UTC) - dt.timedelta(seconds=60):
             return False
         return True
 
@@ -564,16 +565,16 @@ class TibberHome:
         num2 = 0.0
         num = 0.0
         now = dt.datetime.now(self._tibber_control.time_zone)
-        for key, price_total in self.price_total.items():
+        for key, _price_total in self.price_total.items():
             price_time = parse(key).astimezone(self._tibber_control.time_zone)
-            price_total = round(price_total, 3)
+            price_total = round(_price_total, 3)
             if now.date() == price_time.date():
                 max_price = max(max_price, price_total)
                 min_price = min(min_price, price_total)
-                if price_time.hour < 8:
+                if price_time.hour < 8: # noqa: PLR2004
                     off_peak_1 += price_total
                     num1 += 1
-                elif price_time.hour < 20:
+                elif price_time.hour < 20: # noqa: PLR2004
                     peak += price_total
                     num0 += 1
                 else:
