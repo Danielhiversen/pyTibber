@@ -6,7 +6,6 @@ import datetime as dt
 import logging
 from typing import TYPE_CHECKING, Any
 
-from dateutil.parser import parse
 from gql import gql
 
 from .const import RESOLUTION_HOURLY
@@ -95,7 +94,7 @@ class TibberHome:
         if (
             not hourly_data.data
             or hourly_data.last_data_timestamp is None
-            or parse(hourly_data.data[0]["from"]) < now - dt.timedelta(hours=n_hours + 24)
+            or dt.datetime.fromisoformat(hourly_data.data[0]["from"]) < now - dt.timedelta(hours=n_hours + 24)
         ):
             hourly_data.data = []
         else:
@@ -128,7 +127,7 @@ class TibberHome:
         _month_hour_max_month_hour: dt.datetime | None = None
 
         for node in hourly_data.data:
-            _time = parse(node["from"])
+            _time = dt.datetime.fromisoformat(node["from"])
             if _time.month != local_now.month or _time.year != local_now.year:
                 continue
             if (energy := node.get(hourly_data.direction_name)) is None:
@@ -253,8 +252,8 @@ class TibberHome:
             for data in price_info_k:
                 self._price_info[data.get("startsAt")] = data.get("total")
                 self._level_info[data.get("startsAt")] = data.get("level")
-                if not self.last_data_timestamp or parse(data.get("startsAt")) > self.last_data_timestamp:
-                    self.last_data_timestamp = parse(data.get("startsAt"))
+                if not self.last_data_timestamp or dt.datetime.fromisoformat(data.get("startsAt")) > self.last_data_timestamp:
+                    self.last_data_timestamp = dt.datetime.fromisoformat(data.get("startsAt"))
 
     @property
     def current_price_total(self) -> float | None:
@@ -365,7 +364,7 @@ class TibberHome:
         """Get current price."""
         now = dt.datetime.now(self._tibber_control.time_zone)
         for key, price_total in self.price_total.items():
-            price_time = parse(key).astimezone(self._tibber_control.time_zone)
+            price_time = dt.datetime.fromisoformat(key).astimezone(self._tibber_control.time_zone)
             time_diff = (now - price_time).total_seconds() / MIN_IN_HOUR
             if 0 <= time_diff < MIN_IN_HOUR:
                 return round(price_total, 3), self.price_level[key], price_time
@@ -379,7 +378,7 @@ class TibberHome:
 
         def _add_extra_data(data: dict[str, Any]) -> dict[str, Any]:
             live_data = data["data"]["liveMeasurement"]
-            _timestamp = parse(live_data["timestamp"]).astimezone(self._tibber_control.time_zone)
+            _timestamp = dt.datetime.fromisoformat(live_data["timestamp"]).astimezone(self._tibber_control.time_zone)
             while self._rt_power and self._rt_power[0][0] < _timestamp - dt.timedelta(minutes=5):
                 self._rt_power.pop(0)
 
@@ -537,7 +536,7 @@ class TibberHome:
         num = 0.0
         now = dt.datetime.now(self._tibber_control.time_zone)
         for key, _price_total in self.price_total.items():
-            price_time = parse(key).astimezone(self._tibber_control.time_zone)
+            price_time = dt.datetime.fromisoformat(key).astimezone(self._tibber_control.time_zone)
             price_total = round(_price_total, 3)
             if now.date() == price_time.date():
                 max_price = max(max_price, price_total)
