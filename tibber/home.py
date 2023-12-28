@@ -571,10 +571,10 @@ class TibberHome:
             if now.date() == price_time.date():
                 max_price = max(max_price, price_total)
                 min_price = min(min_price, price_total)
-                if price_time.hour < 8: # noqa: PLR2004
+                if price_time.hour < 8:  # noqa: PLR2004
                     off_peak_1 += price_total
                     num1 += 1
-                elif price_time.hour < 20: # noqa: PLR2004
+                elif price_time.hour < 20:  # noqa: PLR2004
                     peak += price_total
                     num0 += 1
                 else:
