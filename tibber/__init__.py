@@ -211,7 +211,7 @@ class Tibber:
 
     async def fetch_consumption_data_active_homes(self) -> None:
         """Fetch consumption data for active homes."""
-        await asyncio.gather([tibber_home.fetch_consumption_data() for tibber_home in self.get_homes(only_active=True)])
+        await asyncio.gather(*[tibber_home.fetch_consumption_data() for tibber_home in self.get_homes(only_active=True)])
 
     async def fetch_production_data_active_homes(self) -> None:
         """Fetch production data for active homes."""
