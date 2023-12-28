@@ -252,7 +252,10 @@ class TibberHome:
             for data in price_info_k:
                 self._price_info[data.get("startsAt")] = data.get("total")
                 self._level_info[data.get("startsAt")] = data.get("level")
-                if not self.last_data_timestamp or dt.datetime.fromisoformat(data.get("startsAt")) > self.last_data_timestamp:
+                if (
+                    not self.last_data_timestamp
+                    or dt.datetime.fromisoformat(data.get("startsAt")) > self.last_data_timestamp
+                ):
                     self.last_data_timestamp = dt.datetime.fromisoformat(data.get("startsAt"))
 
     @property
