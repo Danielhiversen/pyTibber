@@ -16,7 +16,7 @@ setup(
     package_data={"tibber": ["py.typed"]},
     version=consts["__version__"],
     description="A python3 library to communicate with Tibber",
-    python_requires=">=3.10.0",
+    python_requires=">=3.11.0",
     author="Daniel Hjelseth Hoyer",
     author_email="mail@dahoiv.net",
     url="https://github.com/Danielhiversen/pyTibber",
