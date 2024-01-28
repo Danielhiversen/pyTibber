@@ -1,4 +1,5 @@
 """Tibber RT connection."""
+
 import asyncio
 import datetime as dt
 import logging

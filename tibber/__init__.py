@@ -1,4 +1,5 @@
 """Library to handle connection with Tibber API."""
+
 import asyncio
 import datetime as dt
 import logging

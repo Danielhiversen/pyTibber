@@ -1,4 +1,5 @@
 """Constants used by pyTibber"""
+
 from http import HTTPStatus
 from typing import Final
 
