@@ -30,10 +30,12 @@ import tibber.const
 import tibber
 import asyncio
 
-access_token = tibber.const.DEMO_TOKEN
-tibber_connection = tibber.Tibber(access_token, user_agent="change_this")
 
-async def home_data():
+async def start():
+  tibber_connection = tibber.Tibber(tibber.const.DEMO_TOKEN, user_agent="change_this")
+  await tibber_connection.update_info()
+  print(tibber_connection.name)
+
   home = tibber_connection.get_homes()[0]
   await home.fetch_consumption_data()
   await home.update_info()
@@ -41,15 +43,10 @@ async def home_data():
 
   await home.update_price_info()
   print(home.current_price_info)
+  
+  # await tibber_connection.close_connection()
 
-async def start():
-  await tibber_connection.update_info()
-  print(tibber_connection.name)
-  await home_data()
-  await tibber_connection.close_connection()
-
-loop = asyncio.get_event_loop()
-loop.run_until_complete(start())
+loop = asyncio.run(start())
 ```
 
 
