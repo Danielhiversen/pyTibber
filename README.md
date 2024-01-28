@@ -61,8 +61,6 @@ import asyncio
 import aiohttp
 import tibber
 
-ACCESS_TOKEN = tibber.const.DEMO_TOKEN
-
 def _callback(pkg):
     print(pkg)
     data = pkg.get("data")
@@ -73,7 +71,7 @@ def _callback(pkg):
 
 async def run():
     async with aiohttp.ClientSession() as session:
-        tibber_connection = tibber.Tibber(ACCESS_TOKEN, websession=session, user_agent="change_this")
+        tibber_connection = tibber.Tibber(tibber.const.DEMO_TOKEN, websession=session, user_agent="chaDDnge_this")
         await tibber_connection.update_info()
     home = tibber_connection.get_homes()[0]
     await home.rt_subscribe(_callback)    
@@ -81,8 +79,7 @@ async def run():
     while True:
       await asyncio.sleep(10)
 
-loop = asyncio.get_event_loop()
-loop.run_until_complete(run())
+loop = asyncio.run(run())
 ```
 
 The library is used as part of Home Assistant.
