@@ -1,4 +1,5 @@
 """Websocket transport for Tibber."""
+
 import asyncio
 import datetime as dt
 import logging

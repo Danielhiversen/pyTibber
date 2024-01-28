@@ -1,4 +1,5 @@
 """Tibber API response handler"""
+
 import logging
 from http import HTTPStatus
 from typing import Any
