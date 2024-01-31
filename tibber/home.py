@@ -364,15 +364,53 @@ class TibberHome:
             return ""
         return self.currency + "/" + self.consumption_unit
 
-    def current_price_data(self) -> tuple[float | None, str | None, dt.datetime | None]:
+    def current_price_rank(self, price_total: dict[str, float], price_time: dt.datetime | None) -> int | None:
+        
+        # No price -> no rank
+        if price_time is None:
+            return None
+        
+        # Map price_total to a list of tuples (datetime, float)
+        price_items_typed: list[tuple[dt.datetime, float]] = [
+            (
+                dt.datetime.fromisoformat(item[0]).astimezone(self._tibber_control.time_zone),
+                item[1],
+            )
+            for item in price_total
+        ]
+
+        # Filter out prices not from today, sort by price
+        prices_today_sorted = sorted(
+            [
+                item
+                for item in price_items_typed
+                if item[0].date() == price_time.date()
+            ],
+            key=lambda x: x[1],
+        )
+        
+        # Find the rank of the current price
+        try:
+            price_rank = next(
+                idx
+                for idx, item in enumerate(prices_today_sorted, start=1)
+                if item[0] == price_time
+            )
+        except StopIteration:
+            price_rank = None
+
+        return price_rank
+
+    def current_price_data(self) -> tuple[float | None, str | None, dt.datetime | None, int | None]:
         """Get current price."""
         now = dt.datetime.now(self._tibber_control.time_zone)
         for key, price_total in self.price_total.items():
             price_time = dt.datetime.fromisoformat(key).astimezone(self._tibber_control.time_zone)
             time_diff = (now - price_time).total_seconds() / MIN_IN_HOUR
             if 0 <= time_diff < MIN_IN_HOUR:
-                return round(price_total, 3), self.price_level[key], price_time
-        return None, None, None
+                price_rank = self.current_price_rank(self.price_total, price_time)
+                return round(price_total, 3), self.price_level[key], price_time, price_rank
+        return None, None, None, None
 
     async def rt_subscribe(self, callback: Callable[..., Any]) -> None:
         """Connect to Tibber and subscribe to Tibber real time subscription.
