@@ -102,7 +102,7 @@ class Tibber:
         try:
             resp = await self.websession.post(API_ENDPOINT, **post_args, timeout=self.timeout)
             return (await extract_response_data(resp)).get("data")
-        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+        except (TimeoutError, aiohttp.ClientError) as err:
             if retry > 0:
                 return await self.execute(
                     document,

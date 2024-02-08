@@ -34,7 +34,7 @@ class TibberWebsocketsTransport(WebsocketsTransport):
         """Wait the next message from the websocket connection."""
         try:
             msg = await asyncio.wait_for(super()._receive(), timeout=self._timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             _LOGGER.error("No data received from Tibber for %s seconds", self._timeout)
             raise
         self.reconnect_at = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=self._timeout)
