@@ -365,37 +365,27 @@ class TibberHome:
         return self.currency + "/" + self.consumption_unit
 
     def current_price_rank(self, price_total: dict[str, float], price_time: dt.datetime | None) -> int | None:
-        
+        """Gets the rank (1-24) of how expensive the current price is compared to the other prices today."""
         # No price -> no rank
         if price_time is None:
             return None
-        
         # Map price_total to a list of tuples (datetime, float)
         price_items_typed: list[tuple[dt.datetime, float]] = [
             (
-                dt.datetime.fromisoformat(item[0]).astimezone(self._tibber_control.time_zone),
-                item[1],
+                dt.datetime.fromisoformat(time).astimezone(self._tibber_control.time_zone),
+                price,
             )
-            for item in price_total
+            for time, price in price_total.items()
         ]
 
         # Filter out prices not from today, sort by price
         prices_today_sorted = sorted(
-            [
-                item
-                for item in price_items_typed
-                if item[0].date() == price_time.date()
-            ],
+            [item for item in price_items_typed if item[0].date() == price_time.date()],
             key=lambda x: x[1],
         )
-        
         # Find the rank of the current price
         try:
-            price_rank = next(
-                idx
-                for idx, item in enumerate(prices_today_sorted, start=1)
-                if item[0] == price_time
-            )
+            price_rank = next(idx for idx, item in enumerate(prices_today_sorted, start=1) if item[0] == price_time)
         except StopIteration:
             price_rank = None
 
