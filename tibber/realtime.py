@@ -10,7 +10,7 @@ from gql import Client
 
 from .exceptions import SubscriptionEndpointMissingError
 from .home import TibberHome
-from .websocker_transport import TibberWebsocketsTransport
+from .websocket_transport import TibberWebsocketsTransport
 
 LOCK_CONNECT = asyncio.Lock()
 

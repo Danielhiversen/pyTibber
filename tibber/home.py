@@ -415,6 +415,9 @@ class TibberHome:
                 self._rt_power.pop(0)
 
             self._rt_power.append((_timestamp, live_data["power"] / 1000))
+            if "lastMeterProduction" in live_data:
+                live_data["lastMeterProduction"] = max(0, live_data["lastMeterProduction"])
+
             current_hour = live_data["accumulatedConsumptionLastHour"]
             if current_hour is not None:
                 power = sum(p[1] for p in self._rt_power) / len(self._rt_power)
