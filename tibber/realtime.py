@@ -116,8 +116,6 @@ class TibberRT:
                             home.has_real_time_consumption,
                             home.rt_subscription_running,
                         )
-                        if home.has_real_time_consumption is False:
-                            continue
                         if not home.rt_subscription_running:
                             is_running = False
                             next_test_all_homes_running = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=60)
@@ -153,8 +151,8 @@ class TibberRT:
                 await self._resubscribe_homes()
             except Exception:  # pylint: disable=broad-except
                 delay_seconds = min(
-                    random.SystemRandom().randint(1, 60) + _retry_count**2,
-                    20 * 60,
+                    random.SystemRandom().randint(1, 30) + _retry_count**2,
+                    5 * 60,
                 )
                 _retry_count += 1
                 _LOGGER.error(
@@ -189,6 +187,7 @@ class TibberRT:
             self.sub_manager is not None
             and isinstance(self.sub_manager.transport, TibberWebsocketsTransport)
             and self.sub_manager.transport.running
+            and hasattr(self.sub_manager, "session")
         )
 
     @property
