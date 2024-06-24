@@ -43,7 +43,7 @@ jobs:
       - name: black
         run: black --check $SRC_FOLDER
       - name: ruff
-        run: ruff $SRC_FOLDER
+        run: ruff check $SRC_FOLDER
       - name: pytest
         run: |
             pytest test/test.py
