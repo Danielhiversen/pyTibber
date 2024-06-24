@@ -418,6 +418,12 @@ class TibberHome:
             if "lastMeterProduction" in live_data:
                 live_data["lastMeterProduction"] = max(0, live_data["lastMeterProduction"])
 
+            if live_data.get("powerProduction", 0) > 0 and live_data.get("power") is None:
+                live_data["power"] = 0
+
+            if live_data.get("power", 0) > 0 and live_data.get("powerProduction") is None:
+                live_data["powerProduction"] = 0
+
             current_hour = live_data["accumulatedConsumptionLastHour"]
             if current_hour is not None:
                 power = sum(p[1] for p in self._rt_power) / len(self._rt_power)
@@ -444,7 +450,6 @@ class TibberHome:
             else:
                 _LOGGER.error("rt not running")
                 return
-            assert self._tibber_control.realtime.sub_manager is not None
 
             try:
                 async for _data in self._tibber_control.realtime.sub_manager.session.subscribe(
@@ -469,10 +474,10 @@ class TibberHome:
                 _LOGGER.exception("Error in rt_subscribe")
 
         self._rt_callback = callback
+        self._tibber_control.realtime.add_home(self)
+        await self._tibber_control.realtime.connect()
         self._rt_listener = asyncio.create_task(_start())
         self._rt_stopped = False
-        await self._tibber_control.realtime.connect()
-        self._tibber_control.realtime.add_home(self)
 
     async def rt_resubscribe(self) -> None:
         """Resubscribe to Tibber data."""
@@ -486,9 +491,6 @@ class TibberHome:
         )
         if self._rt_callback is None:
             _LOGGER.warning("No callback set for rt_resubscribe")
-            return
-        if self.has_real_time_consumption is False:
-            _LOGGER.error("No real time device for %s", self.home_id)
             return
         await self.rt_subscribe(self._rt_callback)
 
