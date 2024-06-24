@@ -11,7 +11,8 @@ setup(
     packages=["tibber"],
     install_requires=[
         "aiohttp>=3.0.6",
-        "gql[websockets]>=3.0.0",
+         "gql>=3.0.0",
+         "websockets>=10.0"
     ],
     package_data={"tibber": ["py.typed"]},
     version=consts["__version__"],
