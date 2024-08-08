@@ -4,8 +4,8 @@ import asyncio
 import datetime as dt
 import logging
 import random
-from typing import Any
 from ssl import SSLContext
+from typing import Any
 
 from gql import Client
 
