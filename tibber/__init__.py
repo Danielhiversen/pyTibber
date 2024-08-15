@@ -92,15 +92,16 @@ class Tibber:
 
         payload = {"query": document, "variables": variable_values or {}}
 
-        post_args = {
-            "headers": {
-                "Authorization": "Bearer " + self._access_token,
-                aiohttp.hdrs.USER_AGENT: self._user_agent,
-            },
-            "data": payload,
-        }
         try:
-            resp = await self.websession.post(API_ENDPOINT, **post_args, timeout=self.timeout)
+            resp = await self.websession.post(
+                API_ENDPOINT,
+                headers={
+                    "Authorization": "Bearer " + self._access_token,
+                    aiohttp.hdrs.USER_AGENT: self._user_agent,
+                },
+                data=payload,
+                timeout=aiohttp.ClientTimeout(total=self.timeout),
+            )
             return (await extract_response_data(resp)).get("data")
         except (TimeoutError, aiohttp.ClientError) as err:
             if retry > 0:
