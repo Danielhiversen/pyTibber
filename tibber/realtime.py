@@ -22,13 +22,7 @@ class TibberRT:
     """Class to handle real time connection with the Tibber api."""
 
     # pylint: disable=too-many-instance-attributes
-    def __init__(
-        self,
-        access_token: str,
-        timeout: int,
-        user_agent: str,
-        ssl: SSLContext | bool
-    ):
+    def __init__(self, access_token: str, timeout: int, user_agent: str, ssl: SSLContext | bool):
         """Initialize the Tibber connection.
 
         :param access_token: The access token to access the Tibber API with.
