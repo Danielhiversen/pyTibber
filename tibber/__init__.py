@@ -214,7 +214,13 @@ class Tibber:
 
     async def fetch_production_data_active_homes(self) -> None:
         """Fetch production data for active homes."""
-        await asyncio.gather(*[tibber_home.fetch_production_data() for tibber_home in self.get_homes(only_active=True)])
+        await asyncio.gather(
+            *[
+                tibber_home.fetch_production_data()
+                for tibber_home in self.get_homes(only_active=True)
+                if tibber_home.has_production
+            ]
+        )
 
     async def rt_disconnect(self) -> None:
         """Stop subscription manager.
