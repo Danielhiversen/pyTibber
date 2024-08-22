@@ -4,6 +4,7 @@ import asyncio
 import datetime as dt
 import logging
 import random
+from ssl import SSLContext
 from typing import Any
 
 from gql import Client
@@ -21,12 +22,7 @@ class TibberRT:
     """Class to handle real time connection with the Tibber api."""
 
     # pylint: disable=too-many-instance-attributes
-    def __init__(
-        self,
-        access_token: str,
-        timeout: int,
-        user_agent: str,
-    ):
+    def __init__(self, access_token: str, timeout: int, user_agent: str, ssl: SSLContext | bool):
         """Initialize the Tibber connection.
 
         :param access_token: The access token to access the Tibber API with.
@@ -36,6 +32,7 @@ class TibberRT:
         self._access_token: str = access_token
         self._timeout: int = timeout
         self._user_agent: str = user_agent
+        self._ssl_context = ssl
 
         self._sub_endpoint: str | None = None
         self._homes: list[TibberHome] = []
@@ -90,6 +87,7 @@ class TibberRT:
                 self.sub_endpoint,
                 self._access_token,
                 self._user_agent,
+                ssl=self._ssl_context,
             ),
         )
 

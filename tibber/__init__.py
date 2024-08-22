@@ -4,6 +4,7 @@ import asyncio
 import datetime as dt
 import logging
 import zoneinfo
+from ssl import SSLContext
 from typing import Any
 
 import aiohttp
@@ -35,6 +36,7 @@ class Tibber:
         websession: aiohttp.ClientSession | None = None,
         time_zone: dt.tzinfo | None = None,
         user_agent: str | None = None,
+        ssl: SSLContext | bool = True,
     ):
         """Initialize the Tibber connection.
 
@@ -43,10 +45,11 @@ class Tibber:
         :param websession: The websession to use when communicating with the Tibber API.
         :param time_zone: The time zone to display times in and to use.
         :param user_agent: User agent identifier for the platform running this. Required if websession is None.
+        :param ssl: SSLContext to use.
         """
 
         if websession is None:
-            websession = aiohttp.ClientSession()
+            websession = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl))
         elif user_agent is None:
             user_agent = websession.headers.get(aiohttp.hdrs.USER_AGENT)
         if user_agent is None:
@@ -60,6 +63,7 @@ class Tibber:
             self._access_token,
             self.timeout,
             self._user_agent,
+            ssl=ssl,
         )
 
         self.time_zone: dt.tzinfo = time_zone or zoneinfo.ZoneInfo("UTC")

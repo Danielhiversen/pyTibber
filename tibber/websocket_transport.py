@@ -3,6 +3,7 @@
 import asyncio
 import datetime as dt
 import logging
+from ssl import SSLContext
 
 from gql.transport.exceptions import TransportClosed
 from gql.transport.websockets import WebsocketsTransport
@@ -13,13 +14,14 @@ _LOGGER = logging.getLogger(__name__)
 class TibberWebsocketsTransport(WebsocketsTransport):
     """Tibber websockets transport."""
 
-    def __init__(self, url: str, access_token: str, user_agent: str) -> None:
+    def __init__(self, url: str, access_token: str, user_agent: str, ssl: SSLContext | bool = True) -> None:
         """Initialize TibberWebsocketsTransport."""
         super().__init__(
             url=url,
             init_payload={"token": access_token},
             headers={"User-Agent": user_agent},
             ping_interval=30,
+            ssl=ssl,
         )
         self._user_agent: str = user_agent
         self._timeout: int = 90
