@@ -7,13 +7,23 @@ implicit_optional = true
 strict_optional = false
 
 [tool.ruff]
-lint.select = ["E", "F", "PL", "W", "ASYNC", "A", "DTZ", "G", "T20", "RET", "RUF", "TCH", "S", "B", "C90", "T10", "N", "PERF", "UP", "SLF", "TID", "TCH"]
-lint.ignore = ["PLR0913", "C901", "S101"]
 line-length = 120
 target-version = "py311"
 
+[tool.ruff.lint]
+ignore = ["PLR0913", "C901", "S101"]
+select = ["E", "F", "PL", "W", "ASYNC", "A", "DTZ", "G", "T20", "RET", "RUF", "TCH", "S", "B", "C90", "T10", "N", "PERF", "UP", "SLF", "TID", "TCH"]
+
+[tool.ruff.lint.per-file-ignores]
+"setup.py" = ["D100"]
+"test/**/*" = [
+  "PLR2004",
+  "S101",
+  "S106",
+]
+
 [tool.pylint.main]
-max-line-length=120
+max-line-length = 120
 
 [tool.pylint."messages control"]
 enable = ["useless-suppression"]

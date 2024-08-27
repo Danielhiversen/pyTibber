@@ -48,15 +48,15 @@ async def test_tibber():
 
                 await home.update_current_price_info()
                 assert home.current_price_total > 0
-                assert isinstance(home.current_price_info.get("energy"), (float, int))
+                assert isinstance(home.current_price_info.get("energy"), float | int)
                 assert isinstance(home.current_price_info.get("startsAt"), str)
-                assert isinstance(home.current_price_info.get("tax"), (float, int))
-                assert isinstance(home.current_price_info.get("total"), (float, int))
+                assert isinstance(home.current_price_info.get("tax"), float | int)
+                assert isinstance(home.current_price_info.get("total"), float | int)
 
                 await home.update_price_info()
                 for key in home.price_total.keys():
                     assert isinstance(key, str)
-                    assert isinstance(home.price_total[key], (float, int))
+                    assert isinstance(home.price_total[key], float | int)
             else:
                 k += 1
                 assert home.home_id == "96a14971-525a-4420-aae9-e5aedaa129ff"
