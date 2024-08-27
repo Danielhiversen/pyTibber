@@ -1,8 +1,7 @@
 """Tests for pyTibber."""
 
-import pytest
-
 import aiohttp
+import pytest
 
 import tibber
 from tibber.exceptions import FatalHttpExceptionError, InvalidLoginError
