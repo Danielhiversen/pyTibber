@@ -1,21 +1,17 @@
-"""
-Tests for pyTibber
-"""
-import os
-import sys
+"""Tests for pyTibber."""
 
+import aiohttp
 import pytest
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../")))
-import aiohttp  # noqa: E402
-
-import tibber  # noqa: E402
+import tibber
 from tibber.exceptions import FatalHttpExceptionError, InvalidLoginError
 
 
 @pytest.mark.asyncio
 async def test_tibber_no_session():
-    tibber_connection = tibber.Tibber(user_agent="test",)
+    tibber_connection = tibber.Tibber(
+        user_agent="test",
+    )
     await tibber_connection.update_info()
 
     assert tibber_connection.name == "Arya Stark"
@@ -24,7 +20,10 @@ async def test_tibber_no_session():
 @pytest.mark.asyncio
 async def test_tibber():
     async with aiohttp.ClientSession() as session:
-        tibber_connection = tibber.Tibber(websession=session, user_agent="test",)
+        tibber_connection = tibber.Tibber(
+            websession=session,
+            user_agent="test",
+        )
         await tibber_connection.update_info()
 
         assert tibber_connection.name == "Arya Stark"
@@ -74,11 +73,11 @@ async def test_tibber():
 async def test_tibber_invalid_token():
     async with aiohttp.ClientSession() as session:
         tibber_connection = tibber.Tibber(
-            access_token="INVALID_TOKEN", websession=session, user_agent="test",
+            access_token="INVALID_TOKEN",
+            websession=session,
+            user_agent="test",
         )
-        with pytest.raises(
-            InvalidLoginError, match="Context creation failed: invalid token"
-        ):
+        with pytest.raises(InvalidLoginError, match="Context creation failed: invalid token"):
             await tibber_connection.update_info()
         assert not tibber_connection.name
         assert tibber_connection.get_homes() == []
@@ -87,11 +86,12 @@ async def test_tibber_invalid_token():
 @pytest.mark.asyncio
 async def test_tibber_invalid_query():
     async with aiohttp.ClientSession() as session:
-        tibber_connection = tibber.Tibber(websession=session, user_agent="test",)
+        tibber_connection = tibber.Tibber(
+            websession=session,
+            user_agent="test",
+        )
 
-        with pytest.raises(
-            FatalHttpExceptionError, match="Syntax Error*"
-        ):
+        with pytest.raises(FatalHttpExceptionError, match="Syntax Error*"):
             await tibber_connection.execute("invalidquery")
 
         assert not tibber_connection.name
@@ -101,7 +101,10 @@ async def test_tibber_invalid_query():
 @pytest.mark.asyncio
 async def test_tibber_notification():
     async with aiohttp.ClientSession() as session:
-        tibber_connection = tibber.Tibber(websession=session, user_agent="test",)
+        tibber_connection = tibber.Tibber(
+            websession=session,
+            user_agent="test",
+        )
         await tibber_connection.update_info()
         assert not await tibber_connection.send_notification("Test tittle", "message")
 
