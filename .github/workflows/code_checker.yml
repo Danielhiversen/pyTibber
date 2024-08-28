@@ -27,10 +27,7 @@ jobs:
       - name: Install dependency
         run: |
             pip install -r requirements.txt
-            pip install dlint flake8 flake8-bugbear flake8-deprecated flake8-executable pytest pytest-cov pytest-asyncio mypy ruff
-      - name: Flake8 Code Linter
-        run: |
-            flake8 $SRC_FOLDER
+            pip install mypy pre-commit pytest pytest-asyncio pytest-cov ruff
       - name: MyPy
         run: |
             mypy  $SRC_FOLDER
