@@ -35,7 +35,7 @@ class Tibber:
         time_zone: dt.tzinfo | None = None,
         user_agent: str | None = None,
         ssl: SSLContext | bool = True,
-    ):
+    ) -> None:
         """Initialize the Tibber connection.
 
         :param access_token: The access token to access the Tibber API with.
@@ -45,7 +45,6 @@ class Tibber:
         :param user_agent: User agent identifier for the platform running this. Required if websession is None.
         :param ssl: SSLContext to use.
         """
-
         if websession is None:
             websession = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl))
         elif user_agent is None:
@@ -73,7 +72,8 @@ class Tibber:
 
     async def close_connection(self) -> None:
         """Close the Tibber connection.
-        This method simply closes the websession used by the object."""
+        This method simply closes the websession used by the object.
+        """
         await self.websession.close()
 
     async def execute(
@@ -190,7 +190,7 @@ class Tibber:
                 PUSH_NOTIFICATION.format(
                     title,
                     message,
-                )
+                ),
             )
         ):
             return False
@@ -207,7 +207,7 @@ class Tibber:
     async def fetch_consumption_data_active_homes(self) -> None:
         """Fetch consumption data for active homes."""
         await asyncio.gather(
-            *[tibber_home.fetch_consumption_data() for tibber_home in self.get_homes(only_active=True)]
+            *[tibber_home.fetch_consumption_data() for tibber_home in self.get_homes(only_active=True)],
         )
 
     async def fetch_production_data_active_homes(self) -> None:
@@ -217,7 +217,7 @@ class Tibber:
                 tibber_home.fetch_production_data()
                 for tibber_home in self.get_homes(only_active=True)
                 if tibber_home.has_production
-            ]
+            ],
         )
 
     async def rt_disconnect(self) -> None:

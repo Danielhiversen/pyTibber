@@ -1,10 +1,9 @@
-import os
+from pathlib import Path
 
 from setuptools import setup
 
 consts = {}
-with open(os.path.join("tibber", "const.py")) as fp:
-    exec(fp.read(), consts)  # noqa: S102
+exec((Path("tibber") / "const.py").read_text(encoding="utf-8"), consts)  # noqa: S102
 
 setup(
     name="pyTibber",

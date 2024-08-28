@@ -54,7 +54,7 @@ async def test_tibber():
                 assert isinstance(home.current_price_info.get("total"), float | int)
 
                 await home.update_price_info()
-                for key in home.price_total.keys():
+                for key in home.price_total:
                     assert isinstance(key, str)
                     assert isinstance(home.price_total[key], float | int)
             else:

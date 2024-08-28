@@ -21,7 +21,7 @@ _LOGGER = logging.getLogger(__name__)
 class TibberRT:
     """Class to handle real time connection with the Tibber api."""
 
-    def __init__(self, access_token: str, timeout: int, user_agent: str, ssl: SSLContext | bool):
+    def __init__(self, access_token: str, timeout: int, user_agent: str, ssl: SSLContext | bool) -> None:
         """Initialize the Tibber connection.
 
         :param access_token: The access token to access the Tibber API with.
@@ -57,7 +57,7 @@ class TibberRT:
         try:
             if not hasattr(self.sub_manager, "session"):
                 return
-            await self.sub_manager.close_async()  # type: ignore
+            await self.sub_manager.close_async()
         finally:
             self.sub_manager = None
 
@@ -74,7 +74,7 @@ class TibberRT:
                 _LOGGER.debug("Starting watchdog")
                 self._watchdog_running = True
                 self._watchdog_runner = asyncio.create_task(self._watchdog())
-            await self.sub_manager.connect_async()  # type: ignore
+            await self.sub_manager.connect_async()
 
     def _create_sub_manager(self) -> None:
         if self.sub_endpoint is None:
@@ -101,30 +101,34 @@ class TibberRT:
         next_test_all_homes_running = dt.datetime.now(tz=dt.UTC)
         while self._watchdog_running:
             await asyncio.sleep(5)
-            if self.sub_manager.transport.running and self.sub_manager.transport.reconnect_at > dt.datetime.now(
-                tz=dt.UTC
+            if (
+                self.sub_manager.transport.running
+                and self.sub_manager.transport.reconnect_at
+                > dt.datetime.now(
+                    tz=dt.UTC,
+                )
+                and dt.datetime.now(tz=dt.UTC) > next_test_all_homes_running
             ):
-                if dt.datetime.now(tz=dt.UTC) > next_test_all_homes_running:
-                    is_running = True
-                    for home in self._homes:
-                        _LOGGER.debug(
-                            "Watchdog: Checking if home %s is alive, %s, %s",
-                            home.home_id,
-                            home.has_real_time_consumption,
-                            home.rt_subscription_running,
-                        )
-                        if not home.rt_subscription_running:
-                            is_running = False
-                            next_test_all_homes_running = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=60)
-                            break
-                        _LOGGER.debug(
-                            "Watchdog: Home %s is alive",
-                            home.home_id,
-                        )
-                    if is_running:
-                        _retry_count = 0
-                        _LOGGER.debug("Watchdog: Connection is alive")
-                        continue
+                is_running = True
+                for home in self._homes:
+                    _LOGGER.debug(
+                        "Watchdog: Checking if home %s is alive, %s, %s",
+                        home.home_id,
+                        home.has_real_time_consumption,
+                        home.rt_subscription_running,
+                    )
+                    if not home.rt_subscription_running:
+                        is_running = False
+                        next_test_all_homes_running = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=60)
+                        break
+                    _LOGGER.debug(
+                        "Watchdog: Home %s is alive",
+                        home.home_id,
+                    )
+                if is_running:
+                    _retry_count = 0
+                    _LOGGER.debug("Watchdog: Connection is alive")
+                    continue
 
             self.sub_manager.transport.reconnect_at = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=self._timeout)
             _LOGGER.error(
@@ -134,7 +138,7 @@ class TibberRT:
 
             try:
                 if hasattr(self.sub_manager, "session"):
-                    await self.sub_manager.close_async()  # type: ignore
+                    await self.sub_manager.close_async()
             except Exception:
                 _LOGGER.exception("Error in watchdog close")
 
@@ -144,18 +148,19 @@ class TibberRT:
 
             self._create_sub_manager()
             try:
-                await self.sub_manager.connect_async()  # type: ignore
+                await self.sub_manager.connect_async()
                 await self._resubscribe_homes()
-            except Exception:
+            except Exception as err:  # noqa: BLE001
                 delay_seconds = min(
                     random.SystemRandom().randint(1, 30) + _retry_count**2,
                     5 * 60,
                 )
                 _retry_count += 1
                 _LOGGER.error(
-                    "Error in watchdog connect, retrying in %s seconds, %s",
+                    "Error in watchdog connect, retrying in %s seconds, %s: %s",
                     delay_seconds,
                     _retry_count,
+                    err,
                     exc_info=_retry_count > 1,
                 )
                 await asyncio.sleep(delay_seconds)
