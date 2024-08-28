@@ -60,8 +60,6 @@ class HourlyData:
 class TibberHome:
     """Instance of Tibber home."""
 
-    # pylint: disable=too-many-instance-attributes, too-many-public-methods
-
     def __init__(self, home_id: str, tibber_control: Tibber) -> None:
         """Initialize the Tibber home class.
 
@@ -470,7 +468,7 @@ class TibberHome:
                     if self._rt_stopped or not self._tibber_control.realtime.subscription_running:
                         _LOGGER.debug("Stopping rt_subscribe loop")
                         return
-            except Exception:  # pylint: disable=broad-except
+            except Exception:
                 _LOGGER.exception("Error in rt_subscribe")
 
         self._rt_callback = callback
@@ -560,7 +558,6 @@ class TibberHome:
 
     def current_attributes(self) -> dict[str, float]:
         """Get current attributes."""
-        # pylint: disable=too-many-locals
         max_price = 0.0
         min_price = 10000.0
         sum_price = 0.0

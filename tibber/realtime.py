@@ -21,7 +21,6 @@ _LOGGER = logging.getLogger(__name__)
 class TibberRT:
     """Class to handle real time connection with the Tibber api."""
 
-    # pylint: disable=too-many-instance-attributes
     def __init__(self, access_token: str, timeout: int, user_agent: str, ssl: SSLContext | bool):
         """Initialize the Tibber connection.
 
@@ -136,7 +135,7 @@ class TibberRT:
             try:
                 if hasattr(self.sub_manager, "session"):
                     await self.sub_manager.close_async()  # type: ignore
-            except Exception:  # pylint: disable=broad-except
+            except Exception:
                 _LOGGER.exception("Error in watchdog close")
 
             if not self._watchdog_running:
@@ -147,7 +146,7 @@ class TibberRT:
             try:
                 await self.sub_manager.connect_async()  # type: ignore
                 await self._resubscribe_homes()
-            except Exception:  # pylint: disable=broad-except
+            except Exception:
                 delay_seconds = min(
                     random.SystemRandom().randint(1, 30) + _retry_count**2,
                     5 * 60,

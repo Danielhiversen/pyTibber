@@ -21,9 +21,3 @@ known-first-party = ["tibber", "test"]
   "S101",
   "S106",
 ]
-
-[tool.pylint.main]
-max-line-length = 120
-
-[tool.pylint."messages control"]
-enable = ["useless-suppression"]
