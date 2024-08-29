@@ -24,7 +24,7 @@ class HttpExceptionError(Exception):
         status: int,
         message: str = "HTTP error",
         extension_code: str = API_ERR_CODE_UNKNOWN,
-    ):
+    ) -> None:
         self.status = status
         self.message = message
         self.extension_code = extension_code

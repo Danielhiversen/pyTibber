@@ -1,19 +1,14 @@
-import os
+from pathlib import Path
 
 from setuptools import setup
 
 consts = {}
-with open(os.path.join("tibber", "const.py")) as fp:
-    exec(fp.read(), consts)
+exec((Path("tibber") / "const.py").read_text(encoding="utf-8"), consts)  # noqa: S102
 
 setup(
     name="pyTibber",
     packages=["tibber"],
-    install_requires=[
-        "aiohttp>=3.0.6",
-         "gql>=3.0.0",
-         "websockets>=10.0"
-    ],
+    install_requires=["aiohttp>=3.0.6", "gql>=3.0.0", "websockets>=10.0"],
     package_data={"tibber": ["py.typed"]},
     version=consts["__version__"],
     description="A python3 library to communicate with Tibber",

@@ -27,23 +27,14 @@ jobs:
       - name: Install dependency
         run: |
             pip install -r requirements.txt
-            pip install dlint black flake8 flake8-bugbear flake8-deprecated flake8-executable isort pylint pytest pytest-cov pytest-asyncio mypy ruff
-      - name: Flake8 Code Linter
-        run: |
-            flake8 $SRC_FOLDER
-      - name: isort
-        run: |
-            isort  --check-only **/*.py
-      - name: Pylint Code Linter
-        run: |
-            pylint --enable useless-suppression $SRC_FOLDER
-      - name: MyPy
-        run: |
-            mypy  $SRC_FOLDER
-      - name: black
-        run: black --check $SRC_FOLDER
-      - name: ruff
-        run: ruff check $SRC_FOLDER
+            pip install mypy pre-commit pytest pytest-asyncio pytest-cov ruff
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-3|${{ env.pythonLocation }}|${{ hashFiles('.pre-commit-config.yaml') }}
+      - name: Run pre-commit
+        run: pre-commit run --all-files --show-diff-on-failure --color=always
+        shell: bash
       - name: pytest
         run: |
             pytest

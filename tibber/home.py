@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import datetime as dt
 import logging
 from typing import TYPE_CHECKING, Any
@@ -33,7 +34,7 @@ _LOGGER = logging.getLogger(__name__)
 class HourlyData:
     """Holds hourly data for consumption or production."""
 
-    def __init__(self, production: bool = False):
+    def __init__(self, production: bool = False) -> None:
         self.is_production: bool = production
         self.month_energy: float | None = None
         self.month_money: float | None = None
@@ -59,8 +60,6 @@ class HourlyData:
 
 class TibberHome:
     """Instance of Tibber home."""
-
-    # pylint: disable=too-many-instance-attributes, too-many-public-methods
 
     def __init__(self, home_id: str, tibber_control: Tibber) -> None:
         """Initialize the Tibber home class.
@@ -225,7 +224,8 @@ class TibberHome:
 
     async def update_price_info(self) -> None:
         """Update the current price info, todays price info
-        and tomorrows price info asynchronously."""
+        and tomorrows price info asynchronously.
+        """
         if price_info := await self._tibber_control.execute(PRICE_INFO % self.home_id):
             self._process_price_info(price_info)
 
@@ -418,9 +418,12 @@ class TibberHome:
             if "lastMeterProduction" in live_data:
                 live_data["lastMeterProduction"] = max(0, live_data["lastMeterProduction"])
 
-            if power_production := live_data.get("powerProduction"):
-                if power_production > 0 and live_data.get("power") is None:
-                    live_data["power"] = 0
+            if (
+                (power_production := live_data.get("powerProduction"))
+                and power_production > 0
+                and live_data.get("power") is None
+            ):
+                live_data["power"] = 0
 
             if live_data.get("power", 0) > 0 and live_data.get("powerProduction") is None:
                 live_data["powerProduction"] = 0
@@ -454,13 +457,11 @@ class TibberHome:
 
             try:
                 async for _data in self._tibber_control.realtime.sub_manager.session.subscribe(
-                    gql(LIVE_SUBSCRIBE % self.home_id)
+                    gql(LIVE_SUBSCRIBE % self.home_id),
                 ):
                     data = {"data": _data}
-                    try:
+                    with contextlib.suppress(KeyError):
                         data = _add_extra_data(data)
-                    except KeyError:
-                        pass
                     callback(data)
                     self._last_rt_data_received = dt.datetime.now(tz=dt.UTC)
                     _LOGGER.debug(
@@ -471,7 +472,7 @@ class TibberHome:
                     if self._rt_stopped or not self._tibber_control.realtime.subscription_running:
                         _LOGGER.debug("Stopping rt_subscribe loop")
                         return
-            except Exception:  # pylint: disable=broad-except
+            except Exception:
                 _LOGGER.exception("Error in rt_subscribe")
 
         self._rt_callback = callback
@@ -488,7 +489,7 @@ class TibberHome:
             *[
                 self.update_info(),
                 self._tibber_control.update_info(),
-            ]
+            ],
         )
         if self._rt_callback is None:
             _LOGGER.warning("No callback set for rt_resubscribe")
@@ -509,12 +510,13 @@ class TibberHome:
         """Is real time subscription running."""
         if not self._tibber_control.realtime.subscription_running:
             return False
-        if self._last_rt_data_received < dt.datetime.now(tz=dt.UTC) - dt.timedelta(seconds=60):
-            return False
-        return True
+        return not self._last_rt_data_received < dt.datetime.now(tz=dt.UTC) - dt.timedelta(seconds=60)
 
     async def get_historic_data(
-        self, n_data: int, resolution: str = RESOLUTION_HOURLY, production: bool = False
+        self,
+        n_data: int,
+        resolution: str = RESOLUTION_HOURLY,
+        production: bool = False,
     ) -> list[dict[str, Any]]:
         """Get historic data.
 
@@ -561,7 +563,6 @@ class TibberHome:
 
     def current_attributes(self) -> dict[str, float]:
         """Get current attributes."""
-        # pylint: disable=too-many-locals
         max_price = 0.0
         min_price = 10000.0
         sum_price = 0.0
