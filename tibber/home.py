@@ -418,9 +418,12 @@ class TibberHome:
             if "lastMeterProduction" in live_data:
                 live_data["lastMeterProduction"] = max(0, live_data["lastMeterProduction"])
 
-            if power_production := live_data.get("powerProduction"):
-                if power_production > 0 and live_data.get("power") is None:
-                    live_data["power"] = 0
+            if (
+                (power_production := live_data.get("powerProduction"))
+                and power_production > 0
+                and live_data.get("power") is None
+            ):
+                live_data["power"] = 0
 
             if live_data.get("power", 0) > 0 and live_data.get("powerProduction") is None:
                 live_data["powerProduction"] = 0
