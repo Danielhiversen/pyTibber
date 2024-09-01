@@ -2,8 +2,10 @@
 
 import aiohttp
 import pytest
+import datetime as dt
 
 import tibber
+from tibber.const import RESOLUTION_DAILY
 from tibber.exceptions import FatalHttpExceptionError, InvalidLoginError
 
 
@@ -141,3 +143,24 @@ async def test_tibber_current_price_rank():
 
         assert isinstance(price_rank, int), "Price rank was unset"
         assert 1 <= price_rank <= 24, "Price rank is out of range"
+
+
+@pytest.mark.asyncio
+async def test_tibber_get_historic_data():
+    async with aiohttp.ClientSession() as session:
+        tibber_connection = tibber.Tibber(
+            websession=session,
+            user_agent="test",
+        )
+        await tibber_connection.update_info()
+
+        homes = tibber_connection.get_homes()
+        assert len(homes) == 1, "Expected 1 home, got '{}'".format(len(homes))
+
+        home = homes[0]
+        assert home is not None
+
+        historic_data = await home.get_historic_data_date(dt.datetime(2024, 1, 1), 5, RESOLUTION_DAILY)
+        assert len(historic_data) == 5
+        assert historic_data[0]["from"] == '2024-01-01T00:00:00.000+01:00', "First day must be 2024-01-01"
+        assert historic_data[4]["from"] == '2024-01-05T00:00:00.000+01:00', "Last day must be 2024-01-05"
