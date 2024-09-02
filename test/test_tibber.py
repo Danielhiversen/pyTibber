@@ -1,8 +1,8 @@
 """Tests for pyTibber."""
+import datetime as dt
 
 import aiohttp
 import pytest
-import datetime as dt
 
 import tibber
 from tibber.const import RESOLUTION_DAILY
