@@ -1,4 +1,5 @@
 """Tests for pyTibber."""
+
 import datetime as dt
 
 import aiohttp
