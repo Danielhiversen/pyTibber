@@ -576,7 +576,7 @@ class TibberHome:
         )
 
         if not (data := await self._tibber_control.execute(query, timeout=30)):
-            # _LOGGER.error("Could not get the data.")
+            _LOGGER.error("Could not get the data.")
             return []
 
         data = data["viewer"]["home"][cons_or_prod_str]
