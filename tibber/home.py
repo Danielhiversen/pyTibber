@@ -550,7 +550,7 @@ class TibberHome:
         date_from: dt.datetime,
         n_data: int,
         resolution: str = RESOLUTION_HOURLY,
-        production: bool = False
+        production: bool = False,
     ) -> list[dict[str, Any]]:
         """Get historic data.
         :param date_from: The start-date to get the data from
