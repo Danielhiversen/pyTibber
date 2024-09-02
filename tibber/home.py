@@ -546,7 +546,10 @@ class TibberHome:
         return data["nodes"]
 
     async def get_historic_data_date(
-        self, date_from: dt.datetime, n_data: int, resolution: str = RESOLUTION_HOURLY,
+        self,
+        date_from: dt.datetime,
+        n_data: int,
+        resolution: str = RESOLUTION_HOURLY,
         production: bool = False
     ) -> list[dict[str, Any]]:
         """Get historic data.
@@ -572,7 +575,7 @@ class TibberHome:
             cons_or_prod_str,
             resolution,
             n_data,
-            date_from_base64
+            date_from_base64,
         )
 
         if not (data := await self._tibber_control.execute(query, timeout=30)):
@@ -584,7 +587,7 @@ class TibberHome:
         if data is None:
             return []
 
-        return data['nodes']
+        return data["nodes"]
 
     async def get_historic_price_data(
         self,
