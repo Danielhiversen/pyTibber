@@ -20,6 +20,26 @@ HISTORIC_DATA = """
                   }}
                 }}
           """
+HISTORIC_DATA_DATE = """
+                    {{
+                      viewer {{
+                        home(id: "{0}") {{
+                          {1}(resolution: {2}, first: {3}, after: "{4}") {{
+                            nodes {{
+                              from
+                              to
+                              unitPrice
+                              unitPriceVAT
+                              consumption
+                              consumptionUnit
+                              cost
+                              currency
+                            }}
+                          }}
+                        }}
+                      }}
+                    }}
+                    """
 HISTORIC_PRICE = """
                 {{
                   viewer {{

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import datetime as dt
 import logging
@@ -13,6 +14,7 @@ from gql import gql
 from .const import RESOLUTION_HOURLY
 from .gql_queries import (
     HISTORIC_DATA,
+    HISTORIC_DATA_DATE,
     HISTORIC_PRICE,
     LIVE_SUBSCRIBE,
     PRICE_INFO,
@@ -541,6 +543,50 @@ class TibberHome:
         data = data["viewer"]["home"][cons_or_prod_str]
         if data is None:
             return []
+        return data["nodes"]
+
+    async def get_historic_data_date(
+        self,
+        date_from: dt.datetime,
+        n_data: int,
+        resolution: str = RESOLUTION_HOURLY,
+        production: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Get historic data.
+        :param date_from: The start-date to get the data from
+        :param n_data: The number of nodes to get from history. e.g. 5 would give 5 nodes
+            and resolution = hourly would give the 5 last hours of historic data.
+            If 0 the set month-days will be calculated to the end of the month.
+        :param resolution: The resolution of the data. Can be HOURLY,
+            DAILY, WEEKLY, MONTHLY or ANNUAL
+        :param production: True to get production data instead of consumption
+        """
+
+        yesterday = date_from - dt.timedelta(days=1)
+        date_from_base64 = base64.b64encode(yesterday.strftime("%Y-%m-%d").encode()).decode("utf-8")
+
+        if n_data == 0:
+            # Calculate the number of days to the end of the month from the given date
+            n_data = (date_from.replace(day=1, month=date_from.month + 1) - date_from).days
+
+        cons_or_prod_str = "production" if production else "consumption"
+        query = HISTORIC_DATA_DATE.format(
+            self.home_id,
+            cons_or_prod_str,
+            resolution,
+            n_data,
+            date_from_base64,
+        )
+
+        if not (data := await self._tibber_control.execute(query, timeout=30)):
+            _LOGGER.error("Could not get the data.")
+            return []
+
+        data = data["viewer"]["home"][cons_or_prod_str]
+
+        if data is None:
+            return []
+
         return data["nodes"]
 
     async def get_historic_price_data(
