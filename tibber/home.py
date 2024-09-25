@@ -576,6 +576,7 @@ class TibberHome:
             resolution,
             n_data,
             date_from_base64,
+            "profit production productionUnit" if production else "cost consumption consumptionUnit",
         )
 
         if not (data := await self._tibber_control.execute(query, timeout=30)):
