@@ -30,10 +30,8 @@ HISTORIC_DATA_DATE = """
                               to
                               unitPrice
                               unitPriceVAT
-                              consumption
-                              consumptionUnit
-                              cost
                               currency
+                              {5}
                             }}
                           }}
                         }}
