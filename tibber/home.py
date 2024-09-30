@@ -418,7 +418,7 @@ class TibberHome:
 
             self._rt_power.append((_timestamp, live_data["power"] / 1000))
             if "lastMeterProduction" in live_data:
-                live_data["lastMeterProduction"] = max(0, live_data["lastMeterProduction"])
+                live_data["lastMeterProduction"] = max(0, live_data["lastMeterProduction"] or 0)
 
             if (
                 (power_production := live_data.get("powerProduction"))
