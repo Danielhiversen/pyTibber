@@ -562,8 +562,7 @@ class TibberHome:
         :param production: True to get production data instead of consumption
         """
 
-        yesterday = date_from - dt.timedelta(days=1)
-        date_from_base64 = base64.b64encode(yesterday.strftime("%Y-%m-%d").encode()).decode("utf-8")
+        date_from_base64 = base64.b64encode(date_from.strftime("%Y-%m-%d").encode()).decode("utf-8")
 
         if n_data == 0:
             # Calculate the number of days to the end of the month from the given date
