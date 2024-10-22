@@ -542,8 +542,7 @@ class TibberHome:
             max_n_data = 1
         cursor = ""
         for _ in range(n_data // max_n_data + 1):
-            _n_data = min(max_n_data, n_data)
-            _n_data = min(_n_data, n_data - len(res))
+            _n_data = min(max_n_data, n_data - len(res))
             query = HISTORIC_DATA.format(
                 self.home_id,
                 cons_or_prod_str,
