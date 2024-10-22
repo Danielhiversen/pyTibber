@@ -541,7 +541,7 @@ class TibberHome:
             max_n_data = 12
         else:
             max_n_data = 1
-        for k in range(max(1, n_data // max_n_data)):
+        for k in range(n_data // max_n_data + 1):
             _n_data = min(max_n_data, n_data)
             query = HISTORIC_DATA.format(
                 self.home_id,
