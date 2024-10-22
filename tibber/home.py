@@ -11,13 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from gql import gql
 
-from .const import (
-    RESOLUTION_ANNUAL,
-    RESOLUTION_DAILY,
-    RESOLUTION_HOURLY,
-    RESOLUTION_MONTHLY,
-    RESOLUTION_WEEKLY,
-)
+from .const import RESOLUTION_HOURLY, RESOLUTION_MONTHLY, RESOLUTION_WEEKLY, RESOLUTION_DAILY, RESOLUTION_ANNUAL
 from .gql_queries import (
     HISTORIC_DATA,
     HISTORIC_DATA_DATE,
@@ -102,8 +96,7 @@ class TibberHome:
         if (
             not hourly_data.data
             or hourly_data.last_data_timestamp is None
-            or dt.datetime.fromisoformat(hourly_data.data[0]["from"])
-            < now - dt.timedelta(hours=n_hours + 24)
+            or dt.datetime.fromisoformat(hourly_data.data[0]["from"]) < now - dt.timedelta(hours=n_hours + 24)
         ):
             hourly_data.data = []
         else:
@@ -127,9 +120,7 @@ class TibberHome:
         if not hourly_data.data:
             hourly_data.data = data
         else:
-            hourly_data.data = [
-                entry for entry in hourly_data.data if entry not in data
-            ]
+            hourly_data.data = [entry for entry in hourly_data.data if entry not in data]
             hourly_data.data.extend(data)
 
         _month_energy = 0
@@ -212,9 +203,7 @@ class TibberHome:
 
     async def update_info_and_price_info(self) -> None:
         """Update home info and all price info asynchronously."""
-        if data := await self._tibber_control.execute(
-            UPDATE_INFO_PRICE % self._home_id
-        ):
+        if data := await self._tibber_control.execute(UPDATE_INFO_PRICE % self._home_id):
             self.info = data
             self._process_price_info(self.info)
 
@@ -256,9 +245,7 @@ class TibberHome:
         self._level_info = {}
         for key in ["current", "today", "tomorrow"]:
             try:
-                price_info_k = price_info["viewer"]["home"]["currentSubscription"][
-                    "priceInfo"
-                ][key]
+                price_info_k = price_info["viewer"]["home"]["currentSubscription"]["priceInfo"][key]
             except (KeyError, TypeError):
                 _LOGGER.error("Could not find price info for %s.", key)
                 continue
@@ -270,12 +257,9 @@ class TibberHome:
                 self._level_info[data.get("startsAt")] = data.get("level")
                 if (
                     not self.last_data_timestamp
-                    or dt.datetime.fromisoformat(data.get("startsAt"))
-                    > self.last_data_timestamp
+                    or dt.datetime.fromisoformat(data.get("startsAt")) > self.last_data_timestamp
                 ):
-                    self.last_data_timestamp = dt.datetime.fromisoformat(
-                        data.get("startsAt")
-                    )
+                    self.last_data_timestamp = dt.datetime.fromisoformat(data.get("startsAt"))
 
     @property
     def current_price_total(self) -> float | None:
@@ -330,9 +314,7 @@ class TibberHome:
     def has_production(self) -> bool:
         """Return true if the home has a production metering point."""
         try:
-            return bool(
-                self.info["viewer"]["home"]["meteringPointData"]["productionEan"]
-            )
+            return bool(self.info["viewer"]["home"]["meteringPointData"]["productionEan"])
         except (KeyError, TypeError):
             return False
 
@@ -354,9 +336,7 @@ class TibberHome:
     def currency(self) -> str:
         """Return the currency."""
         try:
-            return self.info["viewer"]["home"]["currentSubscription"]["priceInfo"][
-                "current"
-            ]["currency"]
+            return self.info["viewer"]["home"]["currentSubscription"]["priceInfo"]["current"]["currency"]
         except (KeyError, TypeError, IndexError):
             _LOGGER.error("Could not find currency.")
         return ""
@@ -386,9 +366,7 @@ class TibberHome:
             return ""
         return self.currency + "/" + self.consumption_unit
 
-    def current_price_rank(
-        self, price_total: dict[str, float], price_time: dt.datetime | None
-    ) -> int | None:
+    def current_price_rank(self, price_total: dict[str, float], price_time: dt.datetime | None) -> int | None:
         """Gets the rank (1-24) of how expensive the current price is compared to the other prices today."""
         # No price -> no rank
         if price_time is None:
@@ -396,9 +374,7 @@ class TibberHome:
         # Map price_total to a list of tuples (datetime, float)
         price_items_typed: list[tuple[dt.datetime, float]] = [
             (
-                dt.datetime.fromisoformat(time).astimezone(
-                    self._tibber_control.time_zone
-                ),
+                dt.datetime.fromisoformat(time).astimezone(self._tibber_control.time_zone),
                 price,
             )
             for time, price in price_total.items()
@@ -411,34 +387,21 @@ class TibberHome:
         )
         # Find the rank of the current price
         try:
-            price_rank = next(
-                idx
-                for idx, item in enumerate(prices_today_sorted, start=1)
-                if item[0] == price_time
-            )
+            price_rank = next(idx for idx, item in enumerate(prices_today_sorted, start=1) if item[0] == price_time)
         except StopIteration:
             price_rank = None
 
         return price_rank
 
-    def current_price_data(
-        self,
-    ) -> tuple[float | None, str | None, dt.datetime | None, int | None]:
+    def current_price_data(self) -> tuple[float | None, str | None, dt.datetime | None, int | None]:
         """Get current price."""
         now = dt.datetime.now(self._tibber_control.time_zone)
         for key, price_total in self.price_total.items():
-            price_time = dt.datetime.fromisoformat(key).astimezone(
-                self._tibber_control.time_zone
-            )
+            price_time = dt.datetime.fromisoformat(key).astimezone(self._tibber_control.time_zone)
             time_diff = (now - price_time).total_seconds() / MIN_IN_HOUR
             if 0 <= time_diff < MIN_IN_HOUR:
                 price_rank = self.current_price_rank(self.price_total, price_time)
-                return (
-                    round(price_total, 3),
-                    self.price_level[key],
-                    price_time,
-                    price_rank,
-                )
+                return round(price_total, 3), self.price_level[key], price_time, price_rank
         return None, None, None, None
 
     async def rt_subscribe(self, callback: Callable[..., Any]) -> None:
@@ -449,19 +412,13 @@ class TibberHome:
 
         def _add_extra_data(data: dict[str, Any]) -> dict[str, Any]:
             live_data = data["data"]["liveMeasurement"]
-            _timestamp = dt.datetime.fromisoformat(live_data["timestamp"]).astimezone(
-                self._tibber_control.time_zone
-            )
-            while self._rt_power and self._rt_power[0][0] < _timestamp - dt.timedelta(
-                minutes=5
-            ):
+            _timestamp = dt.datetime.fromisoformat(live_data["timestamp"]).astimezone(self._tibber_control.time_zone)
+            while self._rt_power and self._rt_power[0][0] < _timestamp - dt.timedelta(minutes=5):
                 self._rt_power.pop(0)
 
             self._rt_power.append((_timestamp, live_data["power"] / 1000))
             if "lastMeterProduction" in live_data:
-                live_data["lastMeterProduction"] = max(
-                    0, live_data["lastMeterProduction"] or 0
-                )
+                live_data["lastMeterProduction"] = max(0, live_data["lastMeterProduction"] or 0)
 
             if (
                 (power_production := live_data.get("powerProduction"))
@@ -470,26 +427,17 @@ class TibberHome:
             ):
                 live_data["power"] = 0
 
-            if (
-                live_data.get("power", 0) > 0
-                and live_data.get("powerProduction") is None
-            ):
+            if live_data.get("power", 0) > 0 and live_data.get("powerProduction") is None:
                 live_data["powerProduction"] = 0
 
             current_hour = live_data["accumulatedConsumptionLastHour"]
             if current_hour is not None:
                 power = sum(p[1] for p in self._rt_power) / len(self._rt_power)
                 live_data["estimatedHourConsumption"] = round(
-                    current_hour
-                    + power
-                    * (3600 - (_timestamp.minute * 60 + _timestamp.second))
-                    / 3600,
+                    current_hour + power * (3600 - (_timestamp.minute * 60 + _timestamp.second)) / 3600,
                     3,
                 )
-                if (
-                    self._hourly_consumption_data.peak_hour
-                    and current_hour > self._hourly_consumption_data.peak_hour
-                ):
+                if self._hourly_consumption_data.peak_hour and current_hour > self._hourly_consumption_data.peak_hour:
                     self._hourly_consumption_data.peak_hour = round(current_hour, 2)
                     self._hourly_consumption_data.peak_hour_time = _timestamp
             return data
@@ -523,10 +471,7 @@ class TibberHome:
                         self.home_id,
                         data,
                     )
-                    if (
-                        self._rt_stopped
-                        or not self._tibber_control.realtime.subscription_running
-                    ):
+                    if self._rt_stopped or not self._tibber_control.realtime.subscription_running:
                         _LOGGER.debug("Stopping rt_subscribe loop")
                         return
             except Exception:
@@ -567,9 +512,7 @@ class TibberHome:
         """Is real time subscription running."""
         if not self._tibber_control.realtime.subscription_running:
             return False
-        return not self._last_rt_data_received < dt.datetime.now(
-            tz=dt.UTC
-        ) - dt.timedelta(seconds=60)
+        return not self._last_rt_data_received < dt.datetime.now(tz=dt.UTC) - dt.timedelta(seconds=60)
 
     async def get_historic_data(
         self,
@@ -638,15 +581,11 @@ class TibberHome:
         :param production: True to get production data instead of consumption
         """
 
-        date_from_base64 = base64.b64encode(
-            date_from.strftime("%Y-%m-%d").encode()
-        ).decode("utf-8")
+        date_from_base64 = base64.b64encode(date_from.strftime("%Y-%m-%d").encode()).decode("utf-8")
 
         if n_data == 0:
             # Calculate the number of days to the end of the month from the given date
-            n_data = (
-                date_from.replace(day=1, month=date_from.month + 1) - date_from
-            ).days
+            n_data = (date_from.replace(day=1, month=date_from.month + 1) - date_from).days
 
         return await self.get_historic_data(
             n_data,
@@ -671,9 +610,7 @@ class TibberHome:
         if not (data := await self._tibber_control.execute(query)):
             _LOGGER.error("Could not get the price data.")
             return None
-        return data["viewer"]["home"]["currentSubscription"]["priceRating"][resolution][
-            "entries"
-        ]
+        return data["viewer"]["home"]["currentSubscription"]["priceRating"][resolution]["entries"]
 
     def current_attributes(self) -> dict[str, float]:
         """Get current attributes."""
@@ -689,9 +626,7 @@ class TibberHome:
         num = 0.0
         now = dt.datetime.now(self._tibber_control.time_zone)
         for key, _price_total in self.price_total.items():
-            price_time = dt.datetime.fromisoformat(key).astimezone(
-                self._tibber_control.time_zone
-            )
+            price_time = dt.datetime.fromisoformat(key).astimezone(self._tibber_control.time_zone)
             price_total = round(_price_total, 3)
             if now.date() == price_time.date():
                 max_price = max(max_price, price_total)
