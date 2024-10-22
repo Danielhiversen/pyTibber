@@ -519,6 +519,7 @@ class TibberHome:
         n_data: int,
         resolution: str = RESOLUTION_HOURLY,
         production: bool = False,
+        cursor: str = "",
     ) -> list[dict[str, Any]]:
         """Get historic data.
 
@@ -529,7 +530,6 @@ class TibberHome:
         :param production: True to get production data instead of consumption
         """
         cons_or_prod_str = "production" if production else "consumption"
-        cursor = ""
         res = []
         if resolution == RESOLUTION_HOURLY:
             max_n_data = 24 * 30
@@ -586,26 +586,12 @@ class TibberHome:
             # Calculate the number of days to the end of the month from the given date
             n_data = (date_from.replace(day=1, month=date_from.month + 1) - date_from).days
 
-        cons_or_prod_str = "production" if production else "consumption"
-        query = HISTORIC_DATA_DATE.format(
-            self.home_id,
-            cons_or_prod_str,
-            resolution,
+        return await self.get_historic_data(
             n_data,
+            resolution,
+            production,
             date_from_base64,
-            "profit production productionUnit" if production else "cost consumption consumptionUnit",
         )
-
-        if not (data := await self._tibber_control.execute(query, timeout=30)):
-            _LOGGER.error("Could not get the data.")
-            return []
-
-        data = data["viewer"]["home"][cons_or_prod_str]
-
-        if data is None:
-            return []
-
-        return data["nodes"]
 
     async def get_historic_price_data(
         self,
