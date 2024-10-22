@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from gql import gql
 
-from .const import RESOLUTION_HOURLY, RESOLUTION_MONTHLY, RESOLUTION_WEEKLY, RESOLUTION_DAILY, RESOLUTION_ANNUAL
+from .const import RESOLUTION_DAILY, RESOLUTION_HOURLY, RESOLUTION_MONTHLY, RESOLUTION_WEEKLY
 from .gql_queries import (
     HISTORIC_DATA,
     HISTORIC_DATA_DATE,
@@ -519,7 +519,6 @@ class TibberHome:
         n_data: int,
         resolution: str = RESOLUTION_HOURLY,
         production: bool = False,
-        cursor: str = "",
     ) -> list[dict[str, Any]]:
         """Get historic data.
 
@@ -530,7 +529,7 @@ class TibberHome:
         :param production: True to get production data instead of consumption
         """
         cons_or_prod_str = "production" if production else "consumption"
-        res = []
+        res: list[dict[str, Any]] = []
         if resolution == RESOLUTION_HOURLY:
             max_n_data = 24 * 30
         elif resolution == RESOLUTION_DAILY:
@@ -541,7 +540,8 @@ class TibberHome:
             max_n_data = 12
         else:
             max_n_data = 1
-        for k in range(n_data // max_n_data + 1):
+        cursor = ""
+        for _ in range(n_data // max_n_data + 1):
             _n_data = min(max_n_data, n_data)
             _n_data = min(_n_data, n_data - len(res))
             query = HISTORIC_DATA.format(
@@ -587,12 +587,26 @@ class TibberHome:
             # Calculate the number of days to the end of the month from the given date
             n_data = (date_from.replace(day=1, month=date_from.month + 1) - date_from).days
 
-        return await self.get_historic_data(
-            n_data,
+        cons_or_prod_str = "production" if production else "consumption"
+        query = HISTORIC_DATA_DATE.format(
+            self.home_id,
+            cons_or_prod_str,
             resolution,
-            production,
+            n_data,
             date_from_base64,
+            "profit production productionUnit" if production else "cost consumption consumptionUnit",
         )
+
+        if not (data := await self._tibber_control.execute(query, timeout=30)):
+            _LOGGER.error("Could not get the data.")
+            return []
+
+        data = data["viewer"]["home"][cons_or_prod_str]
+
+        if data is None:
+            return []
+
+        return data["nodes"]
 
     async def get_historic_price_data(
         self,
