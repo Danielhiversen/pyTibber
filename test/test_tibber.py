@@ -1,10 +1,10 @@
 """Tests for pyTibber."""
 
-import datetime as dt
 import asyncio
+import datetime as dt
+import logging
 
 import aiohttp
-import logging
 import pytest
 
 import tibber
@@ -170,7 +170,7 @@ async def test_tibber_get_historic_data():
 
 
 @pytest.mark.asyncio
-async def test_logging_tibber_get_historic_data(caplog):
+async def test_logging_tibber_get_historic_data(caplog: pytest.LogCaptureFixture):
     caplog.set_level(logging.INFO)
     async with aiohttp.ClientSession() as session:
         tibber_connection = tibber.Tibber(
@@ -180,9 +180,9 @@ async def test_logging_tibber_get_historic_data(caplog):
         await tibber_connection.update_info()
         home = tibber_connection.get_homes()[0]
 
-        def _callback(pkg):
+        def _callback(_: dict) -> None:
             return None
-        
+
         await home.rt_subscribe(_callback)
         await asyncio.sleep(1)
         home.rt_unsubscribe()
