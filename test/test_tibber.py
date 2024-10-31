@@ -1,6 +1,8 @@
 """Tests for pyTibber."""
 
+import asyncio
 import datetime as dt
+import logging
 
 import aiohttp
 import pytest
@@ -165,3 +167,27 @@ async def test_tibber_get_historic_data():
         assert len(historic_data) == 5
         assert historic_data[0]["from"] == "2024-01-01T00:00:00.000+01:00", "First day must be 2024-01-01"
         assert historic_data[4]["from"] == "2024-01-05T00:00:00.000+01:00", "Last day must be 2024-01-05"
+
+
+@pytest.mark.asyncio
+async def test_logging_rt_subscribe(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.INFO)
+    async with aiohttp.ClientSession() as session:
+        tibber_connection = tibber.Tibber(
+            websession=session,
+            user_agent="test",
+        )
+        await tibber_connection.update_info()
+        home = tibber_connection.get_homes()[0]
+
+        def _callback(_: dict) -> None:
+            return None
+
+        await home.rt_subscribe(_callback)
+        await asyncio.sleep(1)
+        home.rt_unsubscribe()
+        await tibber_connection.rt_disconnect()
+        await asyncio.sleep(10)
+
+    assert "gql.transport.websockets:websockets_base.py:240" not in caplog.text, "should not show on info logging level"
+    assert "gql.transport.websockets:websockets_base.py:218" not in caplog.text, "should not show on info logging level"
