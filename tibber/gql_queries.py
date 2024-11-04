@@ -101,35 +101,6 @@ LIVE_SUBSCRIBE = """
             }
            }
         """
-PRICE_INFO = """
-        {
-          viewer {
-            home(id: "%s") {
-              currentSubscription {
-                priceInfo {
-                  current {
-                    energy
-                    tax
-                    total
-                    startsAt
-                    level
-                  }
-                  today {
-                    total
-                    startsAt
-                    level
-                  }
-                  tomorrow {
-                    total
-                    startsAt
-                    level
-                  }
-                }
-              }
-            }
-          }
-        }
-        """
 PUSH_NOTIFICATION = """
         mutation{{
           sendPushNotification(input: {{
@@ -295,3 +266,24 @@ UPDATE_INFO_PRICE = """
         }
 
         """
+PRICE_INFO = """
+{
+  viewer {
+    home(id: "%s") {
+      currentSubscription {
+        priceRating {
+          hourly {
+            currency
+            entries {
+              time
+              total
+              energy
+              level
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
