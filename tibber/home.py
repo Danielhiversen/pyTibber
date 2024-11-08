@@ -235,7 +235,7 @@ class TibberHome:
         self._price_info = {}
         self._level_info = {}
         data = price_info["viewer"]["home"]["currentSubscription"]["priceRating"]["hourly"]["entries"]
-        if no data:
+        if not data:
             return
         for row in data:
             self._price_info[row.get("time")] = row.get("total")
