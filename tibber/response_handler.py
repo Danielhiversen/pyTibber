@@ -54,8 +54,10 @@ async def extract_response_data(response: ClientResponse) -> dict[Any, Any]:
         if error_code == API_ERR_CODE_UNAUTH:
             raise InvalidLoginError(response.status, error_message, error_code)
 
+        _LOGGER.error("FatalHttpExceptionError %s %s", error_message, error_code)
         raise FatalHttpExceptionError(response.status, error_message, error_code)
 
     error_code, error_message = extract_error_details(result.get("errors", []), "N/A")
     # if reached here the HTTP response code is not currently handled
+    _LOGGER.error("FatalHttpExceptionError %s %s", error_message, error_code)
     raise FatalHttpExceptionError(response.status, f"Unhandled error: {error_message}", error_code)
