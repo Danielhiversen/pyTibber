@@ -211,7 +211,6 @@ class TibberHome:
             self._update_has_real_time_consumption()
         await self.update_price_info()
 
-
     def _update_has_real_time_consumption(self) -> None:
         try:
             _has_real_time_consumption = self.info["viewer"]["home"]["features"]["realTimeConsumptionEnabled"]
@@ -233,7 +232,7 @@ class TibberHome:
             else:
                 self._has_real_time_consumption = None
             return
-        
+
         if _has_real_time_consumption is True:
             self._real_time_consumption_suggested_disabled = None
         self._has_real_time_consumption = _has_real_time_consumption
