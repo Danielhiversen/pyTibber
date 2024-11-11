@@ -221,13 +221,13 @@ class TibberHome:
         if self._has_real_time_consumption is None:
             self._has_real_time_consumption = _has_real_time_consumption
             return
-        
+
         if self._has_real_time_consumption is True and _has_real_time_consumption is False:
             now = dt.datetime.now(tz=dt.UTC)
             if self._real_time_consumption_suggested_disabled is None:
                 self._real_time_consumption_suggested_disabled = now
                 self._has_real_time_consumption = None
-            elif (now - self._real_time_consumption_suggested_disabled > dt.timedelta(hours=1)):
+            elif now - self._real_time_consumption_suggested_disabled > dt.timedelta(hours=1):
                 self._real_time_consumption_suggested_disabled = None
                 self._has_real_time_consumption = False
             else:
@@ -237,7 +237,6 @@ class TibberHome:
         if _has_real_time_consumption is True:
             self._real_time_consumption_suggested_disabled = None
         self._has_real_time_consumption = _has_real_time_consumption
-
 
     async def update_current_price_info(self) -> None:
         """Update just the current price info asynchronously."""
@@ -266,8 +265,7 @@ class TibberHome:
                 if retry:
                     _LOGGER.debug("Could not find price info. Retrying...")
                     return await self.update_price_info(retry=False)
-                else:
-                    _LOGGER.error("Could not find price info.")
+                _LOGGER.error("Could not find price info.")
             return None
         data = price_info["viewer"]["home"]["currentSubscription"]["priceRating"]["hourly"]["entries"]
         if not data:
@@ -275,8 +273,7 @@ class TibberHome:
                 if retry:
                     _LOGGER.debug("Could not find price info data. Retrying...")
                     return await self.update_price_info(retry=False)
-                else:
-                    _LOGGER.error("Could not find price info data. %s", price_info)
+                _LOGGER.error("Could not find price info data. %s", price_info)
             return None
         self._price_info = {}
         self._level_info = {}
@@ -331,7 +328,6 @@ class TibberHome:
     def has_real_time_consumption(self) -> None | bool:
         """Return home id."""
         return self._has_real_time_consumption
-
 
     @property
     def has_production(self) -> bool:
