@@ -268,7 +268,7 @@ class TibberHome:
                     return await self.update_price_info(retry=False)
                 else:
                     _LOGGER.error("Could not find price info.")
-            return
+            return None
         data = price_info["viewer"]["home"]["currentSubscription"]["priceRating"]["hourly"]["entries"]
         if not data:
             if self.has_active_subscription:
@@ -277,13 +277,14 @@ class TibberHome:
                     return await self.update_price_info(retry=False)
                 else:
                     _LOGGER.error("Could not find price info data. %s", price_info)
-            return
+            return None
         self._price_info = {}
         self._level_info = {}
         for row in data:
             self._price_info[row.get("time")] = row.get("total")
             self._level_info[row.get("time")] = row.get("level")
         self.last_data_timestamp = dt.datetime.fromisoformat(data[-1]["time"])
+        return None
 
     @property
     def current_price_total(self) -> float | None:
