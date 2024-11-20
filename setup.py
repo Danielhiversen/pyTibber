@@ -8,7 +8,7 @@ exec((Path("tibber") / "const.py").read_text(encoding="utf-8"), consts)  # noqa:
 setup(
     name="pyTibber",
     packages=["tibber"],
-    install_requires=["aiohttp>=3.0.6", "gql>=3.0.0", "websockets>=10.0"],
+    install_requires=["aiohttp>=3.0.6", "gql>=3.0.0", "websockets>=10.0", "tzdata"],
     package_data={"tibber": ["py.typed"]},
     version=consts["__version__"],
     description="A python3 library to communicate with Tibber",
