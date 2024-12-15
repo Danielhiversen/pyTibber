@@ -200,9 +200,7 @@ class TibberHome:
 
     async def update_info(self) -> None:
         """Update home info and the current price info asynchronously."""
-        if data := await self._tibber_control.execute(UPDATE_INFO % self._home_id):
-            self.info = data
-            self._update_has_real_time_consumption()
+        await self.update_info_and_price_info()
 
     async def update_info_and_price_info(self) -> None:
         """Update home info and all price info asynchronously."""
