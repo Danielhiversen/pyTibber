@@ -19,7 +19,6 @@ from .gql_queries import (
     LIVE_SUBSCRIBE,
     PRICE_INFO,
     UPDATE_CURRENT_PRICE,
-    UPDATE_INFO,
     UPDATE_INFO_PRICE,
 )
 
