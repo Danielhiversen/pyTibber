@@ -533,7 +533,7 @@ class TibberHome:
         if resolution == RESOLUTION_HOURLY:
             max_n_data = 24 * 31
         elif resolution == RESOLUTION_DAILY:
-            max_n_data = 30
+            max_n_data = 31
         elif resolution == RESOLUTION_WEEKLY:
             max_n_data = 52
         elif resolution == RESOLUTION_MONTHLY:
