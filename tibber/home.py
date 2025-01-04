@@ -531,7 +531,7 @@ class TibberHome:
         cons_or_prod_str = "production" if production else "consumption"
         res: list[dict[str, Any]] = []
         if resolution == RESOLUTION_HOURLY:
-            max_n_data = 24 * 30
+            max_n_data = 24 * 31
         elif resolution == RESOLUTION_DAILY:
             max_n_data = 30
         elif resolution == RESOLUTION_WEEKLY:
