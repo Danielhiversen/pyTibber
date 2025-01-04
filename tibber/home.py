@@ -19,7 +19,6 @@ from .gql_queries import (
     LIVE_SUBSCRIBE,
     PRICE_INFO,
     UPDATE_CURRENT_PRICE,
-    UPDATE_INFO,
     UPDATE_INFO_PRICE,
 )
 
@@ -86,6 +85,8 @@ class TibberHome:
         self._rt_listener: None | asyncio.Task[Any] = None
         self._rt_callback: Callable[..., Any] | None = None
         self._rt_stopped: bool = True
+        self._has_real_time_consumption: None | bool = None
+        self._real_time_consumption_suggested_disabled: dt.datetime | None = None
 
     async def _fetch_data(self, hourly_data: HourlyData) -> None:
         """Update hourly consumption or production data asynchronously."""
@@ -198,14 +199,40 @@ class TibberHome:
 
     async def update_info(self) -> None:
         """Update home info and the current price info asynchronously."""
-        if data := await self._tibber_control.execute(UPDATE_INFO % self._home_id):
-            self.info = data
+        await self.update_info_and_price_info()
 
     async def update_info_and_price_info(self) -> None:
         """Update home info and all price info asynchronously."""
         if data := await self._tibber_control.execute(UPDATE_INFO_PRICE % self._home_id):
             self.info = data
-            self._process_price_info(self.info)
+            self._update_has_real_time_consumption()
+        await self.update_price_info()
+
+    def _update_has_real_time_consumption(self) -> None:
+        try:
+            _has_real_time_consumption = self.info["viewer"]["home"]["features"]["realTimeConsumptionEnabled"]
+        except (KeyError, TypeError):
+            self._has_real_time_consumption = None
+            return
+        if self._has_real_time_consumption is None:
+            self._has_real_time_consumption = _has_real_time_consumption
+            return
+
+        if self._has_real_time_consumption is True and _has_real_time_consumption is False:
+            now = dt.datetime.now(tz=dt.UTC)
+            if self._real_time_consumption_suggested_disabled is None:
+                self._real_time_consumption_suggested_disabled = now
+                self._has_real_time_consumption = None
+            elif now - self._real_time_consumption_suggested_disabled > dt.timedelta(hours=1):
+                self._real_time_consumption_suggested_disabled = None
+                self._has_real_time_consumption = False
+            else:
+                self._has_real_time_consumption = None
+            return
+
+        if _has_real_time_consumption is True:
+            self._real_time_consumption_suggested_disabled = None
+        self._has_real_time_consumption = _has_real_time_consumption
 
     async def update_current_price_info(self) -> None:
         """Update just the current price info asynchronously."""
@@ -224,42 +251,33 @@ class TibberHome:
         if price_info:
             self._current_price_info = price_info
 
-    async def update_price_info(self) -> None:
+    async def update_price_info(self, retry: bool = True) -> None:
         """Update the current price info, todays price info
         and tomorrows price info asynchronously.
         """
-        if price_info := await self._tibber_control.execute(PRICE_INFO % self.home_id):
-            self._process_price_info(price_info)
-
-    def _process_price_info(self, price_info: dict[str, dict[str, Any]]) -> None:
-        """Processes price information retrieved from a GraphQL query.
-        The information from the provided dictionary is extracted, then the
-        properties of this TibberHome object is updated with this data.
-
-        :param price_info: Price info to retrieve data from.
-        """
+        price_info = await self._tibber_control.execute(PRICE_INFO % self.home_id)
         if not price_info:
-            _LOGGER.error("Could not find price info.")
-            return
+            if self.has_active_subscription:
+                if retry:
+                    _LOGGER.debug("Could not find price info. Retrying...")
+                    return await self.update_price_info(retry=False)
+                _LOGGER.error("Could not find price info.")
+            return None
+        data = price_info["viewer"]["home"]["currentSubscription"]["priceRating"]["hourly"]["entries"]
+        if not data:
+            if self.has_active_subscription:
+                if retry:
+                    _LOGGER.debug("Could not find price info data. Retrying...")
+                    return await self.update_price_info(retry=False)
+                _LOGGER.error("Could not find price info data. %s", price_info)
+            return None
         self._price_info = {}
         self._level_info = {}
-        for key in ["current", "today", "tomorrow"]:
-            try:
-                price_info_k = price_info["viewer"]["home"]["currentSubscription"]["priceInfo"][key]
-            except (KeyError, TypeError):
-                _LOGGER.error("Could not find price info for %s.", key)
-                continue
-            if key == "current":
-                self._current_price_info = price_info_k
-                continue
-            for data in price_info_k:
-                self._price_info[data.get("startsAt")] = data.get("total")
-                self._level_info[data.get("startsAt")] = data.get("level")
-                if (
-                    not self.last_data_timestamp
-                    or dt.datetime.fromisoformat(data.get("startsAt")) > self.last_data_timestamp
-                ):
-                    self.last_data_timestamp = dt.datetime.fromisoformat(data.get("startsAt"))
+        for row in data:
+            self._price_info[row.get("time")] = row.get("total")
+            self._level_info[row.get("time")] = row.get("level")
+        self.last_data_timestamp = dt.datetime.fromisoformat(data[-1]["time"])
+        return None
 
     @property
     def current_price_total(self) -> float | None:
@@ -305,10 +323,7 @@ class TibberHome:
     @property
     def has_real_time_consumption(self) -> None | bool:
         """Return home id."""
-        try:
-            return self.info["viewer"]["home"]["features"]["realTimeConsumptionEnabled"]
-        except (KeyError, TypeError):
-            return None
+        return self._has_real_time_consumption
 
     @property
     def has_production(self) -> bool:
