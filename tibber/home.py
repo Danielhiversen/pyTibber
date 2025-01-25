@@ -318,6 +318,7 @@ class TibberHome:
             "awaiting market",
             "awaiting time restriction",
             "awaiting termination",
+            "ended",
         ]
 
     @property
