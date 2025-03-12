@@ -15,6 +15,7 @@ from .const import (
 from .exceptions import (
     FatalHttpExceptionError,
     InvalidLoginError,
+    NotForDemoUserError,
     RetryableHttpExceptionError,
 )
 

@@ -9,7 +9,7 @@ import pytest
 
 import tibber
 from tibber.const import RESOLUTION_DAILY
-from tibber.exceptions import FatalHttpExceptionError, InvalidLoginError
+from tibber.exceptions import FatalHttpExceptionError, InvalidLoginError, NotForDemoUserError
 
 
 @pytest.mark.asyncio
