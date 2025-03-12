@@ -5,7 +5,7 @@ strict_optional = false
 
 [tool.ruff]
 line-length = 120
-target-version = "py311"
+target-version = "py313"
 
 [tool.ruff.lint]
 ignore = ["D", "EM", "FBT", "PLR0913", "C901", "S101", "TRY"]
