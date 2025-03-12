@@ -110,8 +110,26 @@ async def test_tibber_notification():
             websession=session,
             user_agent="test",
         )
-        await tibber_connection.update_info()
-        assert not await tibber_connection.send_notification("Test tittle", "message")
+
+        with pytest.raises(NotForDemoUserError, match="operation not allowed for demo user"):
+            await tibber_connection.send_notification("Test tittle", "message")
+
+# ----------------------------------------------------------------------------------
+#                Comments on testing tibber_notification:
+# ----------------------------------------------------------------------------------
+# - Current test only covers the case where the user is a demo user and the operation is not allowed.
+#   --> Still, it is a good test to have for tracking changes in api behavior.
+# ----------------------------------------------------------------------------------
+
+# ----------------------------------------------------------------------------------
+#                   Proposal for additional test cases:
+# ----------------------------------------------------------------------------------
+# - having three different api token types: demo, demo_always_success, demo_always_fail
+# --> demo: current behavior
+# --> demo_always_success: always returns success
+# --> demo_always_fail: always returns fail
+# ----------------------------------------------------------------------------------
+
 
 
 @pytest.mark.asyncio
