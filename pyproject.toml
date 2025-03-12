@@ -22,3 +22,5 @@ known-first-party = ["tibber", "test"]
   "S101",
   "S106",
 ]
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"
