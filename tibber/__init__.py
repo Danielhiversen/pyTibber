@@ -17,6 +17,7 @@ from .exceptions import (
     UserAgentMissingError,
 )
 from .gql_queries import INFO, PUSH_NOTIFICATION
+from .helper.wrapper import log_request_query_types
 from .home import TibberHome
 from .realtime import TibberRT
 from .response_handler import extract_response_data
@@ -74,8 +75,10 @@ class Tibber:
         """Close the Tibber connection.
         This method simply closes the websession used by the object.
         """
+        _LOGGER.debug("Closing Tibber connection")
         await self.websession.close()
 
+    @log_request_query_types
     async def execute(
         self,
         document: str,
@@ -107,6 +110,7 @@ class Tibber:
             return (await extract_response_data(resp)).get("data")
         except (TimeoutError, aiohttp.ClientError) as err:
             if retry > 0:
+                _LOGGER.debug("Retrying request, retries left: %s", retry)
                 return await self.execute(
                     document,
                     variable_values,
@@ -137,7 +141,8 @@ class Tibber:
 
     async def update_info(self) -> None:
         """Updates home info asynchronously."""
-        if (data := await self.execute(INFO)) is None:
+        info_query = INFO
+        if (data := await self.execute(info_query)) is None:
             return
 
         if not (viewer := data.get("viewer")):
@@ -185,20 +190,19 @@ class Tibber:
         :param title: The title of the push notification.
         :param message: The message of the push notification.
         """
+        push_notification_query = PUSH_NOTIFICATION.format(
+            title,
+            message,
+        )
         if not (
-            res := await self.execute(
-                PUSH_NOTIFICATION.format(
-                    title,
-                    message,
-                ),
-            )
+            res := await self.execute(push_notification_query)
         ):
             return False
         notification = res.get("sendPushNotification", {})
         successful = notification.get("successful", False)
         pushed_to_number_of_devices = notification.get("pushedToNumberOfDevices", 0)
         _LOGGER.debug(
-            "send_notification: status %s, send to %s devices",
+            "send_notification: status successful=%s, send to %s devices",
             successful,
             pushed_to_number_of_devices,
         )
@@ -224,6 +228,7 @@ class Tibber:
         """Stop subscription manager.
         This method simply calls the stop method of the SubscriptionManager if it is defined.
         """
+        _LOGGER.debug("Disconnecting from Tibber realtime")
         return await self.realtime.disconnect()
 
     @property

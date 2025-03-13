@@ -105,9 +105,15 @@ class TibberHome:
             seconds_diff = time_diff.total_seconds()
             n_hours = int(seconds_diff / 3600)
             if n_hours < 1:
+                _LOGGER.debug('No need to fetch %s data. Called from "fetch_data"', hourly_data.direction_name)
                 return
             n_hours = max(2, int(n_hours))
 
+        _LOGGER.debug(
+            'Fetching %s data for %s hours. Called from "fetch_data". \nExpect "get_historic_data" call.',
+            hourly_data.direction_name,
+            n_hours,
+        )
         data = await self.get_historic_data(
             n_hours,
             resolution=RESOLUTION_HOURLY,
@@ -156,10 +162,12 @@ class TibberHome:
 
     async def fetch_consumption_data(self) -> None:
         """Update consumption info asynchronously."""
+        _LOGGER.debug('Fetching consumption data for home_id [REDACTED]. \nExpect "fetch_data" call.')
         return await self._fetch_data(self._hourly_consumption_data)
 
     async def fetch_production_data(self) -> None:
         """Update consumption info asynchronously."""
+        _LOGGER.debug('Fetching production data for home_id [REDACTED]. \nExpect "fetch_data" call.')
         return await self._fetch_data(self._hourly_production_data)
 
     @property
@@ -203,9 +211,11 @@ class TibberHome:
 
     async def update_info_and_price_info(self) -> None:
         """Update home info and all price info asynchronously."""
-        if data := await self._tibber_control.execute(UPDATE_INFO_PRICE % self._home_id):
+        update_info_price_query = UPDATE_INFO_PRICE % self._home_id
+        if data := await self._tibber_control.execute(update_info_price_query):
             self.info = data
             self._update_has_real_time_consumption()
+        _LOGGER.debug('Updating price info for home_id [REDACTED]. \nExpect "update_price_info" call.')
         await self.update_price_info()
 
     def _update_has_real_time_consumption(self) -> None:
@@ -236,8 +246,9 @@ class TibberHome:
 
     async def update_current_price_info(self) -> None:
         """Update just the current price info asynchronously."""
-        query = UPDATE_CURRENT_PRICE % self.home_id
-        price_info_temp = await self._tibber_control.execute(query)
+
+        update_current_price_query = UPDATE_CURRENT_PRICE % self.home_id
+        price_info_temp = await self._tibber_control.execute(update_current_price_query)
         if not price_info_temp:
             _LOGGER.error("Could not find current price info.")
             return
@@ -255,7 +266,8 @@ class TibberHome:
         """Update the current price info, todays price info
         and tomorrows price info asynchronously.
         """
-        price_info = await self._tibber_control.execute(PRICE_INFO % self.home_id)
+        price_info_query = PRICE_INFO % self.home_id
+        price_info = await self._tibber_control.execute(price_info_query)
         if not price_info:
             if self.has_active_subscription:
                 if retry:
@@ -473,8 +485,9 @@ class TibberHome:
                 return
 
             try:
+                live_subscribe_query = LIVE_SUBSCRIBE % self.home_id
                 async for _data in self._tibber_control.realtime.sub_manager.session.subscribe(
-                    gql(LIVE_SUBSCRIBE % self.home_id),
+                    gql(live_subscribe_query),
                 ):
                     data = {"data": _data}
                     with contextlib.suppress(KeyError):
@@ -544,7 +557,7 @@ class TibberHome:
         :param production: True to get production data instead of consumption
         """
         cons_or_prod_str = "production" if production else "consumption"
-        query = HISTORIC_DATA.format(
+        historic_data_query = HISTORIC_DATA.format(
             self.home_id,
             cons_or_prod_str,
             resolution,
@@ -552,8 +565,8 @@ class TibberHome:
             "profit" if production else "totalCost cost",
             "",
         )
-        if not (data := await self._tibber_control.execute(query, timeout=30)):
-            _LOGGER.error("Could not get the data.")
+        if not (data := await self._tibber_control.execute(historic_data_query, timeout=30)):
+            _LOGGER.error("Could not get the historic data.")
             return []
         data = data["viewer"]["home"][cons_or_prod_str]
         if data is None:
@@ -576,15 +589,15 @@ class TibberHome:
             DAILY, WEEKLY, MONTHLY or ANNUAL
         :param production: True to get production data instead of consumption
         """
-
-        date_from_base64 = base64.b64encode(date_from.strftime("%Y-%m-%d").encode()).decode("utf-8")
+        formated_date = date_from.strftime("%Y-%m-%d")
+        date_from_base64 = base64.b64encode(formated_date.encode()).decode("utf-8")
 
         if n_data == 0:
             # Calculate the number of days to the end of the month from the given date
             n_data = (date_from.replace(day=1, month=date_from.month + 1) - date_from).days
 
         cons_or_prod_str = "production" if production else "consumption"
-        query = HISTORIC_DATA_DATE.format(
+        historic_data_date_query = HISTORIC_DATA_DATE.format(
             self.home_id,
             cons_or_prod_str,
             resolution,
@@ -593,8 +606,8 @@ class TibberHome:
             "profit production productionUnit" if production else "cost consumption consumptionUnit",
         )
 
-        if not (data := await self._tibber_control.execute(query, timeout=30)):
-            _LOGGER.error("Could not get the data.")
+        if not (data := await self._tibber_control.execute(historic_data_date_query, timeout=30)):
+            _LOGGER.error("Could not get the historic data from %s.", formated_date)
             return []
 
         data = data["viewer"]["home"][cons_or_prod_str]
@@ -613,12 +626,12 @@ class TibberHome:
             DAILY, WEEKLY, MONTHLY or ANNUAL
         """
         resolution = resolution.lower()
-        query = HISTORIC_PRICE.format(
+        historic_price_query = HISTORIC_PRICE.format(
             self.home_id,
             resolution,
         )
-        if not (data := await self._tibber_control.execute(query)):
-            _LOGGER.error("Could not get the price data.")
+        if not (data := await self._tibber_control.execute(historic_price_query)):
+            _LOGGER.error("Could not get the historic price data.")
             return None
         return data["viewer"]["home"]["currentSubscription"]["priceRating"][resolution]["entries"]
 
