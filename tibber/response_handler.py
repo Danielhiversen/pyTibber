@@ -2,6 +2,7 @@
 
 import logging
 from http import HTTPStatus
+from json import JSONDecodeError
 from typing import Any
 
 from aiohttp import ClientResponse
@@ -22,15 +23,22 @@ from .exceptions import (
 _LOGGER = logging.getLogger(__name__)
 
 
-def extract_error_details(errors: list[Any], default_message: str) -> tuple[str, str]:
-    """Tries to extract the error message and code from the provided 'errors' dictionary"""
+def extract_error_details(errors: list[dict], default_message: str) -> tuple[str, str]:
+    """Extracts error code and message from the first error entry."""
+
     if not errors:
         return API_ERR_CODE_UNKNOWN, default_message
-    return errors[0].get("extensions").get("code"), errors[0].get("message")
+    error : dict[str, Any] = errors[0]
+    extensions : dict[str, Any] = error.get("extensions", {})
+    return (
+        extensions.get("code", API_ERR_CODE_UNKNOWN),
+        error.get("message", default_message),
+    )
 
 
-async def extract_response_data(response: ClientResponse) -> dict[Any, Any]:
+async def extract_response_data(response: ClientResponse) -> dict[str, Any]:
     """Extracts the response as JSON or throws a HttpException"""
+
     _LOGGER.debug("Response status: %s", response.status)
 
     if response.content_type != "application/json":
@@ -40,7 +48,24 @@ async def extract_response_data(response: ClientResponse) -> dict[Any, Any]:
             API_ERR_CODE_UNKNOWN,
         )
 
-    result : dict[Any, Any] = await response.json()
+    try:
+        result : dict[str, Any] = await response.json()
+    except JSONDecodeError as err:
+        raise FatalHttpExceptionError(
+            response.status,
+            f"Failed to parse response: {err}",
+            API_ERR_CODE_UNKNOWN,
+        ) from err
+
+    if not isinstance(result, dict):
+        raise FatalHttpExceptionError(
+            response.status,
+            f"Unexpected response: {result}",
+            API_ERR_CODE_UNKNOWN,
+        )
+
+    # precache errors
+    errors : list[dict[str, Any]] = result.get("errors", [])
 
     # From API Changelog 2025-01-03:
     # As part of a major framework update, the API will now no longer return an HTTP status code 400
@@ -49,7 +74,6 @@ async def extract_response_data(response: ClientResponse) -> dict[Any, Any]:
     # object whose extensions.code property will have the value UNAUTHENTICATED set.
 
     if response.status == HTTPStatus.OK:
-        errors : list[dict[str, Any]] = result.get("errors")
         if not errors:
             return result
 
@@ -63,12 +87,12 @@ async def extract_response_data(response: ClientResponse) -> dict[Any, Any]:
             raise NotForDemoUserError(response.status, error_message, error_code)
 
     if response.status in HTTP_CODES_RETRIABLE:
-        error_code, error_message = extract_error_details(result.get("errors", []), str(response.content))
+        error_code, error_message = extract_error_details(errors, str(response.content))
         _LOGGER.error("RetryableHttpExceptionError %s %s", error_message, error_code)
         raise RetryableHttpExceptionError(response.status, message=error_message, extension_code=error_code)
 
     if response.status in HTTP_CODES_FATAL:
-        error_code, error_message = extract_error_details(result.get("errors", []), "request failed")
+        error_code, error_message = extract_error_details(errors, default_message = "request failed")
         if error_code == API_ERR_CODE_UNAUTH:
             _LOGGER.error("InvalidLoginError %s %s", error_message, error_code)
             raise InvalidLoginError(response.status, error_message, error_code)
@@ -76,7 +100,8 @@ async def extract_response_data(response: ClientResponse) -> dict[Any, Any]:
         _LOGGER.error("FatalHttpExceptionError %s %s", error_message, error_code)
         raise FatalHttpExceptionError(response.status, error_message, error_code)
 
-    error_code, error_message = extract_error_details(result.get("errors", []), "N/A")
+    error_code, error_message = extract_error_details(errors, default_message = "N/A")
+
     # if reached here the HTTP response code is not currently handled
     _LOGGER.error("FatalHttpExceptionError %s %s", error_message, error_code)
     raise FatalHttpExceptionError(response.status, f"Unhandled error: {error_message}", error_code)

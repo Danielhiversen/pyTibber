@@ -51,7 +51,8 @@ class Tibber:
         elif user_agent is None:
             user_agent = websession.headers.get(aiohttp.hdrs.USER_AGENT)
         if user_agent is None:
-            raise UserAgentMissingError("Please provide value for HTTP user agent")
+            raise UserAgentMissingError("User-Agent required in HTTP session headers")
+
         self._user_agent: str = f"{user_agent} pyTibber/{__version__}"
         self.websession = websession
         self.timeout: int = timeout
@@ -90,31 +91,33 @@ class Tibber:
 
         :param document: The GraphQL query to request.
         :param variable_values: The GraphQL variables to parse with the request.
-        :param timeout: The timeout to use for the request.
+        :param timeout: Request timeout in seconds.
         :param retry: The number of times to retry the request.
         """
-        timeout = timeout or self.timeout
 
+        timeout_val = timeout or self.timeout
         payload = {"query": document, "variables": variable_values or {}}
+        headers = {
+            "Authorization": f"Bearer { self._access_token }",
+            aiohttp.hdrs.USER_AGENT: self._user_agent,
+        }
 
         try:
             resp = await self.websession.post(
                 API_ENDPOINT,
-                headers={
-                    "Authorization": "Bearer " + self._access_token,
-                    aiohttp.hdrs.USER_AGENT: self._user_agent,
-                },
+                headers=headers,
                 data=payload,
-                timeout=aiohttp.ClientTimeout(total=self.timeout),
+                timeout=aiohttp.ClientTimeout(total=timeout_val),
             )
             return (await extract_response_data(resp)).get("data")
+
         except (TimeoutError, aiohttp.ClientError) as err:
             if retry > 0:
                 _LOGGER.debug("Retrying request, retries left: %s", retry)
                 return await self.execute(
                     document,
                     variable_values,
-                    timeout,
+                    timeout_val,
                     retry - 1,
                 )
             if isinstance(err, asyncio.TimeoutError):
@@ -122,6 +125,7 @@ class Tibber:
             else:
                 _LOGGER.exception("Error connecting to Tibber")
             raise
+
         except (InvalidLoginError, FatalHttpExceptionError) as err:
             _LOGGER.error(
                 "Fatal error interacting with Tibber API, HTTP status: %s. API error: %s / %s",
@@ -130,6 +134,7 @@ class Tibber:
                 err.message,
             )
             raise
+
         except RetryableHttpExceptionError as err:
             _LOGGER.warning(
                 "Temporary failure interacting with Tibber API, HTTP status: %s. API error: %s / %s",
