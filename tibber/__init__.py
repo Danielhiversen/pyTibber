@@ -98,7 +98,7 @@ class Tibber:
         timeout_val = timeout or self.timeout
         payload = {"query": document, "variables": variable_values or {}}
         headers = {
-            "Authorization": f"Bearer {self._access_token}",
+            "Authorization": f"Bearer { self._access_token }",
             aiohttp.hdrs.USER_AGENT: self._user_agent,
         }
 
@@ -199,7 +199,9 @@ class Tibber:
             title,
             message,
         )
-        if not (res := await self.execute(push_notification_query)):
+        if not (
+            res := await self.execute(push_notification_query)
+        ):
             return False
         notification = res.get("sendPushNotification", {})
         successful = notification.get("successful", False)

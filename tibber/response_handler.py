@@ -28,8 +28,8 @@ def extract_error_details(errors: list[dict], default_message: str) -> tuple[str
 
     if not errors:
         return API_ERR_CODE_UNKNOWN, default_message
-    error: dict[str, Any] = errors[0]
-    extensions: dict[str, Any] = error.get("extensions", {})
+    error : dict[str, Any] = errors[0]
+    extensions : dict[str, Any] = error.get("extensions", {})
     return (
         extensions.get("code", API_ERR_CODE_UNKNOWN),
         error.get("message", default_message),
@@ -49,7 +49,7 @@ async def extract_response_data(response: ClientResponse) -> dict[str, Any]:
         )
 
     try:
-        result: dict[str, Any] = await response.json()
+        result : dict[str, Any] = await response.json()
     except JSONDecodeError as err:
         raise FatalHttpExceptionError(
             response.status,
@@ -65,7 +65,7 @@ async def extract_response_data(response: ClientResponse) -> dict[str, Any]:
         )
 
     # precache errors
-    errors: list[dict[str, Any]] = result.get("errors", [])
+    errors : list[dict[str, Any]] = result.get("errors", [])
 
     # From API Changelog 2025-01-03:
     # As part of a major framework update, the API will now no longer return an HTTP status code 400
@@ -92,7 +92,7 @@ async def extract_response_data(response: ClientResponse) -> dict[str, Any]:
         raise RetryableHttpExceptionError(response.status, message=error_message, extension_code=error_code)
 
     if response.status in HTTP_CODES_FATAL:
-        error_code, error_message = extract_error_details(errors, default_message="request failed")
+        error_code, error_message = extract_error_details(errors, default_message = "request failed")
         if error_code == API_ERR_CODE_UNAUTH:
             _LOGGER.error("InvalidLoginError %s %s", error_message, error_code)
             raise InvalidLoginError(response.status, error_message, error_code)
@@ -100,7 +100,7 @@ async def extract_response_data(response: ClientResponse) -> dict[str, Any]:
         _LOGGER.error("FatalHttpExceptionError %s %s", error_message, error_code)
         raise FatalHttpExceptionError(response.status, error_message, error_code)
 
-    error_code, error_message = extract_error_details(errors, default_message="N/A")
+    error_code, error_message = extract_error_details(errors, default_message = "N/A")
 
     # if reached here the HTTP response code is not currently handled
     _LOGGER.error("FatalHttpExceptionError %s %s", error_message, error_code)

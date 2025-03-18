@@ -1,9 +1,8 @@
 from pathlib import Path
-from typing import Any
 
 from setuptools import setup
 
-consts: dict[str, Any] = {}
+consts = {}
 exec((Path("tibber") / "const.py").read_text(encoding="utf-8"), consts)  # noqa: S102
 
 setup(

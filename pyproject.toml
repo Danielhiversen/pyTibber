@@ -16,8 +16,11 @@ known-first-party = ["tibber", "test"]
 
 [tool.ruff.lint.per-file-ignores]
 "setup.py" = ["D100"]
-"test/**/*" = ["ANN201", "PLR2004", "S101", "S106"]
-
-
+"test/**/*" = [
+  "ANN201",
+  "PLR2004",
+  "S101",
+  "S106",
+]
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "function"

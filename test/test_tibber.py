@@ -13,7 +13,7 @@ from tibber.exceptions import FatalHttpExceptionError, InvalidLoginError, NotFor
 
 
 @pytest.mark.asyncio
-async def test_tibber_no_session() -> None:
+async def test_tibber_no_session():
     tibber_connection = tibber.Tibber(
         user_agent="test",
     )
@@ -23,7 +23,7 @@ async def test_tibber_no_session() -> None:
 
 
 @pytest.mark.asyncio
-async def test_tibber() -> None:
+async def test_tibber():
     async with aiohttp.ClientSession() as session:
         tibber_connection = tibber.Tibber(
             websession=session,
@@ -52,9 +52,7 @@ async def test_tibber() -> None:
                 assert home.current_price_info == {}
 
                 await home.update_current_price_info()
-                assert home.current_price_total is not None
                 assert home.current_price_total > 0
-
                 assert isinstance(home.current_price_info.get("energy"), float | int)
                 assert isinstance(home.current_price_info.get("startsAt"), str)
                 assert isinstance(home.current_price_info.get("tax"), float | int)
@@ -77,7 +75,7 @@ async def test_tibber() -> None:
 
 
 @pytest.mark.asyncio
-async def test_tibber_invalid_token() -> None:
+async def test_tibber_invalid_token():
     async with aiohttp.ClientSession() as session:
         tibber_connection = tibber.Tibber(
             access_token="INVALID_TOKEN",
@@ -91,7 +89,7 @@ async def test_tibber_invalid_token() -> None:
 
 
 @pytest.mark.asyncio
-async def test_tibber_invalid_query() -> None:
+async def test_tibber_invalid_query():
     async with aiohttp.ClientSession() as session:
         tibber_connection = tibber.Tibber(
             websession=session,
@@ -106,7 +104,7 @@ async def test_tibber_invalid_query() -> None:
 
 
 @pytest.mark.asyncio
-async def test_tibber_notification() -> None:
+async def test_tibber_notification():
     async with aiohttp.ClientSession() as session:
         tibber_connection = tibber.Tibber(
             websession=session,
@@ -114,8 +112,7 @@ async def test_tibber_notification() -> None:
         )
 
         with pytest.raises(NotForDemoUserError, match="operation not allowed for demo user"):
-            await tibber_connection.send_notification("Test title", "message")
-
+            await tibber_connection.send_notification("Test tittle", "message")
 
 # ----------------------------------------------------------------------------------
 #                Comments on testing tibber_notification:
@@ -134,8 +131,9 @@ async def test_tibber_notification() -> None:
 # ----------------------------------------------------------------------------------
 
 
+
 @pytest.mark.asyncio
-async def test_tibber_token() -> None:
+async def test_tibber_token():
     async with aiohttp.ClientSession() as session:
         tibber_connection = tibber.Tibber(
             access_token="d11a43897efa4cf478afd659d6c8b7117da9e33b38232fd454b0e9f28af98012",
@@ -150,7 +148,7 @@ async def test_tibber_token() -> None:
 
 
 @pytest.mark.asyncio
-async def test_tibber_current_price_rank() -> None:
+async def test_tibber_current_price_rank():
     async with aiohttp.ClientSession() as session:
         tibber_connection = tibber.Tibber(
             websession=session,
@@ -169,7 +167,7 @@ async def test_tibber_current_price_rank() -> None:
 
 
 @pytest.mark.asyncio
-async def test_tibber_get_historic_data() -> None:
+async def test_tibber_get_historic_data():
     async with aiohttp.ClientSession() as session:
         tibber_connection = tibber.Tibber(
             websession=session,
