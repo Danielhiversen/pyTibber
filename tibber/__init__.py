@@ -50,7 +50,7 @@ class Tibber:
             user_agent = websession.headers.get(aiohttp.hdrs.USER_AGENT)
         if user_agent is None:
             raise UserAgentMissingError("Please provide value for HTTP user agent")
-        self._user_agent: str = f"{user_agent} pyTibber/{__version__}"
+        self._user_agent: str = f"{user_agent} pyTibber/{__version__} "
         self.websession = websession
         self.timeout: int = timeout
         self._access_token: str = access_token
