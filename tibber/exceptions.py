@@ -42,6 +42,5 @@ class RetryableHttpExceptionError(HttpExceptionError):
 class InvalidLoginError(FatalHttpExceptionError):
     """Invalid login exception."""
 
-
 class NotForDemoUserError(FatalHttpExceptionError):
     """Exception raised when trying to use a feature not available for demo users"""

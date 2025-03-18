@@ -9,27 +9,21 @@ _LOGGER = logging.getLogger(__name__)
 P = ParamSpec("P")
 R = TypeVar("R")
 
-
 def log_request_query_types(func: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:
     """Decorator to log the name of the `document` variable."""
 
     @wraps(func)
     async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         # Get the frame of the caller
-        current_frame = inspect.currentframe()
-        if current_frame is None:
-            _LOGGER.warning("Could not retrieve the current frame")
-            return await func(*args, **kwargs)
-
-        caller_frame = current_frame.f_back
-        if caller_frame is None:
+        frame = inspect.currentframe().f_back
+        if not frame:
             _LOGGER.warning("Could not get caller's frame")
             return await func(*args, **kwargs)
 
-        frame_info = inspect.getframeinfo(caller_frame)
+        frame_info = inspect.getframeinfo(frame)
 
         # Get all local variables in the caller's scope
-        local_vars = caller_frame.f_locals
+        local_vars = frame.f_locals
 
         # Find the variable name that matches the value passed as `document`
         document_value = kwargs.get("document")
@@ -46,9 +40,7 @@ def log_request_query_types(func: Callable[P, Awaitable[R]]) -> Callable[P, Awai
 
         if variable_name:
             _LOGGER.debug(
-                "sending request with: %s in %s",
-                variable_name,
-                frame_info.function,
+                "sending request with: %s in %s", variable_name, frame_info.function,
             )
 
         # Execute original function
