@@ -9,7 +9,7 @@ import pytest
 
 import tibber
 from tibber.const import RESOLUTION_DAILY
-from tibber.exceptions import FatalHttpExceptionError, InvalidLoginError
+from tibber.exceptions import FatalHttpExceptionError, InvalidLoginError, NotForDemoUserError
 
 
 @pytest.mark.asyncio
@@ -110,8 +110,8 @@ async def test_tibber_notification():
             websession=session,
             user_agent="test",
         )
-        await tibber_connection.update_info()
-        assert not await tibber_connection.send_notification("Test tittle", "message")
+        with pytest.raises(NotForDemoUserError, match="operation not allowed for demo user"):
+            await tibber_connection.send_notification("Test title", "message")
 
 
 @pytest.mark.asyncio
