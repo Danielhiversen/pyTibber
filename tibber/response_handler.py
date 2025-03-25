@@ -15,6 +15,7 @@ from .const import (
 from .exceptions import (
     FatalHttpExceptionError,
     InvalidLoginError,
+    NotForDemoUserError,
     RetryableHttpExceptionError,
 )
 
@@ -39,11 +40,20 @@ async def extract_response_data(response: ClientResponse) -> dict[Any, Any]:
             API_ERR_CODE_UNKNOWN,
         )
 
-    result = await response.json()
+    result: dict[str, Any] = await response.json()
 
     if response.status == HTTPStatus.OK:
-        return result
+        errors: list[dict[str, Any]] = result.get("errors", [])
+        if not errors:
+            return result
 
+        error_code, error_message = extract_error_details(errors, str(response.content))
+
+        if error_code == "UNAUTHENTICATED":
+            raise InvalidLoginError(response.status, error_message, error_code)
+
+        if (error_code == "INTERNAL_SERVER_ERROR") & ("demo user" in error_message):
+            raise NotForDemoUserError(response.status, error_message, error_code)
     if response.status in HTTP_CODES_RETRIABLE:
         error_code, error_message = extract_error_details(result.get("errors", []), str(response.content))
 
