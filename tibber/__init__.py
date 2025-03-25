@@ -3,7 +3,6 @@
 import asyncio
 import datetime as dt
 import logging
-import zoneinfo
 from ssl import SSLContext
 from typing import Any
 
@@ -51,7 +50,7 @@ class Tibber:
             user_agent = websession.headers.get(aiohttp.hdrs.USER_AGENT)
         if user_agent is None:
             raise UserAgentMissingError("Please provide value for HTTP user agent")
-        self._user_agent: str = f"{user_agent} pyTibber/{__version__}"
+        self._user_agent: str = f"{user_agent} pyTibber/{__version__} "
         self.websession = websession
         self.timeout: int = timeout
         self._access_token: str = access_token
@@ -63,7 +62,7 @@ class Tibber:
             ssl=ssl,
         )
 
-        self.time_zone: dt.tzinfo = time_zone or zoneinfo.ZoneInfo("UTC")
+        self.time_zone: dt.tzinfo = time_zone or dt.UTC
         self._name: str = ""
         self._user_id: str | None = None
         self._active_home_ids: list[str] = []
