@@ -9,7 +9,7 @@ import pytest
 
 import tibber
 from tibber.const import RESOLUTION_DAILY
-from tibber.exceptions import FatalHttpExceptionError, InvalidLoginError
+from tibber.exceptions import FatalHttpExceptionError, InvalidLoginError, NotForDemoUserError
 
 
 @pytest.mark.asyncio
@@ -82,7 +82,7 @@ async def test_tibber_invalid_token():
             websession=session,
             user_agent="test",
         )
-        with pytest.raises(InvalidLoginError, match="Context creation failed: invalid token"):
+        with pytest.raises(InvalidLoginError, match="No valid access token in request"):
             await tibber_connection.update_info()
         assert not tibber_connection.name
         assert tibber_connection.get_homes() == []
@@ -110,8 +110,8 @@ async def test_tibber_notification():
             websession=session,
             user_agent="test",
         )
-        await tibber_connection.update_info()
-        assert not await tibber_connection.send_notification("Test tittle", "message")
+        with pytest.raises(NotForDemoUserError, match="operation not allowed for demo user"):
+            await tibber_connection.send_notification("Test title", "message")
 
 
 @pytest.mark.asyncio
