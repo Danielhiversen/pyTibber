@@ -50,7 +50,6 @@ async def extract_response_data(response: ClientResponse) -> dict[Any, Any]:
         error_code, error_message = extract_error_details(errors, str(response.content))
 
         if error_code == "UNAUTHENTICATED":
-            _LOGGER.error("InvalidLoginError %s %s", error_message, error_code)
             raise InvalidLoginError(response.status, error_message, error_code)
 
         if (error_code == "INTERNAL_SERVER_ERROR") & ("demo user" in error_message):
