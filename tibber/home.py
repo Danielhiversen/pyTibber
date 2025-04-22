@@ -308,20 +308,17 @@ class TibberHome:
 
     @property
     def has_active_subscription(self) -> bool:
-        """Return true if the subscription is active"""
+        """Return home id."""
         try:
-            sub = self.info["viewer"]["home"]["currentSubscription"]
-            status = sub["status"]
-            valid_to = dt.datetime.fromisoformat(sub["validTo"])
-            now = dt.datetime.now(self._tibber_control.time_zone)
+            sub = self.info["viewer"]["home"]["currentSubscription"]["status"]
         except (KeyError, TypeError):
             return False
-        return status in [
+        return sub in [
             "running",
             "awaiting market",
             "awaiting time restriction",
             "awaiting termination",
-        ] or (status == "ended" and now <= valid_to)
+        ]
 
     @property
     def has_real_time_consumption(self) -> None | bool:
