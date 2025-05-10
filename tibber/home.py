@@ -256,7 +256,7 @@ class TibberHome:
         and tomorrows price info asynchronously.
         """
         if not self.has_active_subscription:
-            return
+            return None
 
         price_info = await self._tibber_control.execute(PRICE_INFO % self.home_id)
         if not price_info:
