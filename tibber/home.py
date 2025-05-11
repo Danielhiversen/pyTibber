@@ -206,7 +206,8 @@ class TibberHome:
         if data := await self._tibber_control.execute(UPDATE_INFO_PRICE % self._home_id):
             self.info = data
             self._update_has_real_time_consumption()
-        await self.update_price_info()
+        if self.has_active_subscription:
+            await self.update_price_info()
 
     def _update_has_real_time_consumption(self) -> None:
         try:

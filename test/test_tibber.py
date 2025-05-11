@@ -82,7 +82,7 @@ async def test_tibber_invalid_token():
             websession=session,
             user_agent="test",
         )
-        with pytest.raises(InvalidLoginError, match="No valid access token in request"):
+        with pytest.raises(InvalidLoginError, match="invalid token"):
             await tibber_connection.update_info()
         assert not tibber_connection.name
         assert tibber_connection.get_homes() == []
