@@ -258,17 +258,19 @@ class TibberHome:
         """
         price_info = await self._tibber_control.execute(PRICE_INFO % self.home_id)
         if not price_info:
-            if retry:
-                _LOGGER.debug("Could not find price info. Retrying...")
-                return await self.update_price_info(retry=False)
-            _LOGGER.error("Could not find price info.")
+            if self.has_active_subscription:
+                if retry:
+                    _LOGGER.debug("Could not find price info. Retrying...")
+                    return await self.update_price_info(retry=False)
+                _LOGGER.error("Could not find price info.")
             return None
         data = price_info["viewer"]["home"]["currentSubscription"]["priceRating"]["hourly"]["entries"]
         if not data:
-            if retry:
-                _LOGGER.debug("Could not find price info data. Retrying...")
-                return await self.update_price_info(retry=False)
-            _LOGGER.error("Could not find price info data. %s", price_info)
+            if self.has_active_subscription:
+                if retry:
+                    _LOGGER.debug("Could not find price info data. Retrying...")
+                    return await self.update_price_info(retry=False)
+                _LOGGER.error("Could not find price info data. %s", price_info)
             return None
         self._price_info = {}
         self._level_info = {}
