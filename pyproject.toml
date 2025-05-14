@@ -1,3 +1,38 @@
+[build-system]
+build-backend = "setuptools.build_meta"
+requires = ["setuptools>=77.0"]
+
+[project]
+name = "pyTibber"
+license = "GPL-3.0-or-later"
+description = "A python3 library to communicate with Tibber"
+readme = "README.md"
+authors = [{ name = "Daniel Hjelseth Hoyer", email = "mail@dahoiv.net" }]
+requires-python = ">=3.11"
+classifiers = [
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3",
+  "Topic :: Home Automation",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+  "aiohttp>=3.0.6",
+  "gql>=3.0.0",
+  "websockets>=10.0",
+]
+dynamic = ["version"]
+
+[project.urls]
+"Source code" = "https://github.com/Danielhiversen/pyTibber"
+
+[tool.setuptools.dynamic]
+version = { attr = "tibber.const.__version__"}
+
+[tool.setuptools.packages.find]
+include = ["tibber*"]
+
 [tool.mypy]
 disallow_incomplete_defs = true
 implicit_optional = true

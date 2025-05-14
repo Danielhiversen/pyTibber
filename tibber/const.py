@@ -3,11 +3,11 @@
 from http import HTTPStatus
 from typing import Final
 
-__version__ = "0.30.8"
+__version__ = "0.31.2"
 
 API_ENDPOINT: Final = "https://api.tibber.com/v1-beta/gql"
 DEFAULT_TIMEOUT: Final = 10
-DEMO_TOKEN: Final = "5K4MVS-OjfWhK_4yrjOlFe1F6kJXPVf7eQYggo8ebAE"
+DEMO_TOKEN: Final = "3A77EECF61BD445F47241A5A36202185C35AF3AF58609E19B53F3A8872AD7BE1-1"
 
 RESOLUTION_HOURLY: Final = "HOURLY"
 RESOLUTION_DAILY: Final = "DAILY"
