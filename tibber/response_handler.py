@@ -34,7 +34,7 @@ async def extract_response_data(response: ClientResponse) -> dict[Any, Any]:
     _LOGGER.debug("Response status: %s", response.status)
 
     if response.content_type != "application/json":
-        raise FatalHttpExceptionError(
+        raise RetryableHttpExceptionError(
             response.status,
             f"Unexpected content type: {response.content_type}",
             API_ERR_CODE_UNKNOWN,
