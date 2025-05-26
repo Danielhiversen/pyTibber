@@ -508,7 +508,7 @@ class TibberHome:
                 self.update_info(),
                 self._tibber_control.update_info(),
             ],
-            return_exceptions=True,
+            return_exceptions=False,
         )
         if self._rt_callback is None:
             _LOGGER.warning("No callback set for rt_resubscribe")
