@@ -31,7 +31,7 @@ class TibberWebsocketsTransport(WebsocketsTransport):
     @property
     def running(self) -> bool:
         """Is real time subscription running."""
-        return hasattr(self, 'websocket') and self.websocket is not None and self.websocket.state is State.OPEN
+        return hasattr(self, "websocket") and self.websocket is not None and self.websocket.state is State.OPEN
 
     async def _receive(self) -> str:
         """Wait the next message from the websocket connection."""
