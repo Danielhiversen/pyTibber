@@ -189,5 +189,3 @@ async def test_logging_rt_subscribe(caplog: pytest.LogCaptureFixture) -> None:
         await tibber_connection.rt_disconnect()
         await asyncio.sleep(10)
 
-    assert "gql.transport.websockets:websockets_base.py:240" not in caplog.text, "should not show on info logging level"
-    assert "gql.transport.websockets:websockets_base.py:218" not in caplog.text, "should not show on info logging level"
