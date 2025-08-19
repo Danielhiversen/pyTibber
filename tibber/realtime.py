@@ -8,7 +8,6 @@ from ssl import SSLContext
 from typing import Any
 
 from gql import Client
-import logging
 
 from .exceptions import SubscriptionEndpointMissingError
 from .home import TibberHome
