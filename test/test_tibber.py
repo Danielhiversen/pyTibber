@@ -188,4 +188,3 @@ async def test_logging_rt_subscribe(caplog: pytest.LogCaptureFixture) -> None:
         home.rt_unsubscribe()
         await tibber_connection.rt_disconnect()
         await asyncio.sleep(10)
-

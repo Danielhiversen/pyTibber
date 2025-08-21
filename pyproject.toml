@@ -19,8 +19,8 @@ classifiers = [
 ]
 dependencies = [
   "aiohttp>=3.0.6",
-  "gql>=4.0.0",
-  "websockets>=15.0.1",
+  "gql>=3.5.0",
+  "websockets>=15.0.0",
 ]
 dynamic = ["version"]
 
