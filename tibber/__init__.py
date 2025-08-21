@@ -79,7 +79,7 @@ class Tibber:
         self,
         document: str,
         variable_values: dict[Any, Any] | None = None,
-        timeout: int | None = None,
+        timeout: int | None = None,  # noqa: ASYNC109
         retry: int = 3,
     ) -> dict[Any, Any] | None:
         """Execute a GraphQL query and return the data.
