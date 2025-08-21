@@ -30,7 +30,7 @@ class TibberWebsocketsTransport(WebsocketsTransport):
     @property
     def running(self) -> bool:
         """Is real time subscription running."""
-        return self.websocket is not None and self.websocket.open
+        return self._connected
 
     async def _receive(self) -> str:
         """Wait the next message from the websocket connection."""
@@ -39,10 +39,13 @@ class TibberWebsocketsTransport(WebsocketsTransport):
         except TimeoutError:
             _LOGGER.error("No data received from Tibber for %s seconds", self._timeout)
             raise
+        except TransportClosed:
+            _LOGGER.warning("Transport closed while waiting for message")
+            raise
         self.reconnect_at = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=self._timeout)
         return msg
 
     async def close(self) -> None:
         """Close the websocket connection."""
-        await self._fail(TransportClosed(f"Tibber websocket closed by {self._user_agent}"))
-        await self.wait_closed()
+        await super().close_async()
+        _LOGGER.info("Tibber websocket closed by %s", self._user_agent)
