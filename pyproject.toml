@@ -19,8 +19,8 @@ classifiers = [
 ]
 dependencies = [
   "aiohttp>=3.0.6",
-  "gql>=3.0.0",
-  "websockets>=10.0",
+  "gql>=3.5.0",
+  "websockets>=14.0.0",
 ]
 dynamic = ["version"]
 
@@ -34,6 +34,7 @@ version = { attr = "tibber.const.__version__"}
 include = ["tibber*"]
 
 [tool.mypy]
+python_version = "3.12"
 disallow_incomplete_defs = true
 implicit_optional = true
 strict_optional = false
@@ -43,7 +44,7 @@ line-length = 120
 target-version = "py311"
 
 [tool.ruff.lint]
-ignore = ["D", "EM", "FBT", "PLR0913", "C901", "S101", "TRY"]
+ignore = ["D", "EM", "FBT", "PLR0913", "C901", "S101", "S105", "TRY"]
 select = ["ALL"]
 
 [tool.ruff.lint.isort]

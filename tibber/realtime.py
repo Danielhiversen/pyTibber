@@ -8,7 +8,6 @@ from ssl import SSLContext
 from typing import Any
 
 from gql import Client
-from gql.transport.websockets import log as websockets_logger
 
 from .exceptions import SubscriptionEndpointMissingError
 from .home import TibberHome
@@ -17,8 +16,6 @@ from .websocket_transport import TibberWebsocketsTransport
 LOCK_CONNECT = asyncio.Lock()
 
 _LOGGER = logging.getLogger(__name__)
-
-websockets_logger.setLevel(logging.WARNING)
 
 
 class TibberRT:
