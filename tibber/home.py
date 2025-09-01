@@ -411,7 +411,11 @@ class TibberHome:
                 return
 
             try:
-                async for _data in self._tibber_control.realtime.sub_manager.session.subscribe(
+                session = self._tibber_control.realtime.sub_manager.session
+                if not hasattr(session, "subscribe"):
+                    _LOGGER.error("Session does not support subscribe method")
+                    return
+                async for _data in session.subscribe(
                     gql(LIVE_SUBSCRIBE % self.home_id),
                 ):
                     data = {"data": _data}
