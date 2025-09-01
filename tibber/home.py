@@ -199,14 +199,14 @@ class TibberHome:
 
     async def update_info_and_price_info(self) -> None:
         """Update home info and all price info asynchronously."""
-        _LOGGER.error("Updating info and price info for %s",  UPDATE_INFO_PRICE % self._home_id)
+        _LOGGER.error("Updating info and price info for %s", UPDATE_INFO_PRICE % self._home_id)
         if data := await self._tibber_control.execute(UPDATE_INFO_PRICE % self._home_id):
             self.info = data
             today = self.info["viewer"]["home"]["currentSubscription"]["priceInfo"]["today"]
             tomorrow = self.info["viewer"]["home"]["currentSubscription"]["priceInfo"]["tomorrow"]
-            self.price_total  = {}
+            self.price_total = {}
             for item in today + tomorrow:
-                self.price_total [item["startsAt"]] = item["total"]
+                self.price_total[item["startsAt"]] = item["total"]
             _LOGGER.error("Info: %s", self.price_total)
             self._update_has_real_time_consumption()
 
@@ -235,7 +235,6 @@ class TibberHome:
         if _has_real_time_consumption is True:
             self._real_time_consumption_suggested_disabled = None
         self._has_real_time_consumption = _has_real_time_consumption
-
 
     @property
     def home_id(self) -> str:
@@ -317,7 +316,7 @@ class TibberHome:
             return ""
         return self.currency + "/" + self.consumption_unit
 
-    def current_price_rank(self, price_total: dict[str, float], price_time: dt.datetime | None) -> int | None:
+    def current_price_rank(self, price_total: dict[str, float], price_time: dt.datetime | None) -> float | None:
         """Gets the rank (0-1) of how expensive the current price is compared to the other prices today."""
         # No price -> no rank
         if price_time is None:
@@ -338,17 +337,16 @@ class TibberHome:
         )
         # Find the rank of the current price
         try:
-            price_rank = (
-                next(idx for idx, item in enumerate(prices_today_sorted, start=1) if item[0] == price_time)
-                / len(prices_today_sorted)
-            )
+            price_rank = next(
+                idx for idx, item in enumerate(prices_today_sorted, start=1) if item[0] == price_time
+            ) / len(prices_today_sorted)
         except StopIteration:
             price_rank = None
         _LOGGER.error("n_prices: %s price_rank: %s", len(prices_today_sorted), price_rank)
 
         return price_rank
 
-    def current_price_data(self) -> tuple[float | None, dt.datetime | None, int | None]:
+    def current_price_data(self) -> tuple[float | None, dt.datetime | None, float | None]:
         """Get current price."""
         now = dt.datetime.now(self._tibber_control.time_zone)
         for key, price_total in self.price_total.items():
