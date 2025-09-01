@@ -17,12 +17,10 @@ from .gql_queries import (
     HISTORIC_DATA_DATE,
     HISTORIC_PRICE,
     LIVE_SUBSCRIBE,
-    PRICE_INFO,
     UPDATE_CURRENT_PRICE,
     UPDATE_INFO_PRICE,
 )
 
-MIN_IN_HOUR = 60
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -71,10 +69,7 @@ class TibberHome:
         """
         self._tibber_control = tibber_control
         self._home_id: str = home_id
-        self._current_price_total: float | None = None
-        self._current_price_info: dict[str, float] = {}
-        self._price_info: dict[str, float] = {}
-        self._level_info: dict[str, str] = {}
+        self.price_total: dict[str, float] = {}
         self._rt_power: list[tuple[dt.datetime, float]] = []
         self.info: dict[str, dict[Any, Any]] = {}
         self.last_data_timestamp: dt.datetime | None = None
@@ -203,11 +198,16 @@ class TibberHome:
 
     async def update_info_and_price_info(self) -> None:
         """Update home info and all price info asynchronously."""
+        _LOGGER.error("Updating info and price info for %s",  UPDATE_INFO_PRICE % self._home_id)
         if data := await self._tibber_control.execute(UPDATE_INFO_PRICE % self._home_id):
             self.info = data
+            today = self.info["viewer"]["home"]["currentSubscription"]["priceInfo"]["today"]
+            tomorrow = self.info["viewer"]["home"]["currentSubscription"]["priceInfo"]["tomorrow"]
+            self.price_total  = {}
+            for item in today + tomorrow:
+                self.price_total [item["startsAt"]] = item["total"]
+            _LOGGER.error("Info: %s", self.price_total)
             self._update_has_real_time_consumption()
-        if self.has_active_subscription:
-            await self.update_price_info()
 
     def _update_has_real_time_consumption(self) -> None:
         try:
@@ -234,73 +234,7 @@ class TibberHome:
         if _has_real_time_consumption is True:
             self._real_time_consumption_suggested_disabled = None
         self._has_real_time_consumption = _has_real_time_consumption
-
-    async def update_current_price_info(self) -> None:
-        """Update just the current price info asynchronously."""
-        query = UPDATE_CURRENT_PRICE % self.home_id
-        price_info_temp = await self._tibber_control.execute(query)
-        if not price_info_temp:
-            _LOGGER.error("Could not find current price info.")
-            return
-        try:
-            home = price_info_temp["viewer"]["home"]
-            current_subscription = home["currentSubscription"]
-            price_info = current_subscription["priceInfo"]["current"]
-        except (KeyError, TypeError):
-            _LOGGER.error("Could not find current price info.")
-            return
-        if price_info:
-            self._current_price_info = price_info
-
-    async def update_price_info(self, retry: bool = True) -> None:
-        """Update the current price info, todays price info
-        and tomorrows price info asynchronously.
-        """
-        price_info = await self._tibber_control.execute(PRICE_INFO % self.home_id)
-        if not price_info:
-            if self.has_active_subscription:
-                if retry:
-                    _LOGGER.debug("Could not find price info. Retrying...")
-                    return await self.update_price_info(retry=False)
-                _LOGGER.error("Could not find price info.")
-            return None
-        data = price_info["viewer"]["home"]["currentSubscription"]["priceRating"]["hourly"]["entries"]
-        if not data:
-            if self.has_active_subscription:
-                if retry:
-                    _LOGGER.debug("Could not find price info data. Retrying...")
-                    return await self.update_price_info(retry=False)
-                _LOGGER.error("Could not find price info data. %s", price_info)
-            return None
-        self._price_info = {}
-        self._level_info = {}
-        for row in data:
-            self._price_info[row.get("time")] = row.get("total")
-            self._level_info[row.get("time")] = row.get("level")
-        self.last_data_timestamp = dt.datetime.fromisoformat(data[-1]["time"])
-        return None
-
-    @property
-    def current_price_total(self) -> float | None:
-        """Get current price total."""
-        if not self._current_price_info:
-            return None
-        return self._current_price_info.get("total")
-
-    @property
-    def current_price_info(self) -> dict[str, float]:
-        """Get current price info."""
-        return self._current_price_info
-
-    @property
-    def price_total(self) -> dict[str, float]:
-        """Get dictionary with price total, key is date-time as a string."""
-        return self._price_info
-
-    @property
-    def price_level(self) -> dict[str, str]:
-        """Get dictionary with price level, key is date-time as a string."""
-        return self._level_info
+        
 
     @property
     def home_id(self) -> str:
@@ -383,7 +317,7 @@ class TibberHome:
         return self.currency + "/" + self.consumption_unit
 
     def current_price_rank(self, price_total: dict[str, float], price_time: dt.datetime | None) -> int | None:
-        """Gets the rank (1-24) of how expensive the current price is compared to the other prices today."""
+        """Gets the rank (0-1) of how expensive the current price is compared to the other prices today."""
         # No price -> no rank
         if price_time is None:
             return None
@@ -403,22 +337,23 @@ class TibberHome:
         )
         # Find the rank of the current price
         try:
-            price_rank = next(idx for idx, item in enumerate(prices_today_sorted, start=1) if item[0] == price_time)
+            price_rank = next(idx for idx, item in enumerate(prices_today_sorted, start=1) if item[0] == price_time) / len(prices_today_sorted)
         except StopIteration:
             price_rank = None
+        _LOGGER.error("n_prices: %s price_rank: %s", len(prices_today_sorted), price_rank)
 
         return price_rank
 
-    def current_price_data(self) -> tuple[float | None, str | None, dt.datetime | None, int | None]:
+    def current_price_data(self) -> tuple[float | None, dt.datetime | None, int | None]:
         """Get current price."""
         now = dt.datetime.now(self._tibber_control.time_zone)
         for key, price_total in self.price_total.items():
             price_time = dt.datetime.fromisoformat(key).astimezone(self._tibber_control.time_zone)
-            time_diff = (now - price_time).total_seconds() / MIN_IN_HOUR
-            if 0 <= time_diff < MIN_IN_HOUR:
+            time_diff = (now - price_time).total_seconds() / 15
+            if 0 <= time_diff < 15:
                 price_rank = self.current_price_rank(self.price_total, price_time)
-                return round(price_total, 3), self.price_level[key], price_time, price_rank
-        return None, None, None, None
+                return round(price_total, 3), price_time, price_rank
+        return None, None, None
 
     async def rt_subscribe(self, callback: Callable[..., Any]) -> None:
         """Connect to Tibber and subscribe to Tibber real time subscription.
@@ -474,11 +409,7 @@ class TibberHome:
                 return
 
             try:
-                session = self._tibber_control.realtime.sub_manager.session
-                if not hasattr(session, "subscribe"):
-                    _LOGGER.error("Session does not support subscribe method")
-                    return
-                async for _data in session.subscribe(
+                async for _data in self._tibber_control.realtime.sub_manager.session.subscribe(
                     gql(LIVE_SUBSCRIBE % self.home_id),
                 ):
                     data = {"data": _data}
