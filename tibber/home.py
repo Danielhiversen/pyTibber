@@ -17,10 +17,8 @@ from .gql_queries import (
     HISTORIC_DATA_DATE,
     HISTORIC_PRICE,
     LIVE_SUBSCRIBE,
-    UPDATE_CURRENT_PRICE,
     UPDATE_INFO_PRICE,
 )
-
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -28,6 +26,9 @@ if TYPE_CHECKING:
     from . import Tibber
 
 _LOGGER = logging.getLogger(__name__)
+
+# Time intervals in minutes
+MIN_IN_QUARTER = 15  # 15 minutes
 
 
 class HourlyData:
@@ -234,7 +235,7 @@ class TibberHome:
         if _has_real_time_consumption is True:
             self._real_time_consumption_suggested_disabled = None
         self._has_real_time_consumption = _has_real_time_consumption
-        
+
 
     @property
     def home_id(self) -> str:
@@ -337,7 +338,10 @@ class TibberHome:
         )
         # Find the rank of the current price
         try:
-            price_rank = next(idx for idx, item in enumerate(prices_today_sorted, start=1) if item[0] == price_time) / len(prices_today_sorted)
+            price_rank = (
+                next(idx for idx, item in enumerate(prices_today_sorted, start=1) if item[0] == price_time)
+                / len(prices_today_sorted)
+            )
         except StopIteration:
             price_rank = None
         _LOGGER.error("n_prices: %s price_rank: %s", len(prices_today_sorted), price_rank)
@@ -349,8 +353,8 @@ class TibberHome:
         now = dt.datetime.now(self._tibber_control.time_zone)
         for key, price_total in self.price_total.items():
             price_time = dt.datetime.fromisoformat(key).astimezone(self._tibber_control.time_zone)
-            time_diff = (now - price_time).total_seconds() / 15
-            if 0 <= time_diff < 15:
+            time_diff = (now - price_time).total_seconds() / MIN_IN_QUARTER
+            if 0 <= time_diff < MIN_IN_QUARTER:
                 price_rank = self.current_price_rank(self.price_total, price_time)
                 return round(price_total, 3), price_time, price_rank
         return None, None, None
