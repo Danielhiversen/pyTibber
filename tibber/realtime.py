@@ -8,7 +8,6 @@ from ssl import SSLContext
 from typing import Any
 
 from gql import Client
-from gql.transport.websockets import log as websockets_logger
 
 from .exceptions import SubscriptionEndpointMissingError
 from .home import TibberHome
@@ -17,8 +16,6 @@ from .websocket_transport import TibberWebsocketsTransport
 LOCK_CONNECT = asyncio.Lock()
 
 _LOGGER = logging.getLogger(__name__)
-
-websockets_logger.setLevel(logging.WARNING)
 
 
 class TibberRT:
@@ -205,4 +202,11 @@ class TibberRT:
         """Set subscription endpoint."""
         self._sub_endpoint = sub_endpoint
         if self.sub_manager is not None and isinstance(self.sub_manager.transport, TibberWebsocketsTransport):
-            self.sub_manager.transport.url = sub_endpoint
+            self.sub_manager = Client(
+                transport=TibberWebsocketsTransport(
+                    sub_endpoint,
+                    self._access_token,
+                    self._user_agent,
+                    ssl=self._ssl_context,
+                ),
+            )
