@@ -202,4 +202,11 @@ class TibberRT:
         """Set subscription endpoint."""
         self._sub_endpoint = sub_endpoint
         if self.sub_manager is not None and isinstance(self.sub_manager.transport, TibberWebsocketsTransport):
-            self.sub_manager.transport.url = sub_endpoint
+            self.sub_manager = Client(
+                transport=TibberWebsocketsTransport(
+                    sub_endpoint,
+                    self._access_token,
+                    self._user_agent,
+                    ssl=self._ssl_context,
+                ),
+            )
