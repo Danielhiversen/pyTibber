@@ -3,7 +3,7 @@
 from http import HTTPStatus
 from typing import Final
 
-__version__ = "0.31.6"
+__version__ = "0.31.7"
 
 API_ENDPOINT: Final = "https://api.tibber.com/v1-beta/gql"
 DEFAULT_TIMEOUT: Final = 10
