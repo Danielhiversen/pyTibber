@@ -200,15 +200,15 @@ class TibberHome:
     async def update_info_and_price_info(self) -> None:
         """Update home info and all price info asynchronously."""
         _LOGGER.error("Updating info and price info for %s", UPDATE_INFO_PRICE % self._home_id)
-        if data := await self._tibber_control.execute(UPDATE_INFO_PRICE % self._home_id):
-            self.info = data
-            today = self.info["viewer"]["home"]["currentSubscription"]["priceInfo"]["today"]
-            tomorrow = self.info["viewer"]["home"]["currentSubscription"]["priceInfo"]["tomorrow"]
-            self.price_total = {}
-            for item in today + tomorrow:
-                self.price_total[item["startsAt"]] = item["total"]
-            _LOGGER.error("Info: %s", self.price_total)
-            self._update_has_real_time_consumption()
+        if not (data := await self._tibber_control.execute(UPDATE_INFO_PRICE % self._home_id)):
+            _LOGGER.error("Could not get the data.")
+            return
+        self.info = data
+        today = self.info["viewer"]["home"]["currentSubscription"]["priceInfo"].get("today", [])
+        tomorrow = self.info["viewer"]["home"]["currentSubscription"]["priceInfo"].get("tomorrow", [])
+        self.price_total = {item["startsAt"]: item["total"] for item in today + tomorrow}
+        _LOGGER.error("Info: %s", self.price_total)
+        self._update_has_real_time_consumption()
 
     def _update_has_real_time_consumption(self) -> None:
         try:
