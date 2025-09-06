@@ -208,7 +208,8 @@ class TibberHome:
         tomorrow = self.info["viewer"]["home"]["currentSubscription"]["priceInfo"].get("tomorrow", [])
         self.price_total = {item["startsAt"]: item["total"] for item in today + tomorrow}
         _LOGGER.error("Info: %s", self.price_total)
-        self._update_has_real_time_consumption()
+        if self.has_active_subscription:
+            self._update_has_real_time_consumption()
 
     def _update_has_real_time_consumption(self) -> None:
         try:
