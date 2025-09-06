@@ -192,8 +192,9 @@ UPDATE_INFO_PRICE = """
           viewer {
             home(id: "%s") {
               currentSubscription {
-                priceInfo {
+                priceInfo(resolution: QUARTER_HOURLY) {
                   current {
+                    currency
                     energy
                     tax
                     total
@@ -203,12 +204,10 @@ UPDATE_INFO_PRICE = """
                   today {
                     total
                     startsAt
-                    level
                   }
                   tomorrow {
                     total
                     startsAt
-                    level
                   }
                 }
               }
@@ -254,36 +253,8 @@ UPDATE_INFO_PRICE = """
                 validTo
                 statusReason
               }
-              currentSubscription {
-                priceInfo {
-                  current {
-                    currency
-                  }
-                }
-              }
             }
           }
         }
 
         """
-PRICE_INFO = """
-{
-  viewer {
-    home(id: "%s") {
-      currentSubscription {
-        priceRating {
-          hourly {
-            currency
-            entries {
-              time
-              total
-              energy
-              level
-            }
-          }
-        }
-      }
-    }
-  }
-}
-"""
