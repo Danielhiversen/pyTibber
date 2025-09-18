@@ -203,9 +203,28 @@ class TibberHome:
             _LOGGER.error("Could not get the data.")
             return
         self.info = data
-        today = self.info["viewer"]["home"]["currentSubscription"]["priceInfo"].get("today", [])
-        tomorrow = self.info["viewer"]["home"]["currentSubscription"]["priceInfo"].get("tomorrow", [])
-        self.price_total = {item["startsAt"]: item["total"] for item in today + tomorrow}
+
+        # Handle inactive homes where currentSubscription might be None
+        try:
+            current_subscription = self.info["viewer"]["home"]["currentSubscription"]
+            if current_subscription is None:
+                _LOGGER.debug("No active subscription for home %s", self._home_id)
+                self.price_total = {}
+                return
+
+            price_info = current_subscription.get("priceInfo")
+            if price_info is None:
+                _LOGGER.debug("No price info available for home %s", self._home_id)
+                self.price_total = {}
+                return
+
+            today = price_info.get("today", [])
+            tomorrow = price_info.get("tomorrow", [])
+            self.price_total = {item["startsAt"]: item["total"] for item in today + tomorrow}
+        except (KeyError, TypeError) as err:
+            _LOGGER.debug("Could not access price info for home %s: %s", self._home_id, err)
+            self.price_total = {}
+
         if self.has_active_subscription:
             self._update_has_real_time_consumption()
 
