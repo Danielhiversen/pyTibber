@@ -203,9 +203,41 @@ class TibberHome:
             _LOGGER.error("Could not get the data.")
             return
         self.info = data
-        today = self.info["viewer"]["home"]["currentSubscription"]["priceInfo"].get("today", [])
-        tomorrow = self.info["viewer"]["home"]["currentSubscription"]["priceInfo"].get("tomorrow", [])
-        self.price_total = {item["startsAt"]: item["total"] for item in today + tomorrow}
+
+        # Handle inactive homes where currentSubscription might be None
+        # Access currentSubscription, handle missing keys
+        try:
+            viewer = self.info["viewer"]
+        except KeyError as err:
+            _LOGGER.error("Missing 'viewer' key in info for home %s: %s", self._home_id, err)
+            self.price_total = {}
+            return
+        try:
+            home = viewer["home"]
+        except KeyError as err:
+            _LOGGER.error("Missing 'home' key in viewer for home %s: %s", self._home_id, err)
+            self.price_total = {}
+            return
+        current_subscription = home.get("currentSubscription")
+        if current_subscription is None:
+            _LOGGER.debug("No active subscription for home %s", self._home_id)
+            self.price_total = {}
+            return
+
+        price_info = current_subscription.get("priceInfo")
+        if price_info is None:
+            _LOGGER.debug("No price info available for home %s", self._home_id)
+            self.price_total = {}
+            return
+
+        today = price_info.get("today", [])
+        tomorrow = price_info.get("tomorrow", [])
+        try:
+            self.price_total = {item["startsAt"]: item["total"] for item in today + tomorrow}
+        except (KeyError, TypeError) as err:
+            _LOGGER.error("Malformed price info data for home %s: %s", self._home_id, err)
+            self.price_total = {}
+
         if self.has_active_subscription:
             self._update_has_real_time_consumption()
 
