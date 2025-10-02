@@ -208,19 +208,16 @@ class TibberHome:
         # Access currentSubscription, handle missing keys
         try:
             viewer = self.info["viewer"]
-        except KeyError as err:
-            _LOGGER.error("Missing 'viewer' key in info for home %s: %s", self._home_id, err)
-            self.price_total = {}
-            return
-        try:
             home = viewer["home"]
         except KeyError as err:
-            _LOGGER.error("Missing 'home' key in viewer for home %s: %s", self._home_id, err)
+            _LOGGER.error("Missing required key in API response for home %s: %s", self._home_id, err)
             self.price_total = {}
             return
-        
+
+        # Update real-time consumption capability status
         self._update_has_real_time_consumption()
 
+        # Extract price information
         current_subscription = home.get("currentSubscription")
         if current_subscription is None:
             _LOGGER.debug("No active subscription for home %s", self._home_id)
