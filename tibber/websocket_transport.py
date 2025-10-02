@@ -7,7 +7,6 @@ from ssl import SSLContext
 
 from gql.transport.exceptions import TransportClosed
 from gql.transport.websockets import WebsocketsTransport
-from websockets.asyncio.connection import State
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -31,8 +30,6 @@ class TibberWebsocketsTransport(WebsocketsTransport):
     @property
     def running(self) -> bool:
         """Is real time subscription running."""
-        # The parent class WebsocketsTransport uses _connected boolean to track connection state
-        # instead of exposing the raw websocket object
         return getattr(self, "_connected", False)
 
     async def _receive(self) -> str:
