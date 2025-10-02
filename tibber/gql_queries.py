@@ -130,63 +130,7 @@ UPDATE_CURRENT_PRICE = """
           }
         }
         """
-UPDATE_INFO = """
-        {
-          viewer {
-            home(id: "%s") {
-              appNickname
-              features {
-                  realTimeConsumptionEnabled
-                }
-              currentSubscription {
-                status
-              }
-              address {
-                address1
-                address2
-                address3
-                city
-                postalCode
-                country
-                latitude
-                longitude
-              }
-              meteringPointData {
-                consumptionEan
-                energyTaxType
-                estimatedAnnualConsumption
-                gridCompany
-                productionEan
-                vatType
-              }
-              owner {
-                name
-                isCompany
-                language
-                contactInfo {
-                  email
-                  mobile
-                }
-              }
-              timeZone
-              subscriptions {
-                id
-                status
-                validFrom
-                validTo
-                statusReason
-              }
-             currentSubscription {
-                    priceInfo {
-                      current {
-                        currency
-                      }
-                    }
-                  }
-                }
-              }
-            }
-        """
+
 UPDATE_INFO_PRICE = """
         {
           viewer {
