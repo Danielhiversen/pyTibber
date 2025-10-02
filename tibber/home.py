@@ -242,29 +242,63 @@ class TibberHome:
             self._update_has_real_time_consumption()
 
     def _update_has_real_time_consumption(self) -> None:
+        """Update real-time consumption capability status with debouncing.
+
+        This method implements a 1-hour debounce when real-time consumption
+        transitions from enabled to disabled, to avoid false positives from
+        temporary API issues or network glitches.
+
+        States:
+        - True: Real-time consumption is enabled
+        - False: Real-time consumption is disabled (confirmed after debounce)
+        - None: State is unknown or in debounce period
+        """
+        # Extract the API-reported state
         try:
             _has_real_time_consumption = self.info["viewer"]["home"]["features"]["realTimeConsumptionEnabled"]
         except (KeyError, TypeError):
+            # Can't determine state from API response
             self._has_real_time_consumption = None
             return
+
+        # First time initialization - accept API state as-is
         if self._has_real_time_consumption is None:
             self._has_real_time_consumption = _has_real_time_consumption
             return
 
+        # Case 1: Initial transition from enabled to disabled - start debounce
         if self._has_real_time_consumption is True and _has_real_time_consumption is False:
             now = dt.datetime.now(tz=dt.UTC)
-            if self._real_time_consumption_suggested_disabled is None:
-                self._real_time_consumption_suggested_disabled = now
-                self._has_real_time_consumption = None
-            elif now - self._real_time_consumption_suggested_disabled > dt.timedelta(hours=1):
-                self._real_time_consumption_suggested_disabled = None
-                self._has_real_time_consumption = False
-            else:
-                self._has_real_time_consumption = None
+            # Start debounce timer (only set once)
+            self._real_time_consumption_suggested_disabled = now
+            self._has_real_time_consumption = None  # Indeterminate during debounce
+            _LOGGER.debug("Real-time consumption disable detected for home %s, starting 1-hour debounce", self._home_id)
             return
 
+        # Case 2: During debounce period - check if we should confirm or continue waiting
+        if self._real_time_consumption_suggested_disabled is not None and _has_real_time_consumption is False:
+            now = dt.datetime.now(tz=dt.UTC)
+            # Check if debounce period has elapsed
+            if now - self._real_time_consumption_suggested_disabled > dt.timedelta(hours=1):
+                # Confirm the disable after debounce period
+                self._real_time_consumption_suggested_disabled = None
+                self._has_real_time_consumption = False
+                _LOGGER.info("Real-time consumption disabled confirmed for home %s after debounce", self._home_id)
+                return
+            # Still in debounce period
+            self._has_real_time_consumption = None
+            return
+
+        # Case 3: Any transition to enabled - clear debounce and enable immediately
         if _has_real_time_consumption is True:
+            if self._real_time_consumption_suggested_disabled is not None:
+                _LOGGER.debug("Real-time consumption re-enabled for home %s, clearing debounce", self._home_id)
             self._real_time_consumption_suggested_disabled = None
+            self._has_real_time_consumption = True
+            return
+
+        # Case 4: Stable state (False → False) - keep current state
+        # This handles the case where it's already disabled and stays disabled
         self._has_real_time_consumption = _has_real_time_consumption
 
     @property
