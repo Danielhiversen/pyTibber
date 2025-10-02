@@ -204,6 +204,8 @@ class TibberHome:
             return
         self.info = data
 
+        self._update_has_real_time_consumption()
+
         # Handle inactive homes where currentSubscription might be None
         # Access currentSubscription, handle missing keys
         try:
@@ -237,9 +239,6 @@ class TibberHome:
         except (KeyError, TypeError) as err:
             _LOGGER.error("Malformed price info data for home %s: %s", self._home_id, err)
             self.price_total = {}
-
-        if self.has_active_subscription:
-            self._update_has_real_time_consumption()
 
     def _update_has_real_time_consumption(self) -> None:
         try:
