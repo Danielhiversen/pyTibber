@@ -31,7 +31,9 @@ class TibberWebsocketsTransport(WebsocketsTransport):
     @property
     def running(self) -> bool:
         """Is real time subscription running."""
-        return hasattr(self, "websocket") and self.websocket is not None and self.websocket.state is State.OPEN
+        # The parent class WebsocketsTransport uses _connected boolean to track connection state
+        # instead of exposing the raw websocket object
+        return getattr(self, "_connected", False)
 
     async def _receive(self) -> str:
         """Wait the next message from the websocket connection."""
