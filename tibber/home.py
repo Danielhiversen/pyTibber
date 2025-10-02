@@ -240,7 +240,6 @@ class TibberHome:
             _LOGGER.error("Malformed price info data for home %s: %s", self._home_id, err)
             self.price_total = {}
 
-
     def _update_has_real_time_consumption(self) -> None:
         try:
             _has_real_time_consumption = self.info["viewer"]["home"]["features"]["realTimeConsumptionEnabled"]
