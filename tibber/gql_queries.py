@@ -148,10 +148,12 @@ UPDATE_INFO_PRICE = """
                   today {
                     total
                     startsAt
+                    level
                   }
                   tomorrow {
                     total
                     startsAt
+                    level
                   }
                 }
               }
