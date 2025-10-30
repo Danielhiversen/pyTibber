@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from gql import gql
 
-from .const import RESOLUTION_HOURLY
+from .const import RESOLUTION_DAILY, RESOLUTION_HOURLY, RESOLUTION_MONTHLY, RESOLUTION_WEEKLY
 from .gql_queries import (
     HISTORIC_DATA,
     HISTORIC_DATA_DATE,
@@ -512,21 +512,39 @@ class TibberHome:
         :param production: True to get production data instead of consumption
         """
         cons_or_prod_str = "production" if production else "consumption"
-        query = HISTORIC_DATA.format(
-            self.home_id,
-            cons_or_prod_str,
-            resolution,
-            n_data,
-            "profit" if production else "totalCost cost",
-            "",
-        )
-        if not (data := await self._tibber_control.execute(query, timeout=30)):
-            _LOGGER.error("Could not get the data.")
-            return []
-        data = data["viewer"]["home"][cons_or_prod_str]
-        if data is None:
-            return []
-        return data["nodes"]
+        res: list[dict[str, Any]] = []
+        if resolution == RESOLUTION_HOURLY:
+            max_n_data = 24 * 31
+        elif resolution == RESOLUTION_DAILY:
+            max_n_data = 31
+        elif resolution == RESOLUTION_WEEKLY:
+            max_n_data = 52
+        elif resolution == RESOLUTION_MONTHLY:
+            max_n_data = 12
+        else:
+            max_n_data = 1
+        cursor = ""
+        for _ in range(n_data // max_n_data + 1):
+            _n_data = min(max_n_data, n_data - len(res))
+            query = HISTORIC_DATA.format(
+                self.home_id,
+                cons_or_prod_str,
+                resolution,
+                _n_data,
+                "profit" if production else "totalCost cost",
+                cursor,
+            )
+            if not (data := await self._tibber_control.execute(query)):
+                _LOGGER.error("Could not get the data.")
+                continue
+            data = data["viewer"]["home"][cons_or_prod_str]
+            if data is None:
+                continue
+            res.extend(data["nodes"])
+            if len(res) >= n_data:
+                break
+            cursor = data["pageInfo"]["startCursor"]
+        return res
 
     async def get_historic_data_date(
         self,
