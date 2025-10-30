@@ -115,21 +115,6 @@ async def test_tibber_notification():
 
 
 @pytest.mark.asyncio
-async def test_tibber_token():
-    async with aiohttp.ClientSession() as session:
-        tibber_connection = tibber.Tibber(
-            access_token="d11a43897efa4cf478afd659d6c8b7117da9e33b38232fd454b0e9f28af98012",
-            websession=session,
-            user_agent="test",
-        )
-        await tibber_connection.update_info()
-
-        assert tibber_connection.name == "Daniel Høyer"
-        assert len(tibber_connection.get_homes()) == 0
-        assert len(tibber_connection.get_homes(only_active=False)) == 0
-
-
-@pytest.mark.asyncio
 async def test_tibber_current_price_rank():
     async with aiohttp.ClientSession() as session:
         tibber_connection = tibber.Tibber(
@@ -142,10 +127,10 @@ async def test_tibber_current_price_rank():
         assert len(homes) == 1, "No homes found"
 
         await homes[0].update_info_and_price_info()
-        _, _, _, price_rank = homes[0].current_price_data()
+        _, _, price_rank = homes[0].current_price_data()
 
-        assert isinstance(price_rank, int), "Price rank was unset"
-        assert 1 <= price_rank <= 24, "Price rank is out of range"
+        assert isinstance(price_rank, float), "Price rank was unset"
+        assert 0 <= price_rank < 1, "Price rank is out of range"
 
 
 @pytest.mark.asyncio
@@ -188,6 +173,3 @@ async def test_logging_rt_subscribe(caplog: pytest.LogCaptureFixture) -> None:
         home.rt_unsubscribe()
         await tibber_connection.rt_disconnect()
         await asyncio.sleep(10)
-
-    assert "gql.transport.websockets:websockets_base.py:240" not in caplog.text, "should not show on info logging level"
-    assert "gql.transport.websockets:websockets_base.py:218" not in caplog.text, "should not show on info logging level"

@@ -34,7 +34,7 @@ async def extract_response_data(response: ClientResponse) -> dict[Any, Any]:
     _LOGGER.debug("Response status: %s", response.status)
 
     if response.content_type != "application/json":
-        raise FatalHttpExceptionError(
+        raise RetryableHttpExceptionError(
             response.status,
             f"Unexpected content type: {response.content_type}",
             API_ERR_CODE_UNKNOWN,
@@ -54,6 +54,9 @@ async def extract_response_data(response: ClientResponse) -> dict[Any, Any]:
 
         if (error_code == "INTERNAL_SERVER_ERROR") & ("demo user" in error_message):
             raise NotForDemoUserError(response.status, error_message, error_code)
+
+        raise RetryableHttpExceptionError(response.status, message=error_message, extension_code=error_code)
+
     if response.status in HTTP_CODES_RETRIABLE:
         error_code, error_message = extract_error_details(result.get("errors", []), str(response.content))
 
