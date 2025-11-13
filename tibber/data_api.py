@@ -24,7 +24,6 @@ class TibberDataAPI:
         access_token: str,
         timeout: int = DEFAULT_TIMEOUT,
         websession: aiohttp.ClientSession | None = None,
-        ssl: bool = True,
         user_agent: str | None = None,
     ) -> None:
         """Initialize the Tibber Data API client.
@@ -32,11 +31,10 @@ class TibberDataAPI:
         :param access_token: The access token to access the Tibber Data API with.
         :param timeout: The timeout in seconds to use when communicating with the API.
         :param websession: The websession to use when communicating with the API.
-        :param ssl: SSL context to use.
         """
         owns_session = websession is None
         if websession is None:
-            websession = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl))
+            websession = aiohttp.ClientSession()
 
         self.websession = websession
         self._owns_session = owns_session
