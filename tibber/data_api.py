@@ -9,8 +9,13 @@ from typing import Any, TypeAlias
 
 import aiohttp
 
-from .const import DATA_API_ENDPOINT, DEFAULT_TIMEOUT, USERINFO_ENDPOINT
-from .exceptions import FatalHttpExceptionError, InvalidLoginError, RetryableHttpExceptionError
+from .const import DATA_API_ENDPOINT, DEFAULT_TIMEOUT, USERINFO_ENDPOINT, __version__
+from .exceptions import (
+    FatalHttpExceptionError,
+    InvalidLoginError,
+    RetryableHttpExceptionError,
+    UserAgentMissingError,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,13 +41,20 @@ class TibberDataAPI:
         """
         owns_session = websession is None
         if websession is None:
+            if user_agent is None:
+                raise UserAgentMissingError("Please provide value for HTTP user agent")
             websession = aiohttp.ClientSession()
+        elif user_agent is None:
+            user_agent = websession.headers.get(aiohttp.hdrs.USER_AGENT)
+
+        if user_agent is None:
+            raise UserAgentMissingError("Please provide value for HTTP user agent")
 
         self.websession = websession
         self._owns_session = owns_session
         self.timeout = timeout
         self._access_token = access_token
-        self._user_agent = user_agent
+        self._user_agent = f"{user_agent} pyTibber/{__version__} "
 
     async def close_connection(self) -> None:
         """Close the Data API connection."""
@@ -85,22 +97,38 @@ class TibberDataAPI:
                     return await response.json()
                 if response.status == HTTPStatus.UNAUTHORIZED:
                     raise InvalidLoginError(response.status, "Invalid token")
-                if response.status in (HTTPStatus.BAD_REQUEST, HTTPStatus.NOT_FOUND):
-                    error_data = await response.json() if response.content_type == "application/json" else {}
+                detail, extension_code = await self._read_error_response(response)
+                if response.status == HTTPStatus.BAD_REQUEST:
                     raise FatalHttpExceptionError(
                         response.status,
-                        error_data.get("detail", "Bad Request"),
-                        error_data.get("type", "BAD_REQUEST"),
+                        detail,
+                        extension_code or "BAD_REQUEST",
+                    )
+                if response.status == HTTPStatus.NOT_FOUND:
+                    raise FatalHttpExceptionError(
+                        response.status,
+                        detail,
+                        extension_code or "NOT_FOUND",
                     )
                 if response.status in (HTTPStatus.TOO_MANY_REQUESTS, HTTPStatus.PRECONDITION_FAILED):
-                    error_data = await response.json() if response.content_type == "application/json" else {}
                     raise RetryableHttpExceptionError(
                         response.status,
-                        error_data.get("detail", "Rate limited"),
-                        error_data.get("type", "RATE_LIMITED"),
+                        detail or "Rate limited",
+                        extension_code or "RATE_LIMITED",
                     )
+                if response.status >= HTTPStatus.INTERNAL_SERVER_ERROR:
+                    raise RetryableHttpExceptionError(response.status, detail, extension_code)
+                if (
+                    response.status >= HTTPStatus.BAD_REQUEST
+                    and response.status < HTTPStatus.INTERNAL_SERVER_ERROR
+                ):
+                    raise FatalHttpExceptionError(response.status, detail, extension_code)
                 _LOGGER.error("Unexpected HTTP status: %s", response.status)
-                return None
+                raise FatalHttpExceptionError(
+                    response.status,
+                    detail,
+                    extension_code,
+                )
 
         except (aiohttp.ClientError, TimeoutError):
             if retry > 0:
@@ -124,6 +152,34 @@ class TibberDataAPI:
                 err.message,
             )
             raise
+
+    async def _read_error_response(self, response: aiohttp.ClientResponse) -> tuple[str, str]:
+        """Extract detail and extension code from an error HTTP response."""
+        extension_code = f"HTTP_{response.status}"
+        detail: str | None = response.reason
+
+        if response.content_type == "application/json":
+            try:
+                error_data = await response.json()
+            except (aiohttp.ContentTypeError, ValueError):
+                error_data = {}
+            else:
+                detail = (
+                    error_data.get("detail")
+                    or error_data.get("error_description")
+                    or error_data.get("error")
+                    or detail
+                )
+                extension_code = error_data.get("type") or extension_code
+                return detail or "HTTP error", extension_code
+
+        try:
+            text = await response.text()
+        except (aiohttp.ClientError, UnicodeDecodeError):
+            text = None
+        if text:
+            detail = text
+        return detail or "HTTP error", extension_code
 
     async def get_homes(self) -> list[dict[str, Any]]:
         """Get all homes for the user."""
