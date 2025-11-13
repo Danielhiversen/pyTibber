@@ -35,7 +35,8 @@ async def test_get_homes_uses_data_api(data_api: TibberDataAPI, monkeypatch: pyt
 
 @pytest.mark.asyncio
 async def test_get_devices_for_home_returns_raw_devices(
-    data_api: TibberDataAPI, monkeypatch: pytest.MonkeyPatch,
+    data_api: TibberDataAPI,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Ensure device list is returned as received from the API."""
     home_id = "home-1"
@@ -89,7 +90,8 @@ async def test_get_device_returns_tibber_device(data_api: TibberDataAPI, monkeyp
 
 @pytest.mark.asyncio
 async def test_get_all_devices_flattens_device_lists(
-    data_api: TibberDataAPI, monkeypatch: pytest.MonkeyPatch,
+    data_api: TibberDataAPI,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """get_all_devices should merge devices from all homes keyed by device id."""
     homes_payload = {"homes": [{"id": "home-1"}, {"id": "home-2"}]}

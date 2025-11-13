@@ -16,7 +16,6 @@ _LOGGER = logging.getLogger(__name__)
 SensorValue: TypeAlias = bool | int | float | str | None
 
 
-
 class TibberDataAPI:
     """Client for Tibber Data API REST endpoints."""
 
@@ -32,6 +31,7 @@ class TibberDataAPI:
         :param access_token: The access token to access the Tibber Data API with.
         :param timeout: The timeout in seconds to use when communicating with the API.
         :param websession: The websession to use when communicating with the API.
+        :param user_agent: Optional user agent string attached to outgoing requests.
         """
         owns_session = websession is None
         if websession is None:
@@ -148,7 +148,6 @@ class TibberDataAPI:
             return None
         return TibberDevice(response)
 
-
     async def get_all_devices(self) -> dict[str, TibberDevice]:
         """Get all devices for the user."""
         devices: dict[str, TibberDevice] = {}
@@ -158,7 +157,6 @@ class TibberDataAPI:
                 if device is not None:
                     devices[device.id] = device
         return devices
-
 
     async def get_userinfo(self) -> dict[str, Any]:
         """Return OpenID Connect user info for the current access token."""
@@ -181,11 +179,11 @@ class TibberDataAPI:
                 detail: str | None = None
                 if response.content_type == "application/json":
                     error_data = await response.json()
-                    detail = (
-                        error_data.get("error_description")
-                        or error_data.get("detail")
-                        or error_data.get("error")
-                    )
+                    detail = error_data.get("error_description")
+                    if detail is None:
+                        detail = error_data.get("detail")
+                    if detail is None:
+                        detail = error_data.get("error")
                 else:
                     detail = await response.text()
 
@@ -263,7 +261,7 @@ class Sensor:
     @property
     def description(self) -> str:
         """Return the device capability description."""
-        description = self._data["description"]
-        if description is None:
+        description = self._data.get("description")
+        if not description:
             return ""
         return f"{description[0].upper()}{description[1:]}"
