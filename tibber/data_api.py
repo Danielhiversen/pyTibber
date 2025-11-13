@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import logging
 from http import HTTPStatus
-from dataclasses import dataclass
-from typing import Any, Iterator
+from typing import Any, TypeAlias
 
 import aiohttp
 
@@ -13,6 +12,8 @@ from .const import DATA_API_ENDPOINT, DEFAULT_TIMEOUT, USERINFO_ENDPOINT
 from .exceptions import FatalHttpExceptionError, InvalidLoginError, RetryableHttpExceptionError
 
 _LOGGER = logging.getLogger(__name__)
+
+SensorValue: TypeAlias = bool | int | float | str | None
 
 
 
@@ -252,7 +253,7 @@ class Sensor:
         return self._data["unit"]
 
     @property
-    def value(self) -> Any:
+    def value(self) -> SensorValue:
         """Return the device capability value."""
         return self._data["value"]
 
