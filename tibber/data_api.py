@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from http import HTTPStatus
 from typing import Any, TypeAlias
@@ -150,10 +151,20 @@ class TibberDataAPI:
 
     async def get_all_devices(self) -> dict[str, TibberDevice]:
         """Get all devices for the user."""
+        homes = await self.get_homes()
+        if not homes:
+            return {}
+
         devices: dict[str, TibberDevice] = {}
-        for home in await self.get_homes():
-            for raw_device in await self.get_devices_for_home(home["id"]):
-                device = await self.get_device(home["id"], raw_device["id"])
+        for home in homes:
+            raw_devices = await self.get_devices_for_home(home["id"])
+            if not raw_devices:
+                continue
+            detailed_devices = await asyncio.gather(
+                *(self.get_device(home["id"], raw_device["id"]) for raw_device in raw_devices),
+                return_exceptions=False,
+            )
+            for device in detailed_devices:
                 if device is not None:
                     devices[device.id] = device
         return devices
