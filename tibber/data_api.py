@@ -161,12 +161,13 @@ class TibberDataAPI:
             except (aiohttp.ContentTypeError, ValueError):
                 error_data = {}
             else:
-                detail = (
+                preferred_detail = (
                     error_data.get("detail")
                     or error_data.get("error_description")
                     or error_data.get("error")
-                    or detail
                 )
+                if preferred_detail is not None:
+                    detail = preferred_detail
                 extension_code = error_data.get("type") or extension_code
                 return detail or "HTTP error", extension_code
 
