@@ -138,12 +138,15 @@ class TibberDataAPI:
             return []
         return response.get("devices", [])
 
-    async def get_device(self, home_id: str, device_id: str) -> dict[str, Any] | None:
+    async def get_device(self, home_id: str, device_id: str) -> TibberDevice | None:
         """Get detailed information about a specific device."""
         try:
-            return TibberDevice(await self._make_request("GET", f"/v1/homes/{home_id}/devices/{device_id}"))
+            response = await self._make_request("GET", f"/v1/homes/{home_id}/devices/{device_id}")
         except FatalHttpExceptionError:
             return None
+        if response is None:
+            return None
+        return TibberDevice(response)
 
 
     async def get_all_devices(self) -> dict[str, TibberDevice]:

@@ -35,7 +35,7 @@ async def test_get_homes_uses_data_api(data_api: TibberDataAPI, monkeypatch: pyt
 
 @pytest.mark.asyncio
 async def test_get_devices_for_home_returns_raw_devices(
-    data_api: TibberDataAPI, monkeypatch: pytest.MonkeyPatch
+    data_api: TibberDataAPI, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Ensure device list is returned as received from the API."""
     home_id = "home-1"
@@ -51,7 +51,7 @@ async def test_get_devices_for_home_returns_raw_devices(
                 "info": {"name": "Device 2", "brand": "Brand", "model": "Model"},
                 "capabilities": [],
             },
-        ]
+        ],
     }
     mocked_make_request = AsyncMock(return_value=mock_devices)
     monkeypatch.setattr(data_api, "_make_request", mocked_make_request)
@@ -89,20 +89,20 @@ async def test_get_device_returns_tibber_device(data_api: TibberDataAPI, monkeyp
 
 @pytest.mark.asyncio
 async def test_get_all_devices_flattens_device_lists(
-    data_api: TibberDataAPI, monkeypatch: pytest.MonkeyPatch
+    data_api: TibberDataAPI, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """get_all_devices should merge devices from all homes keyed by device id."""
     homes_payload = {"homes": [{"id": "home-1"}, {"id": "home-2"}]}
     devices_payload = {
         "home-1": {
             "devices": [
-                {"id": "device-1", "info": {"name": "D1", "brand": "B", "model": "M"}, "capabilities": []}
-            ]
+                {"id": "device-1", "info": {"name": "D1", "brand": "B", "model": "M"}, "capabilities": []},
+            ],
         },
         "home-2": {
             "devices": [
-                {"id": "device-2", "info": {"name": "D2", "brand": "B", "model": "M"}, "capabilities": []}
-            ]
+                {"id": "device-2", "info": {"name": "D2", "brand": "B", "model": "M"}, "capabilities": []},
+            ],
         },
     }
     device_detail_payload = {
@@ -121,10 +121,10 @@ async def test_get_all_devices_flattens_device_lists(
     }
 
     async def fake_make_request(
-        method: str,
+        _method: str,
         endpoint: str,
-        params: dict[str, Any] | None = None,
-        retry: int = 3,
+        _params: dict[str, Any] | None = None,
+        _retry: int = 3,
     ) -> dict[str, Any]:
         if endpoint == "/v1/homes":
             return homes_payload
