@@ -3,9 +3,11 @@
 from http import HTTPStatus
 from typing import Final
 
-__version__ = "0.32.2"
+__version__ = "0.33.0"
 
 API_ENDPOINT: Final = "https://api.tibber.com/v1-beta/gql"
+DATA_API_ENDPOINT: Final = "https://data-api.tibber.com"
+USERINFO_ENDPOINT: Final = "https://thewall.tibber.com/connect/userinfo"
 DEFAULT_TIMEOUT: Final = 10
 DEMO_TOKEN: Final = "3A77EECF61BD445F47241A5A36202185C35AF3AF58609E19B53F3A8872AD7BE1-1"
 
