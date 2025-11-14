@@ -145,9 +145,9 @@ class TibberDataAPI:
         detail, extension_code = await self._read_error_response(response)
         response.close()
 
-        fatal_codes = {
-            HTTPStatus.BAD_REQUEST: "BAD_REQUEST",
-            HTTPStatus.NOT_FOUND: "NOT_FOUND",
+        fatal_codes: dict[int, str] = {
+            HTTPStatus.BAD_REQUEST.value: "BAD_REQUEST",
+            HTTPStatus.NOT_FOUND.value: "NOT_FOUND",
         }
         if status in fatal_codes:
             raise FatalHttpExceptionError(
