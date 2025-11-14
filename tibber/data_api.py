@@ -162,9 +162,7 @@ class TibberDataAPI:
                 error_data = {}
             else:
                 preferred_detail = (
-                    error_data.get("detail")
-                    or error_data.get("error_description")
-                    or error_data.get("error")
+                    error_data.get("detail") or error_data.get("error_description") or error_data.get("error")
                 )
                 if preferred_detail is not None:
                     detail = preferred_detail
@@ -198,6 +196,7 @@ class TibberDataAPI:
         try:
             response = await self._make_request("GET", f"/v1/homes/{home_id}/devices/{device_id}")
         except FatalHttpExceptionError:
+            _LOGGER.error("Error getting device %s for home %s", device_id, home_id)
             return None
         if response is None:
             return None
@@ -211,7 +210,9 @@ class TibberDataAPI:
 
         devices: dict[str, TibberDevice] = {}
         for home in homes:
+            _LOGGER.debug("home data: %s", home)
             raw_devices = await self.get_devices_for_home(home["id"])
+            _LOGGER.debug("raw devices data: %s", raw_devices)
             if not raw_devices:
                 continue
             detailed_devices = await asyncio.gather(
