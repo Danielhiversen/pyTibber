@@ -86,6 +86,7 @@ async def test_get_device_returns_tibber_device(data_api: TibberDataAPI, monkeyp
     assert device.name == "Device 1"
     assert device.brand == "Brand"
     assert device.model == "Model"
+    assert device.home_id == home_id
 
 
 @pytest.mark.asyncio
@@ -142,6 +143,7 @@ async def test_get_all_devices_flattens_device_lists(
 
     assert set(devices.keys()) == {"device-1", "device-2"}
     assert all(isinstance(value, TibberDevice) for value in devices.values())
+    assert {value.home_id for value in devices.values()} == {"home-1", "home-2"}
 
 
 def test_tibber_device_properties_match_payload() -> None:
@@ -155,11 +157,12 @@ def test_tibber_device_properties_match_payload() -> None:
         ],
     }
 
-    device = TibberDevice(device_data)
+    device = TibberDevice(device_data, home_id="home-1")
 
     assert device.id == "test-device-id"
     assert device.external_id == "test-external-id"
     assert device.name == "Test Device"
     assert device.brand == "Test Brand"
     assert device.model == "Test Model"
+    assert device.home_id == "home-1"
     assert [sensor.id for sensor in device.sensors] == ["sensor-1"]

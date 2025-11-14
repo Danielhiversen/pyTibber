@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import logging
 from http import HTTPStatus
 from typing import Any, TypeAlias
@@ -16,6 +17,7 @@ from .exceptions import (
     RetryableHttpExceptionError,
     UserAgentMissingError,
 )
+from .response_handler import extract_response_data
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -55,6 +57,11 @@ class TibberDataAPI:
         self.timeout = timeout
         self._access_token = access_token
         self._user_agent = f"{user_agent} pyTibber/{__version__} "
+        self._devices: dict[str, TibberDevice] = {}
+
+    def set_access_token(self, access_token: str) -> None:
+        """Set the access token."""
+        self._access_token = access_token
 
     async def close_connection(self) -> None:
         """Close the Data API connection."""
@@ -85,47 +92,22 @@ class TibberDataAPI:
         if self._user_agent:
             headers[aiohttp.hdrs.USER_AGENT] = self._user_agent
 
+        response: aiohttp.ClientResponse | None = None
         try:
-            async with self.websession.request(
+            response = await self.websession.request(
                 method,
                 url,
                 headers=headers,
                 params=params,
                 timeout=aiohttp.ClientTimeout(total=self.timeout),
-            ) as response:
-                if response.status == HTTPStatus.OK:
-                    return await response.json()
-                if response.status == HTTPStatus.UNAUTHORIZED:
-                    raise InvalidLoginError(response.status, "Invalid token")
-                detail, extension_code = await self._read_error_response(response)
-                if response.status == HTTPStatus.BAD_REQUEST:
-                    raise FatalHttpExceptionError(
-                        response.status,
-                        detail,
-                        extension_code or "BAD_REQUEST",
-                    )
-                if response.status == HTTPStatus.NOT_FOUND:
-                    raise FatalHttpExceptionError(
-                        response.status,
-                        detail,
-                        extension_code or "NOT_FOUND",
-                    )
-                if response.status in (HTTPStatus.TOO_MANY_REQUESTS, HTTPStatus.PRECONDITION_FAILED):
-                    raise RetryableHttpExceptionError(
-                        response.status,
-                        detail or "Rate limited",
-                        extension_code or "RATE_LIMITED",
-                    )
-                if response.status >= HTTPStatus.INTERNAL_SERVER_ERROR:
-                    raise RetryableHttpExceptionError(response.status, detail, extension_code)
-                if response.status >= HTTPStatus.BAD_REQUEST and response.status < HTTPStatus.INTERNAL_SERVER_ERROR:
-                    raise FatalHttpExceptionError(response.status, detail, extension_code)
-                _LOGGER.error("Unexpected HTTP status: %s", response.status)
-                raise FatalHttpExceptionError(
-                    response.status,
-                    detail,
-                    extension_code,
-                )
+            )
+            status = response.status
+            if status == HTTPStatus.OK:
+                data = await extract_response_data(response)
+                response.close()
+                return data
+            await self._handle_error_response(response)
+            return None
 
         except (aiohttp.ClientError, TimeoutError):
             if retry > 0:
@@ -149,6 +131,44 @@ class TibberDataAPI:
                 err.message,
             )
             raise
+        finally:
+            if response is not None and not response.closed:
+                response.close()
+
+    async def _handle_error_response(self, response: aiohttp.ClientResponse) -> None:
+        """Handle non-OK HTTP responses from the Data API."""
+        status = response.status
+        if status == HTTPStatus.UNAUTHORIZED:
+            response.close()
+            raise InvalidLoginError(status, "Invalid token")
+
+        detail, extension_code = await self._read_error_response(response)
+        response.close()
+
+        fatal_codes = {
+            HTTPStatus.BAD_REQUEST: "BAD_REQUEST",
+            HTTPStatus.NOT_FOUND: "NOT_FOUND",
+        }
+        if status in fatal_codes:
+            raise FatalHttpExceptionError(
+                status,
+                detail,
+                extension_code or fatal_codes[status],
+            )
+        if status in (HTTPStatus.TOO_MANY_REQUESTS, HTTPStatus.PRECONDITION_FAILED):
+            self._rate_limited_until = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=self.timeout)
+            raise RetryableHttpExceptionError(
+                status,
+                detail or "Rate limited",
+                extension_code or "RATE_LIMITED",
+            )
+        if status >= HTTPStatus.INTERNAL_SERVER_ERROR:
+            raise RetryableHttpExceptionError(status, detail, extension_code)
+        if status >= HTTPStatus.BAD_REQUEST and status < HTTPStatus.INTERNAL_SERVER_ERROR:
+            raise FatalHttpExceptionError(status, detail, extension_code)
+
+        _LOGGER.error("Unexpected HTTP status: %s", status)
+        raise FatalHttpExceptionError(status, detail, extension_code)
 
     async def _read_error_response(self, response: aiohttp.ClientResponse) -> tuple[str, str]:
         """Extract detail and extension code from an error HTTP response."""
@@ -200,7 +220,7 @@ class TibberDataAPI:
             return None
         if response is None:
             return None
-        return TibberDevice(response)
+        return TibberDevice(response, home_id)
 
     async def get_all_devices(self) -> dict[str, TibberDevice]:
         """Get all devices for the user."""
@@ -215,14 +235,20 @@ class TibberDataAPI:
             _LOGGER.debug("raw devices data: %s", raw_devices)
             if not raw_devices:
                 continue
-            detailed_devices = await asyncio.gather(
-                *(self.get_device(home["id"], raw_device["id"]) for raw_device in raw_devices),
-                return_exceptions=False,
-            )
-            for device in detailed_devices:
+            for raw_device in raw_devices:
+                device = await self.get_device(home["id"], raw_device["id"])
                 if device is not None:
                     devices[device.id] = device
+        self._devices = devices
         return devices
+
+    async def update_devices(self) -> dict[str, TibberDevice]:
+        """Update the devices."""
+        tasks = [self.get_device(device.home_id, device.id) for device in self._devices.values()]
+        for device in await asyncio.gather(*tasks, return_exceptions=False):
+            if device is not None:
+                self._devices[device.id] = device
+        return self._devices
 
     async def get_userinfo(self) -> dict[str, Any]:
         """Return OpenID Connect user info for the current access token."""
@@ -266,10 +292,16 @@ class TibberDataAPI:
 class TibberDevice:
     """Represents a Tibber device from the Data API."""
 
-    def __init__(self, device_data: dict[str, Any]) -> None:
+    def __init__(self, device_data: dict[str, Any], home_id: str) -> None:
         """Initialize the device."""
         self._data = device_data
         self._sensors = [Sensor(capability) for capability in device_data["capabilities"]]
+        self._home_id = home_id
+
+    @property
+    def home_id(self) -> str:
+        """Return the home ID."""
+        return self._home_id
 
     @property
     def id(self) -> str:
