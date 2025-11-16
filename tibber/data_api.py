@@ -362,4 +362,8 @@ class Sensor:
         description = self._data.get("description")
         if not description:
             return ""
-        return f"{description[0].upper()}{description[1:]}"
+        return description.capitalize()
+
+    def __repr__(self) -> str:
+        """Return the representation of the sensor."""
+        return f"Sensor(id={self.id}, unit={self.unit}, value={self.value}, description={self.description})"
