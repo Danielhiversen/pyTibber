@@ -11,6 +11,9 @@ from websockets.asyncio.connection import State
 
 _LOGGER = logging.getLogger(__name__)
 
+# Reduce verbose logging from gql websocket transport
+logging.getLogger("gql.transport.websockets").setLevel(logging.WARNING)
+
 
 class TibberWebsocketsTransport(WebsocketsTransport):
     """Tibber websockets transport."""
