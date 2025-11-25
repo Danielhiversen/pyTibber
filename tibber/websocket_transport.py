@@ -16,7 +16,12 @@ class TibberWebsocketsTransport(WebsocketsTransport):
     """Tibber websockets transport."""
 
     def __init__(self, url: str, access_token: str, user_agent: str, ssl: SSLContext | bool = True) -> None:
-        """Initialize TibberWebsocketsTransport."""
+        """Initialize TibberWebsocketsTransport.
+        Configures the gql.transport.websockets logger to WARNING level to suppress
+        verbose INFO-level messages (<<< and >>> websocket traffic logs).
+        """
+        logging.getLogger("gql.transport.websockets").setLevel(logging.WARNING)
+
         super().__init__(
             url=url,
             init_payload={"token": access_token},
