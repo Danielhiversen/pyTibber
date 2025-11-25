@@ -21,7 +21,7 @@ class TibberWebsocketsTransport(WebsocketsTransport):
         verbose INFO-level messages (<<< and >>> websocket traffic logs).
         """
         logging.getLogger("gql.transport.websockets").setLevel(logging.WARNING)
-        
+
         super().__init__(
             url=url,
             init_payload={"token": access_token},
