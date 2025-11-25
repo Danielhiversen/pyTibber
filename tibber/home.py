@@ -544,6 +544,8 @@ class TibberHome:
             if len(res) >= n_data:
                 break
             cursor = data["pageInfo"]["startCursor"]
+            if cursor is None:
+                break
         return res
 
     async def get_historic_data_date(
