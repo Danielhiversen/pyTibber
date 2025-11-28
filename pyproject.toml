@@ -19,7 +19,7 @@ classifiers = [
 ]
 dependencies = [
   "aiohttp>=3.0.6",
-  "gql>=3.5.0",
+  "gql==3.5.0",
   "websockets>=14.0.0",
 ]
 dynamic = ["version"]
