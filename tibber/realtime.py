@@ -54,12 +54,8 @@ class TibberRT:
             home.rt_unsubscribe()
         if self.sub_manager is None:
             return
-        try:
-            if not hasattr(self.sub_manager, "session"):
-                return
-            await self.sub_manager.close_async()
-        finally:
-            self.sub_manager = None
+        await self._close_sub_manager()
+
 
     async def connect(self) -> None:
         """Start subscription manager."""
@@ -136,11 +132,7 @@ class TibberRT:
                 self.sub_manager.transport.reconnect_at,
             )
 
-            try:
-                if hasattr(self.sub_manager, "session"):
-                    await self.sub_manager.close_async()
-            except Exception:
-                _LOGGER.exception("Error in watchdog close")
+            await self._close_sub_manager()
 
             if not self._watchdog_running:
                 _LOGGER.debug("Watchdog: Stopping")
@@ -185,11 +177,16 @@ class TibberRT:
     @property
     def subscription_running(self) -> bool:
         """Is real time subscription running."""
+        if self.sub_manager is None:
+            return False
+        if not isinstance(self.sub_manager.transport, TibberWebsocketsTransport):
+            return False
+        if not self.sub_manager.transport.running:
+            return False
+        # Check if client supports subscriptions (either via session or directly)
         return (
-            self.sub_manager is not None
-            and isinstance(self.sub_manager.transport, TibberWebsocketsTransport)
-            and self.sub_manager.transport.running
-            and hasattr(self.sub_manager, "session")
+            hasattr(self.sub_manager, "subscribe")
+            or (hasattr(self.sub_manager, "session") and hasattr(self.sub_manager.session, "subscribe"))
         )
 
     @property
@@ -210,3 +207,18 @@ class TibberRT:
                     ssl=self._ssl_context,
                 ),
             )
+
+
+    async def _close_sub_manager(self) -> None:
+        """Close the subscription manager."""
+        try:
+            if self.sub_manager is None:
+                return
+            if hasattr(self.sub_manager, "close_async"):
+                await self.sub_manager.close_async()
+            elif hasattr(self.sub_manager, "close"):
+                await self.sub_manager.close()
+        except Exception:
+            _LOGGER.debug("Error closing sub_manager", exc_info=True)
+        finally:
+            self.sub_manager = None
