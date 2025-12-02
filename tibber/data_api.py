@@ -334,6 +334,11 @@ class TibberDevice:
         return self._data["info"]["model"]
 
 
+    def __repr__(self) -> str:
+        """Return the representation of the device."""
+        return f"TibberDevice(id={self.id}, name={self.name}, brand={self.brand}, model={self.model})"
+
+
 class Sensor:
     """Represents a Tibber device capability from the Data API."""
 
@@ -349,12 +354,12 @@ class Sensor:
     @property
     def unit(self) -> str:
         """Return the device capability unit."""
-        return self._data["unit"]
+        return self._data.get("unit")
 
     @property
     def value(self) -> SensorValue:
         """Return the device capability value."""
-        return self._data["value"]
+        return self._data.get("value")
 
     @property
     def description(self) -> str:
