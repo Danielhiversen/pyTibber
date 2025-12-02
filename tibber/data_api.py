@@ -333,7 +333,6 @@ class TibberDevice:
         """Return the device model."""
         return self._data["info"]["model"]
 
-
     def __repr__(self) -> str:
         """Return the representation of the device."""
         return f"TibberDevice(id={self.id}, name={self.name}, brand={self.brand}, model={self.model})"
