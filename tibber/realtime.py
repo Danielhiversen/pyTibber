@@ -182,7 +182,7 @@ class TibberRT:
             return False
         if not self.sub_manager.transport.running:
             return False
-        # Check if client supports subscriptions (either via session or directly)
+        # Check if client supports subscriptions (directly on client or via its session attribute)
         return hasattr(self.sub_manager, "subscribe") or (
             hasattr(self.sub_manager, "session") and hasattr(self.sub_manager.session, "subscribe")
         )
