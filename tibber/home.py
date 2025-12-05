@@ -382,7 +382,7 @@ class TibberHome:
                 return round(price_total, 3), price_time, price_rank
         return None, None, None
 
-    async def rt_subscribe(self, callback: Callable[..., Any]) -> None:
+    async def rt_subscribe(self, callback: Callable[..., Any]) -> None:  # noqa: PLR0915
         """Connect to Tibber and subscribe to Tibber real time subscription.
 
         :param callback: The function to call when data is received.
@@ -436,11 +436,15 @@ class TibberHome:
                 return
 
             try:
-                session = self._tibber_control.realtime.sub_manager.session
-                if not hasattr(session, "subscribe"):
-                    _LOGGER.error("Session does not support subscribe method")
+                client = self._tibber_control.realtime.sub_manager
+                if hasattr(client, "subscribe"):
+                    subscribe_method: Any = client.subscribe
+                elif hasattr(client, "session") and hasattr(client.session, "subscribe"):
+                    subscribe_method = client.session.subscribe  # type: ignore[assignment]
+                else:
+                    _LOGGER.error("Client does not support subscribe method")
                     return
-                async for _data in session.subscribe(
+                async for _data in subscribe_method(  # type: ignore[attr-defined]
                     gql(LIVE_SUBSCRIBE % self.home_id),
                 ):
                     data = {"data": _data}
