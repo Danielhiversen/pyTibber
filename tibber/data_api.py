@@ -179,7 +179,7 @@ class TibberDataAPI:
             try:
                 error_data = await response.json()
             except (aiohttp.ContentTypeError, ValueError):
-                error_data = {}
+                pass
             else:
                 preferred_detail = (
                     error_data.get("detail") or error_data.get("error_description") or error_data.get("error")
