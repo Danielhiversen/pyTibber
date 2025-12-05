@@ -56,7 +56,6 @@ class TibberRT:
             return
         await self._close_sub_manager()
 
-
     async def connect(self) -> None:
         """Start subscription manager."""
         self._create_sub_manager()
@@ -184,9 +183,8 @@ class TibberRT:
         if not self.sub_manager.transport.running:
             return False
         # Check if client supports subscriptions (either via session or directly)
-        return (
-            hasattr(self.sub_manager, "subscribe")
-            or (hasattr(self.sub_manager, "session") and hasattr(self.sub_manager.session, "subscribe"))
+        return hasattr(self.sub_manager, "subscribe") or (
+            hasattr(self.sub_manager, "session") and hasattr(self.sub_manager.session, "subscribe")
         )
 
     @property
@@ -208,7 +206,6 @@ class TibberRT:
                 ),
             )
 
-
     async def _close_sub_manager(self) -> None:
         """Close the subscription manager."""
         try:
@@ -218,7 +215,8 @@ class TibberRT:
                 await self.sub_manager.close_async()
             elif hasattr(self.sub_manager, "close"):
                 await self.sub_manager.close()
-        except Exception:
+        except Exception:  # noqa: BLE001
+            # Catch all other exceptions as the gql client may raise various exceptions
             _LOGGER.debug("Error closing sub_manager", exc_info=True)
         finally:
             self.sub_manager = None
