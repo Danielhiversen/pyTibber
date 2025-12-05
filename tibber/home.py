@@ -437,12 +437,10 @@ class TibberHome:
 
             try:
                 client = self._tibber_control.realtime.sub_manager
-                # Try new API first (subscribe on client directly)
                 if hasattr(client, "subscribe"):
-                    subscribe_method = client.subscribe
-                # Fall back to old API (session.subscribe)
+                    subscribe_method: Any = client.subscribe
                 elif hasattr(client, "session") and hasattr(client.session, "subscribe"):
-                    subscribe_method = client.session.subscribe
+                    subscribe_method = client.session.subscribe  # type: ignore[assignment]
                 else:
                     _LOGGER.error("Client does not support subscribe method")
                     return
