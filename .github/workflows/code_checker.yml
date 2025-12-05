@@ -39,7 +39,7 @@ jobs:
         run: |
             pytest
 
-  validate-gql-3.5.0:
+  validate-gql-350:
     runs-on: "ubuntu-latest"
     strategy:
       matrix:
