@@ -28,7 +28,7 @@ jobs:
         run: |
             pip install -r requirements.txt
             pip install mypy pre-commit pytest pytest-asyncio pytest-cov ruff
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: ~/.cache/pre-commit
           key: pre-commit-3|${{ env.pythonLocation }}|${{ hashFiles('.pre-commit-config.yaml') }}
@@ -61,7 +61,7 @@ jobs:
             pip install -r requirements.txt
             pip install gql==3.5.0
             pip install mypy pre-commit pytest pytest-asyncio pytest-cov ruff
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: ~/.cache/pre-commit
           key: pre-commit-3|${{ env.pythonLocation }}|${{ hashFiles('.pre-commit-config.yaml') }}
