@@ -39,6 +39,27 @@ disallow_incomplete_defs = true
 implicit_optional = true
 strict_optional = false
 
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"
+asyncio_mode = "auto"
+
+[tool.coverage]
+run.branch = true
+paths.source = [
+  "tibber",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+  "pragma: no cover",
+  "@overload",
+  "def __repr__",
+  "if TYPE_CHECKING",
+  "raise NotImplementedError",
+  "raise RuntimeError",
+  'if __name__ == "__main__":',
+]
+
 [tool.ruff]
 line-length = 120
 target-version = "py311"
