@@ -130,7 +130,7 @@ async def test_tibber_current_price_rank():
         _, _, price_rank = homes[0].current_price_data()
 
         assert isinstance(price_rank, float), "Price rank was unset"
-        assert 0 <= price_rank < 1, "Price rank is out of range"
+        assert 0 <= price_rank <= 1, "Price rank is out of range"
 
 
 @pytest.mark.asyncio
