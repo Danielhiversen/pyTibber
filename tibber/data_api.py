@@ -237,8 +237,10 @@ class TibberDataAPI:
                 continue
             for raw_device in raw_devices:
                 device = await self.get_device(home["id"], raw_device["id"])
-                if device is not None:
-                    devices[device.id] = device
+                if device is None:
+                    _LOGGER.error("Error getting device %s", raw_device)
+                    continue
+                devices[device.id] = device
         self._devices = devices
         return devices
 
