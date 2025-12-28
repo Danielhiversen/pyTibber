@@ -136,7 +136,7 @@ UPDATE_INFO_PRICE = """
           viewer {
             home(id: "%s") {
               currentSubscription {
-                priceInfo(resolution: QUARTER_HOURLY) {
+                priceInfo(resolution: %s) {
                   current {
                     currency
                     energy
