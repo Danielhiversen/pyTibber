@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
+import random
 from http import HTTPStatus
 from typing import Any, TypeAlias
 
@@ -20,6 +21,8 @@ from .exceptions import (
 from .response_handler import extract_response_data
 
 _LOGGER = logging.getLogger(__name__)
+
+MAX_RATE_LIMIT_ATTEMPTS = 5
 
 SensorValue: TypeAlias = bool | int | float | str | None
 
@@ -74,6 +77,7 @@ class TibberDataAPI:
         endpoint: str,
         params: dict[str, Any] | None = None,
         retry: int = 3,
+        rate_limit_attempt: int = 0,
     ) -> dict[str, Any] | None:
         """Make a request to the Data API.
 
@@ -81,6 +85,7 @@ class TibberDataAPI:
         :param endpoint: API endpoint path.
         :param params: Query parameters.
         :param retry: Number of retries on failure.
+        :param rate_limit_attempt: Current attempt number for 429 rate limiting (max MAX_RATE_LIMIT_ATTEMPTS).
         """
         url = f"{DATA_API_ENDPOINT}{endpoint}"
 
@@ -106,13 +111,33 @@ class TibberDataAPI:
                 data = await extract_response_data(response)
                 response.close()
                 return data
+
+            if status == HTTPStatus.TOO_MANY_REQUESTS:
+                if rate_limit_attempt >= MAX_RATE_LIMIT_ATTEMPTS:
+                    _LOGGER.error("Rate limit exceeded: max attempts (%d) reached", MAX_RATE_LIMIT_ATTEMPTS)
+                    await self._handle_error_response(response)
+                    return None
+
+                retry_after = response.headers.get("Retry-After")
+                wait_time = self._calculate_429_wait_time(retry_after, rate_limit_attempt)
+
+                _LOGGER.warning(
+                    "Rate limited (429), waiting %.2f seconds before retry (attempt %d/%d)",
+                    wait_time,
+                    rate_limit_attempt + 1,
+                    MAX_RATE_LIMIT_ATTEMPTS,
+                )
+                await asyncio.sleep(wait_time)
+
+                return await self._make_request(method, endpoint, params, retry, rate_limit_attempt + 1)
+
             await self._handle_error_response(response)
             return None
 
         except (aiohttp.ClientError, TimeoutError):
             if retry > 0:
                 _LOGGER.warning("Request failed, retrying... (%d attempts left)", retry, exc_info=True)
-                return await self._make_request(method, endpoint, params, retry - 1)
+                return await self._make_request(method, endpoint, params, retry - 1, rate_limit_attempt)
             _LOGGER.exception("Error connecting to Tibber Data API")
             raise
         except (InvalidLoginError, FatalHttpExceptionError) as err:
@@ -134,6 +159,36 @@ class TibberDataAPI:
         finally:
             if response is not None and not response.closed:
                 response.close()
+
+    def _calculate_429_wait_time(self, retry_after: str | None, attempt: int) -> float:
+        """Calculate wait time for 429 rate limiting.
+
+        :param retry_after: Retry-After header value (seconds or HTTP-date).
+        :param attempt: Current attempt number (0-based).
+        :return: Wait time in seconds.
+        """
+        if retry_after:
+            try:
+                wait_seconds = int(retry_after)
+            except ValueError:
+                try:
+                    retry_time = dt.datetime.fromisoformat(retry_after)
+                    if retry_time.tzinfo is None:
+                        retry_time = retry_time.replace(tzinfo=dt.UTC)
+                    else:
+                        retry_time = retry_time.astimezone(dt.UTC)
+                    now = dt.datetime.now(dt.UTC)
+                    wait_seconds = max(0, (retry_time - now).total_seconds())
+                except ValueError:
+                    wait_seconds = None
+
+            if wait_seconds is not None:
+                jitter = random.uniform(0, 0.25)  # noqa: S311
+                return wait_seconds + jitter
+
+        base = 1.0
+        max_wait = base * (2 ** attempt)
+        return random.uniform(0, max_wait)  # noqa: S311
 
     async def _handle_error_response(self, response: aiohttp.ClientResponse) -> None:
         """Handle non-OK HTTP responses from the Data API."""
