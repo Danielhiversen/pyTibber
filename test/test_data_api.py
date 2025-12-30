@@ -128,6 +128,7 @@ async def test_get_all_devices_flattens_device_lists(
         endpoint: str,
         _params: dict[str, Any] | None = None,
         _retry: int = 3,
+        _rate_limit_attempt: int = 0,
     ) -> dict[str, Any]:
         if endpoint == "/v1/homes":
             return homes_payload
