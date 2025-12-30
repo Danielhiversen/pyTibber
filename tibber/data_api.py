@@ -167,9 +167,10 @@ class TibberDataAPI:
         :param attempt: Current attempt number (0-based).
         :return: Wait time in seconds.
         """
+        wait_seconds: float | None = None
         if retry_after:
             try:
-                wait_seconds = int(retry_after)
+                wait_seconds = float(retry_after)
             except ValueError:
                 try:
                     retry_time = dt.datetime.fromisoformat(retry_after)
@@ -187,7 +188,7 @@ class TibberDataAPI:
                 return wait_seconds + jitter
 
         base = 1.0
-        max_wait = base * (2 ** attempt)
+        max_wait = base * (2**attempt)
         return random.uniform(0, max_wait)  # noqa: S311
 
     async def _handle_error_response(self, response: aiohttp.ClientResponse) -> None:
