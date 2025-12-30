@@ -116,7 +116,6 @@ class TibberDataAPI:
                 if rate_limit_attempt >= MAX_RATE_LIMIT_ATTEMPTS:
                     _LOGGER.error("Rate limit exceeded: max attempts (%d) reached", MAX_RATE_LIMIT_ATTEMPTS)
                     await self._handle_error_response(response)
-                    raise RetryableHttpExceptionError(status, "Rate limit exceeded", "RATE_LIMITED")
                 retry_after = response.headers.get("Retry-After")
                 wait_time = self._calculate_429_wait_time(retry_after, rate_limit_attempt)
 
