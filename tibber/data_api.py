@@ -7,7 +7,7 @@ import datetime as dt
 import logging
 import random
 from http import HTTPStatus
-from typing import Any, TypeAlias
+from typing import Any, NoReturn, TypeAlias
 
 import aiohttp
 
@@ -166,6 +166,7 @@ class TibberDataAPI:
         :return: Wait time in seconds.
         """
         if retry_after:
+            wait_seconds: int | float | None
             try:
                 wait_seconds = int(retry_after)
             except ValueError:
@@ -185,10 +186,10 @@ class TibberDataAPI:
                 return wait_seconds + jitter
 
         base = 1.0
-        max_wait = base * (2 ** attempt)
+        max_wait = base * (2**attempt)
         return random.uniform(0, max_wait)  # noqa: S311
 
-    async def _handle_error_response(self, response: aiohttp.ClientResponse) -> None:
+    async def _handle_error_response(self, response: aiohttp.ClientResponse) -> NoReturn:
         """Handle non-OK HTTP responses from the Data API."""
         status = response.status
         if status == HTTPStatus.UNAUTHORIZED:
