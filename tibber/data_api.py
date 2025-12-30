@@ -22,7 +22,7 @@ from .response_handler import extract_response_data
 
 _LOGGER = logging.getLogger(__name__)
 
-MAX_RATE_LIMIT_ATTEMPTS = 5
+MAX_RATE_LIMIT_ATTEMPTS = 2
 
 SensorValue: TypeAlias = bool | int | float | str | None
 
@@ -78,7 +78,7 @@ class TibberDataAPI:
         params: dict[str, Any] | None = None,
         retry: int = 3,
         rate_limit_attempt: int = 0,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, Any]:
         """Make a request to the Data API.
 
         :param method: HTTP method (GET, POST, etc.).
@@ -116,8 +116,7 @@ class TibberDataAPI:
                 if rate_limit_attempt >= MAX_RATE_LIMIT_ATTEMPTS:
                     _LOGGER.error("Rate limit exceeded: max attempts (%d) reached", MAX_RATE_LIMIT_ATTEMPTS)
                     await self._handle_error_response(response)
-                    return None
-
+                    raise RetryableHttpExceptionError(status, "Rate limit exceeded", "RATE_LIMITED")
                 retry_after = response.headers.get("Retry-After")
                 wait_time = self._calculate_429_wait_time(retry_after, rate_limit_attempt)
 
@@ -132,7 +131,6 @@ class TibberDataAPI:
                 return await self._make_request(method, endpoint, params, retry, rate_limit_attempt + 1)
 
             await self._handle_error_response(response)
-            return None
 
         except (aiohttp.ClientError, TimeoutError):
             if retry > 0:
@@ -167,10 +165,9 @@ class TibberDataAPI:
         :param attempt: Current attempt number (0-based).
         :return: Wait time in seconds.
         """
-        wait_seconds: float | None = None
         if retry_after:
             try:
-                wait_seconds = float(retry_after)
+                wait_seconds = int(retry_after)
             except ValueError:
                 try:
                     retry_time = dt.datetime.fromisoformat(retry_after)
@@ -188,7 +185,7 @@ class TibberDataAPI:
                 return wait_seconds + jitter
 
         base = 1.0
-        max_wait = base * (2**attempt)
+        max_wait = base * (2 ** attempt)
         return random.uniform(0, max_wait)  # noqa: S311
 
     async def _handle_error_response(self, response: aiohttp.ClientResponse) -> None:
@@ -256,15 +253,11 @@ class TibberDataAPI:
     async def get_homes(self) -> list[dict[str, Any]]:
         """Get all homes for the user."""
         response = await self._make_request("GET", "/v1/homes")
-        if response is None:
-            return []
         return response.get("homes", [])
 
     async def get_devices_for_home(self, home_id: str) -> list[dict[str, Any]]:
         """Get all devices for a specific home."""
         response = await self._make_request("GET", f"/v1/homes/{home_id}/devices")
-        if response is None:
-            return []
         return response.get("devices", [])
 
     async def get_device(self, home_id: str, device_id: str) -> TibberDevice | None:
@@ -273,8 +266,6 @@ class TibberDataAPI:
             response = await self._make_request("GET", f"/v1/homes/{home_id}/devices/{device_id}")
         except FatalHttpExceptionError:
             _LOGGER.error("Error getting device %s for home %s", device_id, home_id)
-            return None
-        if response is None:
             return None
         return TibberDevice(response, home_id)
 
