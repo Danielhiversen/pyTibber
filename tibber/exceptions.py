@@ -39,6 +39,13 @@ class RetryableHttpExceptionError(HttpExceptionError):
     """Exception raised for HTTP codes that are possible to retry"""
 
 
+class RateLimitExceededError(RetryableHttpExceptionError):
+    """Exception raised when rate limit is exceeded"""
+    def __init__(self, status: int, message: str, extension_code: str, retry_after: int) -> None:
+        super().__init__(status, message, extension_code)
+        self.retry_after = retry_after
+
+
 class InvalidLoginError(FatalHttpExceptionError):
     """Invalid login exception."""
 

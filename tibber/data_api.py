@@ -15,6 +15,7 @@ from .const import DATA_API_ENDPOINT, DEFAULT_TIMEOUT, USERINFO_ENDPOINT, __vers
 from .exceptions import (
     FatalHttpExceptionError,
     InvalidLoginError,
+    RateLimitExceededError,
     RetryableHttpExceptionError,
     UserAgentMissingError,
 )
@@ -61,6 +62,7 @@ class TibberDataAPI:
         self._access_token = access_token
         self._user_agent = f"{user_agent} pyTibber/{__version__} "
         self._devices: dict[str, TibberDevice] = {}
+        self._rate_limit_attempt = 0
 
     def set_access_token(self, access_token: str) -> None:
         """Set the access token."""
@@ -77,7 +79,6 @@ class TibberDataAPI:
         endpoint: str,
         params: dict[str, Any] | None = None,
         retry: int = 3,
-        rate_limit_attempt: int = 0,
     ) -> dict[str, Any]:
         """Make a request to the Data API.
 
@@ -85,7 +86,6 @@ class TibberDataAPI:
         :param endpoint: API endpoint path.
         :param params: Query parameters.
         :param retry: Number of retries on failure.
-        :param rate_limit_attempt: Current attempt number for 429 rate limiting (max MAX_RATE_LIMIT_ATTEMPTS).
         """
         url = f"{DATA_API_ENDPOINT}{endpoint}"
 
@@ -108,33 +108,36 @@ class TibberDataAPI:
             )
             status = response.status
             if status == HTTPStatus.OK:
+                self._rate_limit_attempt = 0
                 data = await extract_response_data(response)
                 response.close()
                 return data
 
             if status == HTTPStatus.TOO_MANY_REQUESTS:
-                if rate_limit_attempt >= MAX_RATE_LIMIT_ATTEMPTS:
+                if self._rate_limit_attempt >= MAX_RATE_LIMIT_ATTEMPTS:
                     _LOGGER.error("Rate limit exceeded: max attempts (%d) reached", MAX_RATE_LIMIT_ATTEMPTS)
                     await self._handle_error_response(response)
                 retry_after = response.headers.get("Retry-After")
-                wait_time = self._calculate_429_wait_time(retry_after, rate_limit_attempt)
+                wait_time = self._calculate_429_wait_time(retry_after)
+                wait_time = min(wait_time, 10)
 
                 _LOGGER.warning(
                     "Rate limited (429), waiting %.2f seconds before retry (attempt %d/%d)",
                     wait_time,
-                    rate_limit_attempt + 1,
+                    self._rate_limit_attempt + 1,
                     MAX_RATE_LIMIT_ATTEMPTS,
                 )
                 await asyncio.sleep(wait_time)
 
-                return await self._make_request(method, endpoint, params, retry, rate_limit_attempt + 1)
+                self._rate_limit_attempt += 1
+                return await self._make_request(method, endpoint, params, retry)
 
             await self._handle_error_response(response)
 
         except (aiohttp.ClientError, TimeoutError):
             if retry > 0:
                 _LOGGER.warning("Request failed, retrying... (%d attempts left)", retry, exc_info=True)
-                return await self._make_request(method, endpoint, params, retry - 1, rate_limit_attempt)
+                return await self._make_request(method, endpoint, params, retry - 1)
             _LOGGER.exception("Error connecting to Tibber Data API")
             raise
         except (InvalidLoginError, FatalHttpExceptionError) as err:
@@ -157,17 +160,16 @@ class TibberDataAPI:
             if response is not None and not response.closed:
                 response.close()
 
-    def _calculate_429_wait_time(self, retry_after: str | None, attempt: int) -> float:
+    def _calculate_429_wait_time(self, retry_after: str | None) -> float:
         """Calculate wait time for 429 rate limiting.
 
         :param retry_after: Retry-After header value (seconds or HTTP-date).
-        :param attempt: Current attempt number (0-based).
         :return: Wait time in seconds.
         """
         if retry_after:
             wait_seconds: int | float | None
             try:
-                wait_seconds = int(retry_after)
+                wait_seconds = int(float(retry_after))
             except ValueError:
                 try:
                     retry_time = dt.datetime.fromisoformat(retry_after)
@@ -181,12 +183,14 @@ class TibberDataAPI:
                     wait_seconds = None
 
             if wait_seconds is not None:
-                jitter = random.uniform(0, 0.25)  # noqa: S311
+                wait_seconds = min(wait_seconds, 10*60)
+                jitter = random.uniform(0, 1)  # noqa: S311
                 return wait_seconds + jitter
 
         base = 1.0
-        max_wait = base * (2**attempt)
-        return random.uniform(0, max_wait)  # noqa: S311
+        max_wait = base * (2**self._rate_limit_attempt)
+        max_wait = min(max_wait, 10*60)
+        return random.uniform(0, 30) + max_wait # noqa: S311
 
     async def _handle_error_response(self, response: aiohttp.ClientResponse) -> NoReturn:
         """Handle non-OK HTTP responses from the Data API."""
@@ -208,8 +212,16 @@ class TibberDataAPI:
                 detail,
                 extension_code or fatal_codes[status],
             )
-        if status in (HTTPStatus.TOO_MANY_REQUESTS, HTTPStatus.PRECONDITION_FAILED):
-            self._rate_limited_until = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=self.timeout)
+        if status == HTTPStatus.TOO_MANY_REQUESTS:
+            retry_after = response.headers.get("Retry-After")
+            wait_time = self._calculate_429_wait_time(retry_after)
+            raise RateLimitExceededError(
+                status,
+                detail or "Rate limited",
+                extension_code or "RATE_LIMITED",
+                wait_time,
+            )
+        if status == HTTPStatus.PRECONDITION_FAILED:
             raise RetryableHttpExceptionError(
                 status,
                 detail or "Rate limited",
