@@ -41,7 +41,8 @@ class RetryableHttpExceptionError(HttpExceptionError):
 
 class RateLimitExceededError(RetryableHttpExceptionError):
     """Exception raised when rate limit is exceeded"""
-    def __init__(self, status: int, message: str, extension_code: str, retry_after: int) -> None:
+
+    def __init__(self, status: int, message: str, extension_code: str, retry_after: float) -> None:
         super().__init__(status, message, extension_code)
         self.retry_after = retry_after
 

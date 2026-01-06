@@ -183,14 +183,14 @@ class TibberDataAPI:
                     wait_seconds = None
 
             if wait_seconds is not None:
-                wait_seconds = min(wait_seconds, 10*60)
+                wait_seconds = min(wait_seconds, 10 * 60)
                 jitter = random.uniform(0, 1)  # noqa: S311
                 return wait_seconds + jitter
 
         base = 1.0
         max_wait = base * (2**self._rate_limit_attempt)
-        max_wait = min(max_wait, 10*60)
-        return random.uniform(0, 30) + max_wait # noqa: S311
+        max_wait = min(max_wait, 10 * 60)
+        return random.uniform(0, 30) + max_wait  # noqa: S311
 
     async def _handle_error_response(self, response: aiohttp.ClientResponse) -> NoReturn:
         """Handle non-OK HTTP responses from the Data API."""
