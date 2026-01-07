@@ -306,9 +306,12 @@ class TibberDataAPI:
     async def update_devices(self) -> dict[str, TibberDevice]:
         """Update the devices."""
         tasks = [self.get_device(device.home_id, device.id) for device in self._devices.values()]
-        for device in await asyncio.gather(*tasks, return_exceptions=False):
-            if device is not None:
-                self._devices[device.id] = device
+        for result in await asyncio.gather(*tasks, return_exceptions=True):
+            if isinstance(result, BaseException):
+                _LOGGER.error("Error getting device %s", result)
+                raise result
+            if result is not None:
+                self._devices[result.id] = result
         return self._devices
 
     async def get_userinfo(self) -> dict[str, Any]:
