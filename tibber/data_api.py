@@ -307,7 +307,7 @@ class TibberDataAPI:
         """Update the devices."""
         tasks = [self.get_device(device.home_id, device.id) for device in self._devices.values()]
         for result in await asyncio.gather(*tasks, return_exceptions=True):
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 _LOGGER.error("Error getting device %s", result)
                 raise result
             if result is not None:
