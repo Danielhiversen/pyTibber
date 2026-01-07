@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
+import random
 from http import HTTPStatus
-from typing import Any, TypeAlias
+from typing import Any, NoReturn, TypeAlias
 
 import aiohttp
 
@@ -14,12 +15,15 @@ from .const import DATA_API_ENDPOINT, DEFAULT_TIMEOUT, USERINFO_ENDPOINT, __vers
 from .exceptions import (
     FatalHttpExceptionError,
     InvalidLoginError,
+    RateLimitExceededError,
     RetryableHttpExceptionError,
     UserAgentMissingError,
 )
 from .response_handler import extract_response_data
 
 _LOGGER = logging.getLogger(__name__)
+
+MAX_RATE_LIMIT_ATTEMPTS = 2
 
 SensorValue: TypeAlias = bool | int | float | str | None
 
@@ -58,6 +62,7 @@ class TibberDataAPI:
         self._access_token = access_token
         self._user_agent = f"{user_agent} pyTibber/{__version__} "
         self._devices: dict[str, TibberDevice] = {}
+        self._rate_limit_attempt = 0
 
     def set_access_token(self, access_token: str) -> None:
         """Set the access token."""
@@ -74,7 +79,7 @@ class TibberDataAPI:
         endpoint: str,
         params: dict[str, Any] | None = None,
         retry: int = 3,
-    ) -> dict[str, Any] | None:
+    ) -> dict[str, Any]:
         """Make a request to the Data API.
 
         :param method: HTTP method (GET, POST, etc.).
@@ -103,11 +108,31 @@ class TibberDataAPI:
             )
             status = response.status
             if status == HTTPStatus.OK:
+                self._rate_limit_attempt = 0
                 data = await extract_response_data(response)
                 response.close()
                 return data
+
+            if status == HTTPStatus.TOO_MANY_REQUESTS:
+                if self._rate_limit_attempt >= MAX_RATE_LIMIT_ATTEMPTS:
+                    _LOGGER.error("Rate limit exceeded: max attempts (%d) reached", MAX_RATE_LIMIT_ATTEMPTS)
+                    await self._handle_error_response(response)
+                retry_after = response.headers.get("Retry-After")
+                wait_time = self._calculate_429_wait_time(retry_after)
+                wait_time = min(wait_time, 10)
+
+                _LOGGER.warning(
+                    "Rate limited (429), waiting %.2f seconds before retry (attempt %d/%d)",
+                    wait_time,
+                    self._rate_limit_attempt + 1,
+                    MAX_RATE_LIMIT_ATTEMPTS,
+                )
+                await asyncio.sleep(wait_time)
+
+                self._rate_limit_attempt += 1
+                return await self._make_request(method, endpoint, params, retry)
+
             await self._handle_error_response(response)
-            return None
 
         except (aiohttp.ClientError, TimeoutError):
             if retry > 0:
@@ -135,7 +160,39 @@ class TibberDataAPI:
             if response is not None and not response.closed:
                 response.close()
 
-    async def _handle_error_response(self, response: aiohttp.ClientResponse) -> None:
+    def _calculate_429_wait_time(self, retry_after: str | None) -> float:
+        """Calculate wait time for 429 rate limiting.
+
+        :param retry_after: Retry-After header value (seconds or HTTP-date).
+        :return: Wait time in seconds.
+        """
+        if retry_after:
+            wait_seconds: int | float | None
+            try:
+                wait_seconds = int(float(retry_after))
+            except ValueError:
+                try:
+                    retry_time = dt.datetime.fromisoformat(retry_after)
+                    if retry_time.tzinfo is None:
+                        retry_time = retry_time.replace(tzinfo=dt.UTC)
+                    else:
+                        retry_time = retry_time.astimezone(dt.UTC)
+                    now = dt.datetime.now(dt.UTC)
+                    wait_seconds = max(0, (retry_time - now).total_seconds())
+                except ValueError:
+                    wait_seconds = None
+
+            if wait_seconds is not None:
+                wait_seconds = min(wait_seconds, 10 * 60)
+                jitter = random.uniform(0, 1)  # noqa: S311
+                return wait_seconds + jitter
+
+        base = 1.0
+        max_wait = base * (2**self._rate_limit_attempt)
+        max_wait = min(max_wait, 10 * 60)
+        return random.uniform(0, 30) + max_wait  # noqa: S311
+
+    async def _handle_error_response(self, response: aiohttp.ClientResponse) -> NoReturn:
         """Handle non-OK HTTP responses from the Data API."""
         status = response.status
         if status == HTTPStatus.UNAUTHORIZED:
@@ -155,8 +212,16 @@ class TibberDataAPI:
                 detail,
                 extension_code or fatal_codes[status],
             )
-        if status in (HTTPStatus.TOO_MANY_REQUESTS, HTTPStatus.PRECONDITION_FAILED):
-            self._rate_limited_until = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=self.timeout)
+        if status == HTTPStatus.TOO_MANY_REQUESTS:
+            retry_after = response.headers.get("Retry-After")
+            wait_time = self._calculate_429_wait_time(retry_after)
+            raise RateLimitExceededError(
+                status,
+                detail or "Rate limited",
+                extension_code or "RATE_LIMITED",
+                wait_time,
+            )
+        if status == HTTPStatus.PRECONDITION_FAILED:
             raise RetryableHttpExceptionError(
                 status,
                 detail or "Rate limited",
@@ -200,15 +265,11 @@ class TibberDataAPI:
     async def get_homes(self) -> list[dict[str, Any]]:
         """Get all homes for the user."""
         response = await self._make_request("GET", "/v1/homes")
-        if response is None:
-            return []
         return response.get("homes", [])
 
     async def get_devices_for_home(self, home_id: str) -> list[dict[str, Any]]:
         """Get all devices for a specific home."""
         response = await self._make_request("GET", f"/v1/homes/{home_id}/devices")
-        if response is None:
-            return []
         return response.get("devices", [])
 
     async def get_device(self, home_id: str, device_id: str) -> TibberDevice | None:
@@ -217,8 +278,6 @@ class TibberDataAPI:
             response = await self._make_request("GET", f"/v1/homes/{home_id}/devices/{device_id}")
         except FatalHttpExceptionError:
             _LOGGER.error("Error getting device %s for home %s", device_id, home_id)
-            return None
-        if response is None:
             return None
         return TibberDevice(response, home_id)
 
