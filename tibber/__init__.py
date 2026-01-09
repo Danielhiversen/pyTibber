@@ -225,6 +225,11 @@ class Tibber:
         """
         return await self.realtime.disconnect()
 
+    def set_access_token(self, access_token: str) -> None:
+        """Set access token."""
+        self._access_token = access_token
+        self.realtime.set_access_token(access_token)
+
     @property
     def user_id(self) -> str | None:
         """Return user id of user."""
