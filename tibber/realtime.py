@@ -76,6 +76,10 @@ class TibberRT:
                 self._watchdog_runner = asyncio.create_task(self._watchdog())
             await self.sub_manager.connect_async()
 
+    def set_access_token(self, access_token: str) -> None:
+        """Set access token."""
+        self._access_token = access_token
+
     def _create_sub_manager(self) -> None:
         if self.sub_endpoint is None:
             raise SubscriptionEndpointMissingError("Subscription endpoint not initialized")
