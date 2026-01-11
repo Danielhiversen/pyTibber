@@ -9,6 +9,7 @@ from typing import Any
 import aiohttp
 
 from .const import API_ENDPOINT, DEFAULT_TIMEOUT, DEMO_TOKEN, __version__
+from .data_api import TibberDataAPI
 from .exceptions import (
     FatalHttpExceptionError,
     InvalidLoginError,
@@ -68,6 +69,12 @@ class Tibber:
         self._active_home_ids: list[str] = []
         self._all_home_ids: list[str] = []
         self._homes: dict[str, TibberHome] = {}
+        self.data_api: TibberDataAPI = TibberDataAPI(
+            access_token,
+            timeout=timeout,
+            websession=websession,
+            user_agent=self._user_agent,
+        )
 
     async def close_connection(self) -> None:
         """Close the Tibber connection.
@@ -229,6 +236,7 @@ class Tibber:
         """Set access token."""
         self._access_token = access_token
         self.realtime.set_access_token(access_token)
+        self.data_api.set_access_token(access_token)
 
     @property
     def user_id(self) -> str | None:
