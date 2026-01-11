@@ -3,7 +3,7 @@
 from http import HTTPStatus
 from typing import Final
 
-__version__ = "0.34.4"
+__version__ = "0.34.5"
 
 API_ENDPOINT: Final = "https://api.tibber.com/v1-beta/gql"
 DATA_API_ENDPOINT: Final = "https://data-api.tibber.com"
