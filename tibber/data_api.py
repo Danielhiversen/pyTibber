@@ -276,7 +276,6 @@ class TibberDataAPI:
         """Get detailed information about a specific device."""
         try:
             response = await self._make_request("GET", f"/v1/homes/{home_id}/devices/{device_id}")
-            _LOGGER.error("Response %s: %s", device_id, response)
         except FatalHttpExceptionError:
             _LOGGER.error("Error getting device %s for home %s", device_id, home_id)
             return None
