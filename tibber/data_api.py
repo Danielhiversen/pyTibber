@@ -359,7 +359,23 @@ class TibberDevice:
     def __init__(self, device_data: dict[str, Any], home_id: str) -> None:
         """Initialize the device."""
         self._data = device_data
-        self._sensors = [Sensor(capability) for capability in device_data["capabilities"]]
+        self._sensors = [Sensor(capability) for capability in device_data.get("capabilities", [])]
+        attributes = device_data.get("attributes", [])
+        for attribute in attributes:
+            if "id" not in attribute:
+                continue
+            attr_value = attribute.get("value") if "value" in attribute else attribute.get("status")
+            if attr_value is None:
+                continue
+            sensor_data = {
+                "id": attribute["id"],
+                "value": attr_value,
+            }
+            if "description" in attribute:
+                sensor_data["description"] = attribute["description"]
+            if "unit" in attribute:
+                sensor_data["unit"] = attribute["unit"]
+            self._sensors.append(Sensor(sensor_data))
         self._home_id = home_id
 
     @property
@@ -384,7 +400,7 @@ class TibberDevice:
 
     @property
     def sensors(self) -> list[Sensor]:
-        """Return the device capabilities."""
+        """Return the device sensors from both capabilities and attributes."""
         return self._sensors
 
     @property
@@ -403,10 +419,10 @@ class TibberDevice:
 
 
 class Sensor:
-    """Represents a Tibber device capability from the Data API."""
+    """Represents a Tibber device sensor from capabilities or attributes in the Data API."""
 
     def __init__(self, capability_data: dict[str, Any]) -> None:
-        """Initialize the sensor."""
+        """Initialize the sensor from capability or attribute data."""
         self._data = capability_data
 
     @property
