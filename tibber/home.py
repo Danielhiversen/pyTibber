@@ -436,9 +436,9 @@ class TibberHome:
                 return
 
             try:
-                session = self._tibber_control.realtime.sub_manager.session
-                if not hasattr(session, "subscribe"):
-                    _LOGGER.error("Session does not support subscribe method")
+                session = self._tibber_control.realtime.session
+                if session is None or not hasattr(session, "subscribe"):
+                    _LOGGER.error("Session is not connected or does not support subscribe method")
                     return
                 async for _data in session.subscribe(
                     gql(LIVE_SUBSCRIBE % self.home_id),

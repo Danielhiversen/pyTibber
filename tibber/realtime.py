@@ -39,6 +39,7 @@ class TibberRT:
         self._watchdog_running: bool = False
 
         self.sub_manager: Client | None = None
+        self.session: Any | None = None
 
     async def disconnect(self) -> None:
         """Stop subscription manager.
@@ -52,14 +53,10 @@ class TibberRT:
             self._watchdog_runner = None
         for home in self._homes:
             home.rt_unsubscribe()
-        if self.sub_manager is None:
-            return
-        try:
-            if not hasattr(self.sub_manager, "session"):
-                return
+        if self.session is not None:
             await self.sub_manager.close_async()
-        finally:
-            self.sub_manager = None
+            self.session = None
+        self.sub_manager = None
 
     async def connect(self) -> None:
         """Start subscription manager."""
@@ -74,7 +71,7 @@ class TibberRT:
                 _LOGGER.debug("Starting watchdog")
                 self._watchdog_running = True
                 self._watchdog_runner = asyncio.create_task(self._watchdog())
-            await self.sub_manager.connect_async()
+            self.session = await self.sub_manager.connect_async()
 
     def set_access_token(self, access_token: str) -> None:
         """Set access token."""
@@ -141,8 +138,9 @@ class TibberRT:
             )
 
             try:
-                if hasattr(self.sub_manager, "session"):
+                if self.session is not None:
                     await self.sub_manager.close_async()
+                    self.session = None
             except Exception:
                 _LOGGER.exception("Error in watchdog close")
 
@@ -152,7 +150,7 @@ class TibberRT:
 
             self._create_sub_manager()
             try:
-                await self.sub_manager.connect_async()
+                self.session = await self.sub_manager.connect_async()
                 await self._resubscribe_homes()
             except Exception as err:  # noqa: BLE001
                 delay_seconds = min(
@@ -193,7 +191,7 @@ class TibberRT:
             self.sub_manager is not None
             and isinstance(self.sub_manager.transport, TibberWebsocketsTransport)
             and self.sub_manager.transport.running
-            and hasattr(self.sub_manager, "session")
+            and self.session is not None
         )
 
     @property
