@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from gql import gql
 
-from .const import RESOLUTION_DAILY, RESOLUTION_HOURLY, RESOLUTION_MONTHLY, RESOLUTION_WEEKLY
+from .const import RESOLUTION_DAILY, RESOLUTION_HOURLY, RESOLUTION_MONTHLY, RESOLUTION_WEEKLY, RESOLUTION_QUARTER_HOURLY
 from .gql_queries import (
     HISTORIC_DATA,
     HISTORIC_DATA_DATE,
@@ -197,9 +197,11 @@ class TibberHome:
         """Update home info and the current price info asynchronously."""
         await self.update_info_and_price_info()
 
-    async def update_info_and_price_info(self) -> None:
-        """Update home info and all price info asynchronously."""
-        if not (data := await self._tibber_control.execute(UPDATE_INFO_PRICE % self._home_id)):
+    async def update_info_and_price_info(self, resolution: str = RESOLUTION_QUARTER_HOURLY) -> None:
+        """Update home info and all price info asynchronously.
+        :param resolution: The resolution of the data. Can be RESOLUTION_QUARTER_HOURLY or RESOLUTION_HOURLY
+        """
+        if not (data := await self._tibber_control.execute(UPDATE_INFO_PRICE % (self._home_id, resolution))):
             _LOGGER.error("Could not get the data.")
             return
         self.info = data
