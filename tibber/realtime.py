@@ -140,9 +140,10 @@ class TibberRT:
             try:
                 if self.session is not None:
                     await self.sub_manager.close_async()
-                    self.session = None
             except Exception:
                 _LOGGER.exception("Error in watchdog close")
+            self.session = None
+            self.sub_manager = None
 
             if not self._watchdog_running:
                 _LOGGER.debug("Watchdog: Stopping")
