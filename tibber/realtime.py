@@ -175,9 +175,7 @@ class TibberRT:
                 except Exception:
                     _LOGGER.exception("Error in watchdog reconnect callback")
 
-            self._create_sub_manager()
             try:
-                self.session = await self.sub_manager.connect_async()
                 await self._resubscribe_homes()
             except Exception as err:  # noqa: BLE001
                 delay_seconds = min(
@@ -230,6 +228,8 @@ class TibberRT:
     @sub_endpoint.setter
     def sub_endpoint(self, sub_endpoint: str) -> None:
         """Set subscription endpoint."""
+        if self._sub_endpoint == sub_endpoint:
+            return
         self._sub_endpoint = sub_endpoint
         if self.sub_manager is not None and isinstance(self.sub_manager.transport, TibberWebsocketsTransport):
             self.sub_manager = Client(
