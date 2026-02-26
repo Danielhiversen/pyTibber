@@ -4,6 +4,7 @@ import asyncio
 import datetime as dt
 import logging
 import random
+from collections.abc import Awaitable, Callable
 from ssl import SSLContext
 from typing import Any
 
@@ -40,6 +41,7 @@ class TibberRT:
 
         self.sub_manager: Client | None = None
         self.session: Any | None = None
+        self._on_reconnect_cb: Callable[[], Awaitable[None]] | None = None
 
     async def disconnect(self) -> None:
         """Stop subscription manager.
@@ -148,6 +150,12 @@ class TibberRT:
             if not self._watchdog_running:
                 _LOGGER.debug("Watchdog: Stopping")
                 return
+
+            if self._on_reconnect_cb is not None:
+                try:
+                    await self._on_reconnect_cb()
+                except Exception:
+                    _LOGGER.exception("Error in watchdog reconnect callback")
 
             self._create_sub_manager()
             try:
