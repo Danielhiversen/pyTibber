@@ -62,7 +62,7 @@ class Tibber:
             self._user_agent,
             ssl=ssl,
         )
-        self.realtime._on_reconnect_cb = self.update_info
+        self.realtime.on_reconnect_cb = self.update_info
 
         self.time_zone: dt.tzinfo = time_zone or dt.UTC
         self._name: str = ""
