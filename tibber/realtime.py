@@ -165,8 +165,7 @@ class TibberRT:
                     )
                     _retry_count += 1
                     _LOGGER.error(
-                        "Access token expired (attempt %s), "
-                        "retrying in %s seconds",
+                        "Access token expired (attempt %s), " "retrying in %s seconds",
                         _retry_count,
                         delay_seconds,
                     )
