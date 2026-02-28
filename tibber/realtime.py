@@ -103,7 +103,9 @@ class TibberRT:
         while self._watchdog_running:
             await asyncio.sleep(5)
             if (
-                self.sub_manager.transport.running
+                self.sub_manager is not None
+                and isinstance(self.sub_manager.transport, TibberWebsocketsTransport)
+                and self.sub_manager.transport.running
                 and self.sub_manager.transport.reconnect_at
                 > dt.datetime.now(
                     tz=dt.UTC,
@@ -131,24 +133,24 @@ class TibberRT:
                     _LOGGER.debug("Watchdog: Connection is alive")
                     continue
 
-            self.sub_manager.transport.reconnect_at = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=self._timeout)
-            _LOGGER.error(
-                "Watchdog: Connection is down, %s",
-                self.sub_manager.transport.reconnect_at,
-            )
+            _LOGGER.error("Watchdog: Connection is down")
 
             try:
-                if self.session is not None:
+                if self.sub_manager is not None and self.session is not None:
                     await self.sub_manager.close_async()
                     self.session = None
             except Exception:
                 _LOGGER.exception("Error in watchdog close")
+
+            self.sub_manager = None
+            self.session = None
 
             if not self._watchdog_running:
                 _LOGGER.debug("Watchdog: Stopping")
                 return
 
             self._create_sub_manager()
+            assert self.sub_manager is not None
             try:
                 self.session = await self.sub_manager.connect_async()
                 await self._resubscribe_homes()
