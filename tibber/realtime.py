@@ -150,6 +150,7 @@ class TibberRT:
                 return
 
             self._create_sub_manager()
+            assert self.sub_manager is not None
             try:
                 self.session = await self.sub_manager.connect_async()
                 await self._resubscribe_homes()
