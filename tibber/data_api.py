@@ -136,25 +136,9 @@ class TibberDataAPI:
 
         except (aiohttp.ClientError, TimeoutError):
             if retry > 0:
-                _LOGGER.warning("Request failed, retrying... (%d attempts left)", retry, exc_info=True)
+                _LOGGER.debug("Request failed, retrying... (%d attempts left)", retry, exc_info=True)
                 return await self._make_request(method, endpoint, params, retry - 1)
-            _LOGGER.exception("Error connecting to Tibber Data API")
-            raise
-        except (InvalidLoginError, FatalHttpExceptionError) as err:
-            _LOGGER.error(
-                "Fatal error interacting with Tibber Data API, HTTP status: %s. API error: %s / %s",
-                err.status,
-                err.extension_code,
-                err.message,
-            )
-            raise
-        except RetryableHttpExceptionError as err:
-            _LOGGER.warning(
-                "Temporary failure interacting with Tibber Data API, HTTP status: %s. API error: %s / %s",
-                err.status,
-                err.extension_code,
-                err.message,
-            )
+            _LOGGER.debug("Error connecting to Tibber Data API", exc_info=True)
             raise
         finally:
             if response is not None and not response.closed:
@@ -277,7 +261,6 @@ class TibberDataAPI:
         try:
             response = await self._make_request("GET", f"/v1/homes/{home_id}/devices/{device_id}")
         except FatalHttpExceptionError:
-            _LOGGER.error("Error getting device %s for home %s", device_id, home_id)
             return None
         return TibberDevice(response, home_id)
 
@@ -308,7 +291,7 @@ class TibberDataAPI:
         tasks = [self.get_device(device.home_id, device.id) for device in self._devices.values()]
         for result in await asyncio.gather(*tasks, return_exceptions=True):
             if isinstance(result, BaseException):
-                _LOGGER.error("Error getting device %s", result)
+                _LOGGER.debug("Error getting device %s", result, exc_info=result)
                 raise result
             if result is not None:
                 self._devices[result.id] = result
@@ -349,7 +332,7 @@ class TibberDataAPI:
                     "USERINFO_HTTP_ERROR",
                 )
         except (aiohttp.ClientError, TimeoutError):
-            _LOGGER.exception("Error connecting to Tibber user info endpoint")
+            _LOGGER.debug("Error connecting to Tibber user info endpoint", exc_info=True)
             raise
 
 
