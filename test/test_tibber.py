@@ -12,7 +12,6 @@ import tibber
 import tibber.realtime as tibber_realtime
 from tibber.const import RESOLUTION_DAILY
 from tibber.exceptions import FatalHttpExceptionError, InvalidLoginError, NotForDemoUserError
-from tibber.realtime import TibberRT
 from tibber.websocket_transport import TibberWebsocketsTransport
 
 
@@ -252,7 +251,7 @@ async def test_realtime_set_access_token_recreates_subscription_manager(monkeypa
 
     monkeypatch.setattr(tibber_realtime, "Client", FakeClient)
 
-    realtime = TibberRT("old-token", 10, "test-agent", True)
+    realtime = tibber_realtime.TibberRT("old-token", 10, "test-agent", True)
     realtime.sub_endpoint = "wss://example.test/v1-beta/gql/subscriptions"
 
     await realtime.connect()
