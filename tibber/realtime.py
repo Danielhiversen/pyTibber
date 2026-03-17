@@ -46,17 +46,24 @@ class TibberRT:
         This method simply calls the stop method of the SubscriptionManager if it is defined.
         """
         _LOGGER.debug("Stopping subscription manager")
+        await self._reset_connection(unsubscribe_homes=True)
+
+    async def _reset_connection(self, unsubscribe_homes: bool = False) -> None:
+        """Reset websocket connection state."""
         if self._watchdog_runner is not None:
             _LOGGER.debug("Stopping watchdog")
             self._watchdog_running = False
             self._watchdog_runner.cancel()
             self._watchdog_runner = None
-        for home in self._homes:
-            home.rt_unsubscribe()
-        if self.session is not None:
-            await self.sub_manager.close_async()
+        if unsubscribe_homes:
+            for home in self._homes:
+                home.rt_unsubscribe()
+        try:
+            if self.session is not None and self.sub_manager is not None:
+                await self.sub_manager.close_async()
+        finally:
             self.session = None
-        self.sub_manager = None
+            self.sub_manager = None
 
     async def connect(self) -> None:
         """Start subscription manager."""
@@ -73,9 +80,16 @@ class TibberRT:
                 self._watchdog_runner = asyncio.create_task(self._watchdog())
             self.session = await self.sub_manager.connect_async()
 
-    def set_access_token(self, access_token: str) -> None:
+    async def reconnect(self) -> None:
+        """Reconnect and resubscribe all homes."""
+        await self.connect()
+        await self._resubscribe_homes()
+
+    async def set_access_token(self, access_token: str) -> None:
         """Set access token."""
+        reconnect_running = self.subscription_running or self._watchdog_runner is not None
         self._access_token = access_token
+        await self._reset_connection(unsubscribe_homes=reconnect_running)
 
     def _create_sub_manager(self) -> None:
         if self.sub_endpoint is None:
@@ -193,6 +207,11 @@ class TibberRT:
             and self.sub_manager.transport.running
             and self.session is not None
         )
+
+    @property
+    def should_restore_connection(self) -> bool:
+        """Whether realtime subscriptions should be restored after a reset."""
+        return self.subscription_running or self._watchdog_runner is not None
 
     @property
     def sub_endpoint(self) -> str | None:
