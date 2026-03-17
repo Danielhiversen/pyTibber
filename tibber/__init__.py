@@ -23,6 +23,16 @@ from .response_handler import extract_response_data
 
 _LOGGER = logging.getLogger(__name__)
 
+__all__ = [
+    "FatalHttpExceptionError",
+    "InvalidLoginError",
+    "RetryableHttpExceptionError",
+    "Tibber",
+    "TibberDataAPI",
+    "TibberHome",
+    "TibberRT",
+]
+
 
 class Tibber:
     """Class to communicate with the Tibber api."""
@@ -120,25 +130,9 @@ class Tibber:
                     retry - 1,
                 )
             if isinstance(err, asyncio.TimeoutError):
-                _LOGGER.error("Timed out when connecting to Tibber")
+                _LOGGER.debug("Timed out when connecting to Tibber")
             else:
-                _LOGGER.exception("Error connecting to Tibber")
-            raise
-        except (InvalidLoginError, FatalHttpExceptionError) as err:
-            _LOGGER.error(
-                "Fatal error interacting with Tibber API, HTTP status: %s. API error: %s / %s",
-                err.status,
-                err.extension_code,
-                err.message,
-            )
-            raise
-        except RetryableHttpExceptionError as err:
-            _LOGGER.warning(
-                "Temporary failure interacting with Tibber API, HTTP status: %s. API error: %s / %s",
-                err.status,
-                err.extension_code,
-                err.message,
-            )
+                _LOGGER.debug("Error connecting to Tibber", exc_info=True)
             raise
 
     async def update_info(self) -> None:
