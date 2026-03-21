@@ -151,6 +151,7 @@ class Tibber:
         self._user_id = viewer.get("userId")
 
         self._active_home_ids = []
+        self._all_home_ids = []
         for _home in viewer.get("homes", []):
             if not (home_id := _home.get("id")):
                 continue
@@ -226,11 +227,17 @@ class Tibber:
         """
         return await self.realtime.disconnect()
 
-    def set_access_token(self, access_token: str) -> None:
-        """Set access token."""
+    async def set_access_token(self, access_token: str) -> None:
+        if access_token == self._access_token:
+            return
+        """Set access token and reauthorize clients."""
+        restore_realtime = self.realtime.should_restore_connection
         self._access_token = access_token
-        self.realtime.set_access_token(access_token)
+        await self.realtime.set_access_token(access_token)
         self.data_api.set_access_token(access_token)
+        await self.update_info()
+        if restore_realtime:
+            await self.realtime.reconnect()
 
     @property
     def user_id(self) -> str | None:

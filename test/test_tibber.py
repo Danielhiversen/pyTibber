@@ -3,13 +3,16 @@
 import asyncio
 import datetime as dt
 import logging
+from unittest.mock import AsyncMock, MagicMock
 
 import aiohttp
 import pytest
 
 import tibber
+import tibber.realtime as tibber_realtime
 from tibber.const import RESOLUTION_DAILY
 from tibber.exceptions import FatalHttpExceptionError, InvalidLoginError, NotForDemoUserError
+from tibber.websocket_transport import TibberWebsocketsTransport
 
 
 @pytest.mark.asyncio
@@ -96,7 +99,7 @@ async def test_tibber_invalid_query():
             user_agent="test",
         )
 
-        with pytest.raises(FatalHttpExceptionError, match="Syntax Error*"):
+        with pytest.raises(FatalHttpExceptionError, match=r"Syntax Error*"):
             await tibber_connection.execute("invalidquery")
 
         assert not tibber_connection.name
@@ -173,3 +176,100 @@ async def test_logging_rt_subscribe(caplog: pytest.LogCaptureFixture) -> None:
         home.rt_unsubscribe()
         await tibber_connection.rt_disconnect()
         await asyncio.sleep(10)
+
+
+@pytest.mark.asyncio
+async def test_set_access_token_updates_clients_without_realtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    tibber_connection = tibber.Tibber(
+        websession=MagicMock(),
+        user_agent="test",
+    )
+    update_info = AsyncMock()
+    reconnect = AsyncMock()
+    rt_set_access_token = AsyncMock()
+    data_api_set_access_token = MagicMock()
+
+    monkeypatch.setattr(tibber_connection, "update_info", update_info)
+    monkeypatch.setattr(tibber_connection.realtime, "reconnect", reconnect)
+    monkeypatch.setattr(tibber_connection.realtime, "set_access_token", rt_set_access_token)
+    monkeypatch.setattr(tibber_connection.data_api, "set_access_token", data_api_set_access_token)
+
+    await tibber_connection.set_access_token("new-token")
+
+    rt_set_access_token.assert_awaited_once_with("new-token")
+    data_api_set_access_token.assert_called_once_with("new-token")
+    update_info.assert_awaited_once_with()
+    reconnect.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_set_access_token_reconnects_active_realtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    tibber_connection = tibber.Tibber(
+        websession=MagicMock(),
+        user_agent="test",
+    )
+    calls: list[str] = []
+
+    async def fake_realtime_set_access_token(_access_token: str) -> None:
+        calls.append("realtime.set_access_token")
+
+    async def fake_update_info() -> None:
+        calls.append("update_info")
+
+    async def fake_reconnect() -> None:
+        calls.append("reconnect")
+
+    monkeypatch.setattr(
+        type(tibber_connection.realtime),
+        "should_restore_connection",
+        property(lambda _: True),
+    )
+    monkeypatch.setattr(
+        tibber_connection.realtime,
+        "set_access_token",
+        AsyncMock(side_effect=fake_realtime_set_access_token),
+    )
+    data_api_set_access_token = MagicMock()
+    monkeypatch.setattr(tibber_connection, "update_info", AsyncMock(side_effect=fake_update_info))
+    monkeypatch.setattr(tibber_connection.realtime, "reconnect", AsyncMock(side_effect=fake_reconnect))
+    monkeypatch.setattr(tibber_connection.data_api, "set_access_token", data_api_set_access_token)
+
+    await tibber_connection.set_access_token("new-token")
+
+    data_api_set_access_token.assert_called_once_with("new-token")
+    assert calls == ["realtime.set_access_token", "update_info", "reconnect"]
+
+
+@pytest.mark.asyncio
+async def test_realtime_set_access_token_recreates_subscription_manager(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeClient:
+        def __init__(self, transport: TibberWebsocketsTransport) -> None:
+            self.transport = transport
+            self.connect_async = AsyncMock(return_value=object())
+            self.close_async_mock = AsyncMock()
+            self.close_async = self.close_async_mock
+
+    monkeypatch.setattr(tibber_realtime, "Client", FakeClient)
+
+    realtime = tibber_realtime.TibberRT("old-token", 10, "test-agent", True)
+    realtime.sub_endpoint = "wss://example.test/v1-beta/gql/subscriptions"
+
+    await realtime.connect()
+    old_manager = realtime.sub_manager
+    assert old_manager is not None
+    assert isinstance(old_manager, FakeClient)
+    assert isinstance(old_manager.transport, TibberWebsocketsTransport)
+    assert old_manager.transport.init_payload["token"] == "old-token"
+
+    await realtime.set_access_token("new-token")
+
+    old_manager.close_async_mock.assert_awaited_once_with()
+    assert realtime.session is None
+    assert realtime.sub_manager is None
+
+    await realtime.connect()
+
+    assert realtime.sub_manager is not None
+    assert realtime.sub_manager is not old_manager
+    assert isinstance(realtime.sub_manager.transport, TibberWebsocketsTransport)
+    assert realtime.sub_manager.transport.init_payload["token"] == "new-token"
