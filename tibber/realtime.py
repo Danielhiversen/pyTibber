@@ -111,9 +111,7 @@ class TibberRT:
         assert isinstance(self.sub_manager.transport, TibberWebsocketsTransport)
 
         await asyncio.sleep(60)
-
         _retry_count = 0
-        next_test_all_homes_running = dt.datetime.now(tz=dt.UTC)
         while self._watchdog_running:
             await asyncio.sleep(5)
             if (
@@ -122,28 +120,10 @@ class TibberRT:
                 > dt.datetime.now(
                     tz=dt.UTC,
                 )
-                and dt.datetime.now(tz=dt.UTC) > next_test_all_homes_running
             ):
-                is_running = True
-                for home in self._homes:
-                    _LOGGER.debug(
-                        "Watchdog: Checking if home %s is alive, %s, %s",
-                        home.home_id,
-                        home.has_real_time_consumption,
-                        home.rt_subscription_running,
-                    )
-                    if not home.rt_subscription_running:
-                        is_running = False
-                        next_test_all_homes_running = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=60)
-                        break
-                    _LOGGER.debug(
-                        "Watchdog: Home %s is alive",
-                        home.home_id,
-                    )
-                if is_running:
-                    _retry_count = 0
-                    _LOGGER.debug("Watchdog: Connection is alive")
-                    continue
+                _retry_count = 0
+                _LOGGER.debug("Watchdog: Connection is alive")
+                continue
 
             self.sub_manager.transport.reconnect_at = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=self._timeout)
             _LOGGER.error(
