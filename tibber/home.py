@@ -7,13 +7,15 @@ import base64
 import contextlib
 import datetime as dt
 import logging
+import random
+import time
 import warnings
 from typing import TYPE_CHECKING, Any
 
 from gql import gql
 
 from .const import RESOLUTION_DAILY, RESOLUTION_HOURLY, RESOLUTION_MONTHLY, RESOLUTION_WEEKLY
-from .exceptions import WebsocketReconnectedError, WebsocketTransportError
+from .exceptions import SubscriptionFailedError, WebsocketReconnectedError, WebsocketTransportError
 from .gql_queries import (
     HISTORIC_DATA,
     HISTORIC_DATA_DATE,
@@ -31,6 +33,7 @@ _LOGGER = logging.getLogger(__name__)
 
 MIN_IN_HOUR: int = 60
 MIN_IN_QUARTER: int = 15
+RT_SUBSCRIPTION_TIMEOUT = 60
 
 
 class HourlyData:
@@ -79,8 +82,10 @@ class TibberHome:
 
         self._hourly_consumption_data = HourlyData()
         self._hourly_production_data = HourlyData(production=True)
-        self._rt_listener: asyncio.Task[Any] | None = None
+        self._last_rt_data_received: float | None = None
+        self._rt_listener: asyncio.Task[None] | None = None
         self._rt_callback: Callable[..., Any] | None = None
+        self._rt_subscription_timeout_task: asyncio.Task[None] | None = None
         self._has_real_time_consumption: None | bool = None
         self._real_time_consumption_suggested_disabled: dt.datetime | None = None
         self._resubscribe_task: asyncio.Task[None] | None = None
@@ -399,6 +404,9 @@ class TibberHome:
         self._rt_callback = callback
         await self._tibber_control.realtime.connect()
         self._rt_listener = asyncio.create_task(self._start_listen(callback, on_error=on_error))
+        self._rt_subscription_timeout_task = asyncio.create_task(
+            self._rt_subscription_timeout(callback, on_error=on_error),
+        )
 
     async def _start_listen(
         self,
@@ -417,6 +425,7 @@ class TibberHome:
                 data = {"data": _data}
                 with contextlib.suppress(KeyError):
                     data = self._add_extra_data(data)
+                self._last_rt_data_received = time.time()
                 _LOGGER.debug(
                     "Data received for %s: %s",
                     self.home_id,
@@ -527,6 +536,41 @@ class TibberHome:
             return
         self._rt_listener.cancel()
         self._rt_listener = None
+        if self._rt_subscription_timeout_task is not None:
+            self._rt_subscription_timeout_task.cancel()
+            self._rt_subscription_timeout_task = None
+        self._last_rt_data_received = None
+
+    async def _rt_subscription_timeout(
+        self,
+        callback: Callable[..., Any],
+        *,
+        on_error: Callable[[Exception], None] | None = None,
+    ) -> None:
+        """Resubscribe if realtime subscription is unresponsive."""
+        while True:
+            # Add some random time to avoid all homes resubscribing at the same time
+            # if there is an issue with the subscription
+            await asyncio.sleep(RT_SUBSCRIPTION_TIMEOUT + random.random() * RT_SUBSCRIPTION_TIMEOUT)  # noqa: S311
+            if (
+                self._last_rt_data_received is None
+                or time.time() - self._last_rt_data_received <= RT_SUBSCRIPTION_TIMEOUT
+            ):
+                continue
+            if on_error:
+                on_error(
+                    SubscriptionFailedError(
+                        f"No real time data received for home {self.home_id} "
+                        f"in the last {RT_SUBSCRIPTION_TIMEOUT} seconds",
+                    ),
+                )
+            else:
+                _LOGGER.error(
+                    "No real time data received for home %s in the last %d seconds, resubscribing",
+                    self.home_id,
+                    RT_SUBSCRIPTION_TIMEOUT,
+                )
+            await self._rt_resubscribe(callback=callback, on_error=on_error)
 
     @property
     def rt_subscription_running(self) -> bool:

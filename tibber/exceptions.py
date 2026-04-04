@@ -11,6 +11,10 @@ class SubscriptionEndpointMissingError(TibberError):
     """Exception raised when subscription endpoint is missing."""
 
 
+class SubscriptionFailedError(TibberError):
+    """Exception raised when subscription fails."""
+
+
 class UserAgentMissingError(TibberError):
     """Exception raised when user agent is missing."""
 
