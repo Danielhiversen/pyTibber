@@ -149,49 +149,49 @@ class TibberRT:
             await asyncio.sleep(5)
 
             # Reconnect Backoff
-            if self.sub_manager is None:
-                continue
-
-            if (
-                self.sub_manager.transport.running
-                and self.sub_manager.transport.reconnect_at
-                > dt.datetime.now(
-                    tz=dt.UTC,
-                )
-                and dt.datetime.now(tz=dt.UTC) > next_test_all_homes_running
-            ):
-                is_running = True
-                for home in self._homes:
-                    _LOGGER.debug(
-                        "Watchdog: Checking if home %s is alive, %s, %s",
-                        home.home_id,
-                        home.has_real_time_consumption,
-                        home.rt_subscription_running,
+            if self.sub_manager:
+                if (
+                    self.sub_manager.transport.running
+                    and self.sub_manager.transport.reconnect_at
+                    > dt.datetime.now(
+                        tz=dt.UTC,
                     )
-                    if not home.rt_subscription_running:
-                        is_running = False
-                        next_test_all_homes_running = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=60)
-                        break
-                    _LOGGER.debug(
-                        "Watchdog: Home %s is alive",
-                        home.home_id,
-                    )
-                if is_running:
-                    _retry_count = 0
-                    _LOGGER.debug("Watchdog: Connection is alive")
-                    continue
+                    and dt.datetime.now(tz=dt.UTC) > next_test_all_homes_running
+                ):
+                    is_running = True
+                    for home in self._homes:
+                        _LOGGER.debug(
+                            "Watchdog: Checking if home %s is alive, %s, %s",
+                            home.home_id,
+                            home.has_real_time_consumption,
+                            home.rt_subscription_running,
+                        )
+                        if not home.rt_subscription_running:
+                            is_running = False
+                            next_test_all_homes_running = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=60)
+                            break
+                        _LOGGER.debug(
+                            "Watchdog: Home %s is alive",
+                            home.home_id,
+                        )
+                    if is_running:
+                        _retry_count = 0
+                        _LOGGER.debug("Watchdog: Connection is alive")
+                        continue
+            if self.sub_manager:
+                self.sub_manager.transport.reconnect_at = dt.datetime.now(tz=dt.UTC) + dt.timedelta(
+                    seconds=self._timeout)
+                reconnect_at = self.sub_manager.transport.reconnect_at
+            else:
+                reconnect_at = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=self._timeout)
 
-            self.sub_manager.transport.reconnect_at = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=self._timeout)
-            _LOGGER.error(
-                "Watchdog: Connection is down, %s",
-                self.sub_manager.transport.reconnect_at,
-            )
+            _LOGGER.error("Watchdog: Connection is down, %s", reconnect_at)
 
             try:
-                if self.session is not None:
+                if self.session is not None and self.sub_manager is not None:
                     await self.sub_manager.close_async()
-            except Exception:
-                _LOGGER.exception("Error in watchdog close")
+            except Exception as e:
+                _LOGGER.exception(f"Error in watchdog close: {e}")
             finally:
                 # Reset connection state so _create_sub_manager() builds a fresh
                 # transport with current credentials instead of reusing the stale one.
