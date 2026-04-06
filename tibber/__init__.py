@@ -71,6 +71,7 @@ class Tibber:
             self.timeout,
             self._user_agent,
             ssl=ssl,
+            on_reconnect=self.update_info,
         )
 
         self.time_zone: dt.tzinfo = time_zone or dt.UTC
@@ -228,9 +229,9 @@ class Tibber:
         return await self.realtime.disconnect()
 
     async def set_access_token(self, access_token: str) -> None:
+        """Set access token and reauthorize clients."""
         if access_token == self._access_token:
             return
-        """Set access token and reauthorize clients."""
         restore_realtime = self.realtime.should_restore_connection
         self._access_token = access_token
         await self.realtime.set_access_token(access_token)
