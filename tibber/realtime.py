@@ -135,10 +135,11 @@ class TibberRT:
             async for result in self._session.subscribe(request):
                 yield result
         except TransportError as err:
-            _LOGGER.debug("%s: %s", err.__class__.__name__, err)
             self.subscription_running = False
             self._tibber_connected.clear()
             if isinstance(err, TransportConnectionFailed):
+                level = logging.DEBUG if on_error is not None else logging.ERROR
+                _LOGGER.log(level, "%s: %s", err.__class__.__name__, err)
                 if on_error:
                     on_error(err)
                 _LOGGER.debug("Waiting for reconnect")
