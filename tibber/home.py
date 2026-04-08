@@ -451,9 +451,7 @@ class TibberHome:
             if on_error is not None:
                 on_error(err)
 
-        if self._resubscribe_task is not None:
-            self._resubscribe_task.cancel()
-        self._resubscribe_task = asyncio.create_task(self._rt_resubscribe(callback, on_error=on_error))
+        self._schedule_resubscribe(callback, on_error=on_error)
 
     def _add_extra_data(self, data: dict[str, Any]) -> dict[str, Any]:
         """Add extra data to live subscription result."""
@@ -487,6 +485,16 @@ class TibberHome:
                 self._hourly_consumption_data.peak_hour = round(current_hour, 2)
                 self._hourly_consumption_data.peak_hour_time = _timestamp
         return data
+
+    def _schedule_resubscribe(
+        self,
+        callback: Callable[..., Any],
+        *,
+        on_error: Callable[[Exception], None] | None = None,
+    ) -> None:
+        if self._resubscribe_task is not None:
+            self._resubscribe_task.cancel()
+        self._resubscribe_task = asyncio.create_task(self._rt_resubscribe(callback=callback, on_error=on_error))
 
     async def rt_resubscribe(self) -> None:
         """Resubscribe to Tibber data.
@@ -570,7 +578,7 @@ class TibberHome:
                     self.home_id,
                     RT_SUBSCRIPTION_TIMEOUT,
                 )
-            await self._rt_resubscribe(callback=callback, on_error=on_error)
+            self._schedule_resubscribe(callback, on_error=on_error)
 
     @property
     def rt_subscription_running(self) -> bool:
