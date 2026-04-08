@@ -65,10 +65,9 @@ class Tibber:
         self.websession = websession
         self.timeout: int = timeout
         self._access_token: str = access_token
-
-        self.realtime: TibberRT = TibberRT(
-            self._access_token,
-            self.timeout,
+        self.realtime = TibberRT(
+            access_token,
+            timeout,
             self._user_agent,
             ssl=ssl,
         )
@@ -110,6 +109,11 @@ class Tibber:
 
         payload = {"query": document, "variables": variable_values or {}}
 
+        _LOGGER.debug(
+            "Executing query: %s with variables: %s",
+            document.replace(" ", "").replace("\n", "_"),
+            variable_values,
+        )
         try:
             resp = await self.websession.post(
                 API_ENDPOINT,
@@ -144,8 +148,7 @@ class Tibber:
             return
 
         if sub_endpoint := viewer.get("websocketSubscriptionUrl"):
-            _LOGGER.debug("Using websocket subscription url %s", sub_endpoint)
-            self.realtime.sub_endpoint = sub_endpoint
+            await self.realtime.set_subscription_endpoint(sub_endpoint)
 
         self._name = viewer.get("name")
         self._user_id = viewer.get("userId")
@@ -222,22 +225,19 @@ class Tibber:
         )
 
     async def rt_disconnect(self) -> None:
-        """Stop subscription manager.
-        This method simply calls the stop method of the SubscriptionManager if it is defined.
-        """
-        return await self.realtime.disconnect()
+        """Stop subscription manager."""
+        for home in self._homes.values():
+            home.rt_unsubscribe()
+        await self.realtime.disconnect()
 
     async def set_access_token(self, access_token: str) -> None:
+        """Set access token and reauthorize clients."""
         if access_token == self._access_token:
             return
-        """Set access token and reauthorize clients."""
-        restore_realtime = self.realtime.should_restore_connection
+        _LOGGER.debug("Updating access token")
         self._access_token = access_token
         await self.realtime.set_access_token(access_token)
         self.data_api.set_access_token(access_token)
-        await self.update_info()
-        if restore_realtime:
-            await self.realtime.reconnect()
 
     @property
     def user_id(self) -> str | None:
