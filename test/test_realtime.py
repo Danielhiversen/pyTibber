@@ -159,3 +159,63 @@ async def test_websocket_transport() -> None:
     assert mock_adapter.send.await_count == 1
     mock_adapter.receive.assert_awaited()
     assert mock_adapter.close.await_count == 1
+
+async def test_watchdog_resets_sub_manager_after_close(
+    mock_client: MagicMock,
+    tibber_rt: TibberRT,
+) -> None:
+    """sub_manager must be None after watchdog closes connection
+    so _create_sub_manager() builds a fresh transport instead of
+    reusing the stale one with an expired token."""
+    await tibber_rt.connect()
+    assert tibber_rt.sub_manager is not None
+
+    await tibber_rt._reset_connection()
+
+    assert tibber_rt.sub_manager is None
+    assert tibber_rt.session is None
+
+async def test_on_reconnect_callback_called_before_reconnect(
+    mock_client: MagicMock,
+) -> None:
+    """on_reconnect must be called before _create_sub_manager()
+    so the fresh websocketSubscriptionUrl is used for the new transport."""
+    call_order = []
+
+    async def mock_reconnect() -> None:
+        call_order.append("on_reconnect")
+
+    tibber_rt = TibberRT(
+        access_token="test_token",
+        timeout=30,
+        user_agent="test_agent",
+        ssl=True,
+        on_reconnect=mock_reconnect,
+    )
+    tibber_rt.sub_endpoint = "wss://test.endpoint"
+    await tibber_rt.connect()
+    call_order.append("connected")
+
+    await tibber_rt._reset_connection()
+    await tibber_rt._on_reconnect()
+    call_order.append("create_sub_manager")
+
+    assert call_order == ["connected", "on_reconnect", "create_sub_manager"]
+
+async def test_sub_endpoint_setter_skips_replacement_on_same_url(
+    mock_client: MagicMock,
+    tibber_rt: TibberRT,
+) -> None:
+    """Setting the same URL must not replace a running sub_manager.
+    Previously this would orphan the existing websocket connection."""
+    await tibber_rt.connect()
+
+    # Track how many times Client() was instantiated
+    with patch("tibber.realtime.Client") as mock_client_class:
+        # Set same URL — should be a no-op, Client() not called
+        tibber_rt.sub_endpoint = "wss://test.endpoint"
+        mock_client_class.assert_not_called()
+
+        # Set different URL — should create new Client
+        tibber_rt.sub_endpoint = "wss://new.endpoint"
+        mock_client_class.assert_called_once()

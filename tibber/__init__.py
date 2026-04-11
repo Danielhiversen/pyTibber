@@ -71,6 +71,7 @@ class Tibber:
             self.timeout,
             self._user_agent,
             ssl=ssl,
+            on_reconnect=self.update_info,
         )
 
         self.time_zone: dt.tzinfo = time_zone or dt.UTC
@@ -121,7 +122,7 @@ class Tibber:
                 timeout=aiohttp.ClientTimeout(total=self.timeout),
             )
             return (await extract_response_data(resp)).get("data")
-        except (TimeoutError, aiohttp.ClientError) as err:
+        except (TimeoutError, aiohttp.ClientError, RetryableHttpExceptionError) as err:
             if retry > 0:
                 return await self.execute(
                     document,
@@ -228,16 +229,28 @@ class Tibber:
         return await self.realtime.disconnect()
 
     async def set_access_token(self, access_token: str) -> None:
+        """Set access token and reauthorize clients."""
         if access_token == self._access_token:
             return
-        """Set access token and reauthorize clients."""
+
         restore_realtime = self.realtime.should_restore_connection
+        old_token = self._access_token # Store old token in case of rollback.
+
         self._access_token = access_token
         await self.realtime.set_access_token(access_token)
         self.data_api.set_access_token(access_token)
-        await self.update_info()
-        if restore_realtime:
-            await self.realtime.reconnect()
+
+        try:
+            await self.update_info()
+        except Exception:
+            # Rollback: If token was wrong or API threw transient error.
+            self._access_token = old_token
+            raise
+        else:
+            # Watchdog start only when connection was successful.
+            if restore_realtime:
+                await self.realtime.reconnect()
+
 
     @property
     def user_id(self) -> str | None:

@@ -466,16 +466,14 @@ class TibberHome:
         self._rt_stopped = False
 
     async def rt_resubscribe(self) -> None:
-        """Resubscribe to Tibber data."""
+        """Resubscribe to Tibber data.
+
+        Note: websocketSubscriptionUrl refresh is handled by the watchdog
+        via on_reconnect callback before calling this method.
+        """
         self.rt_unsubscribe()
         _LOGGER.debug("Resubscribe, %s", self.home_id)
-        await asyncio.gather(
-            *[
-                self.update_info(),
-                self._tibber_control.update_info(),
-            ],
-            return_exceptions=False,
-        )
+        await self.update_info()
         if self._rt_callback is None:
             _LOGGER.warning("No callback set for rt_resubscribe")
             return
