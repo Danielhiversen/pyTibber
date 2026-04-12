@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -111,7 +111,7 @@ async def test_subscription_running(
 
 
 async def test_update_endpoint(mock_client: MagicMock, tibber_rt: TibberRT) -> None:
-    """Test update subscription endpoint."""
+    """Delay endpoint replacement until the current connection is reset."""
     await tibber_rt.connect()
 
     assert mock_client.transport.url == "wss://test.endpoint"
@@ -119,7 +119,36 @@ async def test_update_endpoint(mock_client: MagicMock, tibber_rt: TibberRT) -> N
     # Set new endpoint
     tibber_rt.sub_endpoint = "wss://new.endpoint"
 
+    assert tibber_rt.sub_endpoint == "wss://new.endpoint"
+    assert mock_client.transport.url == "wss://test.endpoint"
+
+    await tibber_rt.disconnect()
+    await tibber_rt.connect()
+
     assert mock_client.transport.url == "wss://new.endpoint"
+
+
+async def test_close_sub_manager_skips_clients_without_session(
+    tibber_rt: TibberRT,
+) -> None:
+    """Avoid calling gql close_async when the client never got a session."""
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.transport = TibberWebsocketsTransport(
+                url="wss://test.endpoint",
+                access_token="test_token",
+                user_agent="test_agent",
+            )
+            self.close_async = AsyncMock()
+
+    mock_client = FakeClient()
+
+    tibber_rt.sub_manager = cast("Client", mock_client)
+
+    await tibber_rt.disconnect()
+
+    mock_client.close_async.assert_not_awaited()
 
 
 async def test_websocket_transport() -> None:

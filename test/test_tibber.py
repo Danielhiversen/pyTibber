@@ -184,12 +184,10 @@ async def test_set_access_token_updates_clients_without_realtime(monkeypatch: py
         websession=MagicMock(),
         user_agent="test",
     )
-    update_info = AsyncMock()
     reconnect = AsyncMock()
     rt_set_access_token = AsyncMock()
     data_api_set_access_token = MagicMock()
 
-    monkeypatch.setattr(tibber_connection, "update_info", update_info)
     monkeypatch.setattr(tibber_connection.realtime, "reconnect", reconnect)
     monkeypatch.setattr(tibber_connection.realtime, "set_access_token", rt_set_access_token)
     monkeypatch.setattr(tibber_connection.data_api, "set_access_token", data_api_set_access_token)
@@ -198,7 +196,6 @@ async def test_set_access_token_updates_clients_without_realtime(monkeypatch: py
 
     rt_set_access_token.assert_awaited_once_with("new-token")
     data_api_set_access_token.assert_called_once_with("new-token")
-    update_info.assert_awaited_once_with()
     reconnect.assert_not_awaited()
 
 
@@ -212,9 +209,6 @@ async def test_set_access_token_reconnects_active_realtime(monkeypatch: pytest.M
 
     async def fake_realtime_set_access_token(_access_token: str) -> None:
         calls.append("realtime.set_access_token")
-
-    async def fake_update_info() -> None:
-        calls.append("update_info")
 
     async def fake_reconnect() -> None:
         calls.append("reconnect")
@@ -230,14 +224,13 @@ async def test_set_access_token_reconnects_active_realtime(monkeypatch: pytest.M
         AsyncMock(side_effect=fake_realtime_set_access_token),
     )
     data_api_set_access_token = MagicMock()
-    monkeypatch.setattr(tibber_connection, "update_info", AsyncMock(side_effect=fake_update_info))
     monkeypatch.setattr(tibber_connection.realtime, "reconnect", AsyncMock(side_effect=fake_reconnect))
     monkeypatch.setattr(tibber_connection.data_api, "set_access_token", data_api_set_access_token)
 
     await tibber_connection.set_access_token("new-token")
 
     data_api_set_access_token.assert_called_once_with("new-token")
-    assert calls == ["realtime.set_access_token", "update_info", "reconnect"]
+    assert calls == ["realtime.set_access_token", "reconnect"]
 
 
 @pytest.mark.asyncio
@@ -245,9 +238,15 @@ async def test_realtime_set_access_token_recreates_subscription_manager(monkeypa
     class FakeClient:
         def __init__(self, transport: TibberWebsocketsTransport) -> None:
             self.transport = transport
-            self.connect_async = AsyncMock(return_value=object())
             self.close_async_mock = AsyncMock()
             self.close_async = self.close_async_mock
+
+            async def mock_connect_async() -> object:
+                session = object()
+                self.session = session
+                return session
+
+            self.connect_async = AsyncMock(side_effect=mock_connect_async)
 
     monkeypatch.setattr(tibber_realtime, "Client", FakeClient)
 
