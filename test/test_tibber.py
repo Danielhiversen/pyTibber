@@ -238,9 +238,15 @@ async def test_realtime_set_access_token_recreates_subscription_manager(monkeypa
     class FakeClient:
         def __init__(self, transport: TibberWebsocketsTransport) -> None:
             self.transport = transport
-            self.connect_async = AsyncMock(return_value=object())
             self.close_async_mock = AsyncMock()
             self.close_async = self.close_async_mock
+
+            async def mock_connect_async() -> object:
+                session = object()
+                self.session = session
+                return session
+
+            self.connect_async = AsyncMock(side_effect=mock_connect_async)
 
     monkeypatch.setattr(tibber_realtime, "Client", FakeClient)
 
