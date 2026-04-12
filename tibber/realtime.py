@@ -115,7 +115,7 @@ class TibberRT:
 
         if not self._sub_manager_has_session():
             _LOGGER.debug(
-                "Skipping subscription manager close because the gql client has no session"
+                "Skipping subscription manager close because the gql client has no session",
             )
             return
 
@@ -185,6 +185,7 @@ class TibberRT:
                 return
 
             self._create_sub_manager()
+            assert self.sub_manager is not None
             try:
                 self.session = await self.sub_manager.connect_async()
                 await self._resubscribe_homes()
@@ -247,7 +248,7 @@ class TibberRT:
         if self.sub_manager is not None and isinstance(self.sub_manager.transport, TibberWebsocketsTransport):
             if self.session is not None or self._sub_manager_has_session():
                 _LOGGER.debug(
-                    "Delaying websocket subscription url update until the next reconnect"
+                    "Delaying websocket subscription url update until the next reconnect",
                 )
                 return
 

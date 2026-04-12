@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -132,6 +132,7 @@ async def test_close_sub_manager_skips_clients_without_session(
     tibber_rt: TibberRT,
 ) -> None:
     """Avoid calling gql close_async when the client never got a session."""
+
     class FakeClient:
         def __init__(self) -> None:
             self.transport = TibberWebsocketsTransport(
@@ -143,10 +144,9 @@ async def test_close_sub_manager_skips_clients_without_session(
 
     mock_client = FakeClient()
 
-    tibber_rt.sub_manager = mock_client
-    tibber_rt.session = object()
+    tibber_rt.sub_manager = cast("Client", mock_client)
 
-    await tibber_rt._close_sub_manager()
+    await tibber_rt.disconnect()
 
     mock_client.close_async.assert_not_awaited()
 
