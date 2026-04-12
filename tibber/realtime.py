@@ -59,8 +59,7 @@ class TibberRT:
             for home in self._homes:
                 home.rt_unsubscribe()
         try:
-            if self.session is not None and self.sub_manager is not None:
-                await self.sub_manager.close_async()
+            await self._close_sub_manager()
         finally:
             self.session = None
             self.sub_manager = None
@@ -91,12 +90,12 @@ class TibberRT:
         self._access_token = access_token
         await self._reset_connection(unsubscribe_homes=reconnect_running)
 
-    def _create_sub_manager(self) -> None:
+    def _build_sub_manager(self) -> Client:
+        """Create a subscription manager for the current websocket endpoint."""
         if self.sub_endpoint is None:
             raise SubscriptionEndpointMissingError("Subscription endpoint not initialized")
-        if self.sub_manager is not None:
-            return
-        self.sub_manager = Client(
+
+        return Client(
             transport=TibberWebsocketsTransport(
                 self.sub_endpoint,
                 self._access_token,
@@ -104,6 +103,28 @@ class TibberRT:
                 ssl=self._ssl_context,
             ),
         )
+
+    def _sub_manager_has_session(self) -> bool:
+        """Return True if the current gql client owns a session."""
+        return self.sub_manager is not None and hasattr(self.sub_manager, "session")
+
+    async def _close_sub_manager(self) -> None:
+        """Close the current gql client if it has an active session object."""
+        if self.sub_manager is None:
+            return
+
+        if not self._sub_manager_has_session():
+            _LOGGER.debug(
+                "Skipping subscription manager close because the gql client has no session"
+            )
+            return
+
+        await self.sub_manager.close_async()
+
+    def _create_sub_manager(self) -> None:
+        if self.sub_manager is not None:
+            return
+        self.sub_manager = self._build_sub_manager()
 
     async def _watchdog(self) -> None:
         """Watchdog to keep connection alive."""
@@ -152,11 +173,12 @@ class TibberRT:
             )
 
             try:
-                if self.session is not None:
-                    await self.sub_manager.close_async()
-                    self.session = None
+                await self._close_sub_manager()
             except Exception:
                 _LOGGER.exception("Error in watchdog close")
+            finally:
+                self.session = None
+                self.sub_manager = None
 
             if not self._watchdog_running:
                 _LOGGER.debug("Watchdog: Stopping")
@@ -223,11 +245,10 @@ class TibberRT:
         """Set subscription endpoint."""
         self._sub_endpoint = sub_endpoint
         if self.sub_manager is not None and isinstance(self.sub_manager.transport, TibberWebsocketsTransport):
-            self.sub_manager = Client(
-                transport=TibberWebsocketsTransport(
-                    sub_endpoint,
-                    self._access_token,
-                    self._user_agent,
-                    ssl=self._ssl_context,
-                ),
-            )
+            if self.session is not None or self._sub_manager_has_session():
+                _LOGGER.debug(
+                    "Delaying websocket subscription url update until the next reconnect"
+                )
+                return
+
+            self.sub_manager = self._build_sub_manager()

@@ -235,7 +235,6 @@ class Tibber:
         self._access_token = access_token
         await self.realtime.set_access_token(access_token)
         self.data_api.set_access_token(access_token)
-        await self.update_info()
         if restore_realtime:
             await self.realtime.reconnect()
 
