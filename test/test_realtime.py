@@ -72,6 +72,8 @@ async def test_connect_disconnect(
     # Should not raise
     await tibber_rt.disconnect()
 
+    mock_client.close_async.assert_not_awaited()
+
     # First connect - transport not running, so connect_async should be called
     await tibber_rt.connect()
 
@@ -133,6 +135,14 @@ async def test_update_endpoint(mock_client: MagicMock) -> None:
     assert mock_client.transport.url == "wss://new.endpoint"
     assert mock_client.close_async.call_count == 0
     assert mock_client.connect_async.call_count == 0
+    mock_client.reset_mock()
+
+    await tibber_rt.disconnect()
+    await tibber_rt.connect()
+
+    assert mock_client.transport.url == "wss://new.endpoint"
+    assert mock_client.close_async.call_count == 1
+    assert mock_client.connect_async.call_count == 1
     mock_client.reset_mock()
 
     await tibber_rt.set_subscription_endpoint("wss://another_connected.endpoint")
