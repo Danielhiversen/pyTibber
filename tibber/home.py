@@ -561,8 +561,8 @@ class TibberHome:
             # if there is an issue with the subscription
             await asyncio.sleep(RT_SUBSCRIPTION_TIMEOUT + random.random() * RT_SUBSCRIPTION_TIMEOUT)  # noqa: S311
             if (
-                self._last_rt_data_received is None
-                or time.time() - self._last_rt_data_received <= RT_SUBSCRIPTION_TIMEOUT
+                self._last_rt_data_received is not None
+                and time.time() - self._last_rt_data_received <= RT_SUBSCRIPTION_TIMEOUT
             ):
                 continue
             if on_error:
