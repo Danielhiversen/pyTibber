@@ -236,6 +236,7 @@ async def test_rt_subscribe_on_error_called_on_exception(
 
     # Track which call number we're on to return different responses
     call_count = 0
+    resubscribe_called = asyncio.Event()
 
     def make_response(rt_enabled: bool) -> MagicMock:
         mock_response = MagicMock()
@@ -258,9 +259,12 @@ async def test_rt_subscribe_on_error_called_on_exception(
     async def post_side_effect(*args: Any, **kwargs: Any) -> MagicMock:  # noqa: ARG001, ANN401
         nonlocal call_count
         call_count += 1
-        # First call (initial subscription) always returns True to start subscription
+        # First two calls (initial subscription) always returns True to start subscription
         # Subsequent calls (resubscription) return the real_time_consumption value
-        return make_response(True if call_count == 1 else real_time_consumption)
+        if call_count <= 2:
+            return make_response(True)
+        resubscribe_called.set()
+        return make_response(real_time_consumption)
 
     mock_websession.post.side_effect = post_side_effect
 
@@ -286,7 +290,8 @@ async def test_rt_subscribe_on_error_called_on_exception(
     await asyncio.wait_for(on_error_called.wait(), timeout=1.0)
 
     assert caught == [error]
-    # resubscription should have been triggered
+    # resubscription should have been triggered - wait for HTTP calls to complete
+    await asyncio.wait_for(resubscribe_called.wait(), timeout=1.0)
     assert mock_websession.post.call_count == len(http_calls)
     assert mock_websession.post.call_args_list == http_calls
     assert home.rt_subscription_running is real_time_consumption
