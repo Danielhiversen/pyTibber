@@ -398,12 +398,17 @@ class TibberHome:
         """Connect to Tibber and subscribe to Tibber real time subscription.
 
         :param callback: The function to call when data is received.
+        :param on_error: The function to call when an error occurs.
         """
         if self._rt_listener is not None:
             raise RuntimeError("Already subscribed to real time data, call rt_unsubscribe first")
         _LOGGER.debug("Subscribe, %s", self.home_id)
         self._rt_callback = callback
         self._rt_on_error = on_error
+        await self._rt_resubscribe()
+
+    async def _rt_subscribe(self) -> None:
+        """Subscribe to Tibber real time subscription."""
         await self._tibber_control.realtime.connect()
         self._rt_listener = asyncio.create_task(self._start_listen())
         self._rt_subscription_timeout_task = asyncio.create_task(
@@ -504,13 +509,6 @@ class TibberHome:
 
     async def _rt_resubscribe(self) -> None:
         """Resubscribe to Tibber data."""
-        if (callback := self._rt_callback) is None:
-            raise RuntimeError("No callback set for rt_resubscribe, call rt_subscribe first")
-
-        if self._rt_listener is None:
-            _LOGGER.debug("No active subscription to resubscribe for %s", self.home_id)
-            return
-
         _LOGGER.debug("Resubscribe, %s", self.home_id)
         self.rt_unsubscribe()
 
@@ -524,7 +522,7 @@ class TibberHome:
         with contextlib.suppress(Exception):
             await self._tibber_control.update_info()
 
-        await self.rt_subscribe(callback, on_error=self._rt_on_error)
+        await self._rt_subscribe()
 
     def rt_unsubscribe(self) -> None:
         """Unsubscribe to Tibber data."""
