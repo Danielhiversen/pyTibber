@@ -11,7 +11,7 @@ import pytest
 
 import tibber
 from tibber.exceptions import WebsocketReconnectedError, WebsocketTransportError
-from tibber.gql_queries import INFO, UPDATE_INFO_PRICE
+from tibber.gql_queries import INFO, REAL_TIME_CONSUMPTION_ENABLED
 from tibber.realtime import TibberRT
 
 if TYPE_CHECKING:
@@ -132,13 +132,33 @@ async def test_rt_subscribe_multiple_items_all_delivered(
         (
             False,
             [
+                # Initial subscription (first call returns True)
                 call(
                     "https://api.tibber.com/v1-beta/gql",
                     headers={
                         "Authorization": "Bearer test-token",
                         "User-Agent": "test",
                     },
-                    data={"query": UPDATE_INFO_PRICE % HOME_ID, "variables": {}},
+                    data={"query": REAL_TIME_CONSUMPTION_ENABLED % HOME_ID, "variables": {}},
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ),
+                call(
+                    "https://api.tibber.com/v1-beta/gql",
+                    headers={
+                        "Authorization": "Bearer test-token",
+                        "User-Agent": "test",
+                    },
+                    data={"query": INFO, "variables": {}},
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ),
+                # Resubscription (returns False, so no INFO call)
+                call(
+                    "https://api.tibber.com/v1-beta/gql",
+                    headers={
+                        "Authorization": "Bearer test-token",
+                        "User-Agent": "test",
+                    },
+                    data={"query": REAL_TIME_CONSUMPTION_ENABLED % HOME_ID, "variables": {}},
                     timeout=aiohttp.ClientTimeout(total=10),
                 ),
             ],
@@ -146,13 +166,33 @@ async def test_rt_subscribe_multiple_items_all_delivered(
         (
             True,
             [
+                # Initial subscription (first call returns True)
                 call(
                     "https://api.tibber.com/v1-beta/gql",
                     headers={
                         "Authorization": "Bearer test-token",
                         "User-Agent": "test",
                     },
-                    data={"query": UPDATE_INFO_PRICE % HOME_ID, "variables": {}},
+                    data={"query": REAL_TIME_CONSUMPTION_ENABLED % HOME_ID, "variables": {}},
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ),
+                call(
+                    "https://api.tibber.com/v1-beta/gql",
+                    headers={
+                        "Authorization": "Bearer test-token",
+                        "User-Agent": "test",
+                    },
+                    data={"query": INFO, "variables": {}},
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ),
+                # Resubscription (returns True)
+                call(
+                    "https://api.tibber.com/v1-beta/gql",
+                    headers={
+                        "Authorization": "Bearer test-token",
+                        "User-Agent": "test",
+                    },
+                    data={"query": REAL_TIME_CONSUMPTION_ENABLED % HOME_ID, "variables": {}},
                     timeout=aiohttp.ClientTimeout(total=10),
                 ),
                 call(
@@ -185,7 +225,45 @@ async def test_rt_subscribe_on_error_called_on_exception(
     http_calls: list,
 ) -> None:
     """on_error must be called when subscribe raises an exception."""
-    home._has_real_time_consumption = real_time_consumption  # noqa: SLF001
+    # Initialize info structure so update_real_time_consumption_enabled can update it
+    home.info = {
+        "viewer": {
+            "home": {
+                "features": {"realTimeConsumptionEnabled": real_time_consumption},
+            },
+        },
+    }
+
+    # Track which call number we're on to return different responses
+    call_count = 0
+
+    def make_response(rt_enabled: bool) -> MagicMock:
+        mock_response = MagicMock()
+        mock_response.status = 200
+        mock_response.content_type = "application/json"
+        mock_response.json = AsyncMock(
+            return_value={
+                "data": {
+                    "viewer": {
+                        "home": {
+                            "id": HOME_ID,
+                            "features": {"realTimeConsumptionEnabled": rt_enabled},
+                        },
+                    },
+                },
+            },
+        )
+        return mock_response
+
+    async def post_side_effect(*args: Any, **kwargs: Any) -> MagicMock:  # noqa: ARG001, ANN401
+        nonlocal call_count
+        call_count += 1
+        # First call (initial subscription) always returns True to start subscription
+        # Subsequent calls (resubscription) return the real_time_consumption value
+        return make_response(True if call_count == 1 else real_time_consumption)
+
+    mock_websession.post.side_effect = post_side_effect
+
     wait_for_events = asyncio.Event()
     wait_for_events.set()  # allow subscribe to raise immediately
 
