@@ -1,19 +1,27 @@
 """Tibber RT connection."""
 
 import asyncio
-import datetime as dt
 import logging
-import random
+from collections.abc import AsyncGenerator, Callable
 from ssl import SSLContext
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
-from gql import Client
+from gql import Client, GraphQLRequest
+from gql.transport.exceptions import TransportClosed, TransportConnectionFailed, TransportError
+from gql.transport.websockets import WebsocketsTransport
+from tenacity import before_sleep_log, retry, wait_exponential_jitter
 
-from .exceptions import SubscriptionEndpointMissingError
-from .home import TibberHome
-from .websocket_transport import TibberWebsocketsTransport
+from .exceptions import SubscriptionEndpointMissingError, WebsocketReconnectedError, WebsocketTransportError
 
+if TYPE_CHECKING:
+    from gql.client import AsyncClientSession
+
+KEEP_ALIVE_TIMEOUT = 90
 LOCK_CONNECT = asyncio.Lock()
+MIN_RECONNECT_INTERVAL = 1
+MAX_RECONNECT_INTERVAL = 60
+PING_INTERVAL = 30
+PONG_TIMEOUT = 20
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,224 +40,176 @@ class TibberRT:
         self._timeout: int = timeout
         self._user_agent: str = user_agent
         self._ssl_context = ssl
-
         self._sub_endpoint: str | None = None
-        self._homes: list[TibberHome] = []
-        self._watchdog_runner: None | asyncio.Task[Any] = None
-        self._watchdog_running: bool = False
+        self._tibber_connected = asyncio.Event()
+        self._client: Client | None = None
+        self.subscription_running = False
+        self._session: AsyncClientSession | None = None
 
-        self.sub_manager: Client | None = None
-        self.session: Any | None = None
-
-    async def disconnect(self) -> None:
-        """Stop subscription manager.
-        This method simply calls the stop method of the SubscriptionManager if it is defined.
-        """
-        _LOGGER.debug("Stopping subscription manager")
-        await self._reset_connection(unsubscribe_homes=True)
-
-    async def _reset_connection(self, unsubscribe_homes: bool = False) -> None:
-        """Reset websocket connection state."""
-        if self._watchdog_runner is not None:
-            _LOGGER.debug("Stopping watchdog")
-            self._watchdog_running = False
-            self._watchdog_runner.cancel()
-            self._watchdog_runner = None
-        if unsubscribe_homes:
-            for home in self._homes:
-                home.rt_unsubscribe()
-        try:
-            await self._close_sub_manager()
-        finally:
-            self.session = None
-            self.sub_manager = None
-
-    async def connect(self) -> None:
-        """Start subscription manager."""
-        self._create_sub_manager()
-
-        assert self.sub_manager is not None
-
-        async with LOCK_CONNECT:
-            if self.subscription_running:
-                return
-            if self._watchdog_runner is None:
-                _LOGGER.debug("Starting watchdog")
-                self._watchdog_running = True
-                self._watchdog_runner = asyncio.create_task(self._watchdog())
-            self.session = await self.sub_manager.connect_async()
-
-    async def reconnect(self) -> None:
-        """Reconnect and resubscribe all homes."""
-        await self.connect()
-        await self._resubscribe_homes()
-
-    async def set_access_token(self, access_token: str) -> None:
-        """Set access token."""
-        reconnect_running = self.subscription_running or self._watchdog_runner is not None
-        self._access_token = access_token
-        await self._reset_connection(unsubscribe_homes=reconnect_running)
-
-    def _build_sub_manager(self) -> Client:
-        """Create a subscription manager for the current websocket endpoint."""
-        if self.sub_endpoint is None:
-            raise SubscriptionEndpointMissingError("Subscription endpoint not initialized")
-
+    def _create_client(self) -> Client:
+        """Create a new gql Client with the current transport settings."""
+        self._tibber_connected.clear()
         return Client(
             transport=TibberWebsocketsTransport(
-                self.sub_endpoint,
+                self._sub_endpoint,
                 self._access_token,
                 self._user_agent,
                 ssl=self._ssl_context,
+                tibber_connected=self._tibber_connected,
             ),
         )
 
-    def _sub_manager_has_session(self) -> bool:
-        """Return True if the current gql client owns a session."""
-        return self.sub_manager is not None and hasattr(self.sub_manager, "session")
+    async def disconnect(self) -> None:
+        """Disconnect the websocket client."""
+        _LOGGER.debug("Stopping subscription manager")
+        async with LOCK_CONNECT:
+            await self._disconnect()
 
-    async def _close_sub_manager(self) -> None:
-        """Close the current gql client if it has an active session object."""
-        if self.sub_manager is None:
+    async def _disconnect(self) -> None:
+        """Disconnect the websocket client."""
+        if self._client is not None and self._session is not None:
+            await self._client.close_async()
+            self._session = None
+        self.subscription_running = False
+
+    async def connect(self) -> None:
+        """Connect the websocket client."""
+        async with LOCK_CONNECT:
+            await self._connect()
+
+    async def _connect(self) -> None:
+        """Connect the websocket client."""
+        if self._sub_endpoint is None:
+            raise SubscriptionEndpointMissingError("Subscription endpoint not initialized")
+
+        if self.subscription_running or self._session:
             return
 
-        if not self._sub_manager_has_session():
-            _LOGGER.debug(
-                "Skipping subscription manager close because the gql client has no session",
+        self._client = self._create_client()
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(
+                    self._client.connect_async(
+                        reconnecting=True,
+                        retry_connect=retry(
+                            wait=wait_exponential_jitter(
+                                initial=MIN_RECONNECT_INTERVAL,
+                                max=MAX_RECONNECT_INTERVAL,
+                                jitter=MAX_RECONNECT_INTERVAL,
+                            ),
+                            before_sleep=before_sleep_log(_LOGGER, logging.INFO),
+                        ),
+                    ),
+                ),
+                timeout=self._timeout,
             )
-            return
+        except TimeoutError as err:
+            _LOGGER.debug("Timeout connecting to websocket: %s", err)
+            # The connection will be retried by the reconnecting task
+        else:
+            self.subscription_running = True
 
-        await self.sub_manager.close_async()
+        # The client session is set even if the connection times out.
+        self._session = cast("AsyncClientSession", self._client.session)
 
-    def _create_sub_manager(self) -> None:
-        if self.sub_manager is not None:
-            return
-        self.sub_manager = self._build_sub_manager()
-
-    async def _watchdog(self) -> None:
-        """Watchdog to keep connection alive."""
-        assert self.sub_manager is not None
-        assert isinstance(self.sub_manager.transport, TibberWebsocketsTransport)
-
-        await asyncio.sleep(60)
-
-        _retry_count = 0
-        next_test_all_homes_running = dt.datetime.now(tz=dt.UTC)
-        while self._watchdog_running:
-            await asyncio.sleep(5)
-            if (
-                self.sub_manager.transport.running
-                and self.sub_manager.transport.reconnect_at
-                > dt.datetime.now(
-                    tz=dt.UTC,
-                )
-                and dt.datetime.now(tz=dt.UTC) > next_test_all_homes_running
-            ):
-                is_running = True
-                for home in self._homes:
-                    _LOGGER.debug(
-                        "Watchdog: Checking if home %s is alive, %s, %s",
-                        home.home_id,
-                        home.has_real_time_consumption,
-                        home.rt_subscription_running,
-                    )
-                    if not home.rt_subscription_running:
-                        is_running = False
-                        next_test_all_homes_running = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=60)
-                        break
-                    _LOGGER.debug(
-                        "Watchdog: Home %s is alive",
-                        home.home_id,
-                    )
-                if is_running:
-                    _retry_count = 0
-                    _LOGGER.debug("Watchdog: Connection is alive")
-                    continue
-
-            self.sub_manager.transport.reconnect_at = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=self._timeout)
-            _LOGGER.error(
-                "Watchdog: Connection is down, %s",
-                self.sub_manager.transport.reconnect_at,
-            )
-
-            try:
-                await self._close_sub_manager()
-            except Exception:
-                _LOGGER.exception("Error in watchdog close")
-            finally:
-                self.session = None
-                self.sub_manager = None
-
-            if not self._watchdog_running:
-                _LOGGER.debug("Watchdog: Stopping")
+    async def reconnect(self) -> None:
+        """Reconnect the websocket client."""
+        async with LOCK_CONNECT:
+            if self._session is None:
                 return
+            _LOGGER.debug("Reconnecting websocket client")
+            await self._disconnect()
+            await self._connect()
 
-            self._create_sub_manager()
-            assert self.sub_manager is not None
-            try:
-                self.session = await self.sub_manager.connect_async()
-                await self._resubscribe_homes()
-            except Exception as err:  # noqa: BLE001
-                delay_seconds = min(
-                    random.SystemRandom().randint(1, 30) + _retry_count**2,
-                    5 * 60,
-                )
-                _retry_count += 1
-                _LOGGER.error(
-                    "Error in watchdog connect, retrying in %s seconds, %s: %s",
-                    delay_seconds,
-                    _retry_count,
-                    err,
-                    exc_info=_retry_count > 1,
-                )
-                await asyncio.sleep(delay_seconds)
-            else:
-                _LOGGER.debug("Watchdog: Reconnected successfully")
-                await asyncio.sleep(60)
+    async def set_access_token(self, access_token: str) -> None:
+        """Set access token."""
+        self._access_token = access_token
+        await self.reconnect()
 
-    async def _resubscribe_homes(self) -> None:
-        """Resubscribe to all homes."""
-        _LOGGER.debug("Resubscribing to homes")
-        await asyncio.gather(*[home.rt_resubscribe() for home in self._homes])
+    async def subscribe(
+        self,
+        request: GraphQLRequest,
+        *,
+        on_error: Callable[[Exception], None] | None = None,
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        """Subscribe to a GraphQL query."""
+        if self._session is None:
+            raise RuntimeError("Connect must be called before subscribe")
 
-    def add_home(self, home: TibberHome) -> bool:
-        """Add home to real time subscription."""
-        if home.has_real_time_consumption is False:
-            return False
-        if home in self._homes:
-            return False
-        self._homes.append(home)
-        return True
+        try:
+            async for result in self._session.subscribe(request):
+                yield result
+        except TransportError as err:
+            self.subscription_running = False
+            self._tibber_connected.clear()
+            if isinstance(err, TransportConnectionFailed):
+                level = logging.DEBUG if on_error is not None else logging.ERROR
+                _LOGGER.log(level, "%s: %s", err.__class__.__name__, err)
+                if on_error:
+                    on_error(err)
+                _LOGGER.debug("Waiting for reconnect")
+                await self._tibber_connected.wait()
+                self.subscription_running = True
+                _LOGGER.info("Reconnected")
+                raise WebsocketReconnectedError("Websocket reconnected") from err
+            raise WebsocketTransportError(err) from err
 
-    @property
-    def subscription_running(self) -> bool:
-        """Is real time subscription running."""
-        return (
-            self.sub_manager is not None
-            and isinstance(self.sub_manager.transport, TibberWebsocketsTransport)
-            and self.sub_manager.transport.running
-            and self.session is not None
-        )
-
-    @property
-    def should_restore_connection(self) -> bool:
-        """Whether realtime subscriptions should be restored after a reset."""
-        return self.subscription_running or self._watchdog_runner is not None
-
-    @property
-    def sub_endpoint(self) -> str | None:
-        """Get subscription endpoint."""
-        return self._sub_endpoint
-
-    @sub_endpoint.setter
-    def sub_endpoint(self, sub_endpoint: str) -> None:
+    async def set_subscription_endpoint(self, url: str) -> None:
         """Set subscription endpoint."""
-        self._sub_endpoint = sub_endpoint
-        if self.sub_manager is not None and isinstance(self.sub_manager.transport, TibberWebsocketsTransport):
-            if self.session is not None or self._sub_manager_has_session():
-                _LOGGER.debug(
-                    "Delaying websocket subscription url update until the next reconnect",
-                )
-                return
+        old_url = self._sub_endpoint
+        if url == old_url:
+            return
+        _LOGGER.debug("Updating subscription endpoint to %s", url)
+        self._sub_endpoint = url
+        await self.reconnect()
 
-            self.sub_manager = self._build_sub_manager()
+
+class TibberWebsocketsTransport(WebsocketsTransport):
+    """Tibber websockets transport."""
+
+    def __init__(
+        self,
+        url: str,
+        access_token: str,
+        user_agent: str,
+        *,
+        ssl: SSLContext | bool = True,
+        tibber_connected: asyncio.Event,
+    ) -> None:
+        """Initialize TibberWebsocketsTransport."""
+        super().__init__(
+            url=url,
+            init_payload={"token": access_token},
+            headers={"User-Agent": user_agent},
+            ssl=ssl,
+            keep_alive_timeout=KEEP_ALIVE_TIMEOUT,
+            ping_interval=PING_INTERVAL,
+            pong_timeout=PONG_TIMEOUT,
+        )
+        self._tibber_connected = tibber_connected
+        self._user_agent = user_agent
+
+    async def _after_connect(self) -> None:
+        """Hook to add custom code for subclasses.
+
+        Called after the connection has been established.
+        """
+        await super()._after_connect()
+        self._tibber_connected.set()
+
+    async def close(self) -> None:
+        """Close the websocket connection.
+
+        This method is only called by the client.
+        """
+        await self._fail(TransportClosed(f"Tibber websocket closed by {self._user_agent}"))
+        await self.wait_closed()
+
+    async def _close_hook(self) -> None:
+        """Hook called by WebsocketsTransportBase on connection close.
+
+        This method is called when the connection is closed
+        for any reason (not only by the client).
+        """
+        self._tibber_connected.clear()
+        await super()._close_hook()
