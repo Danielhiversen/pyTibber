@@ -57,6 +57,7 @@ def mock_client_fixture() -> Generator[MagicMock]:
         async def mock_connect_async(**kwargs: Any) -> MagicMock:  # noqa: ANN401, ARG001
             session = mock_client.session = MagicMock(spec=AsyncClientSession)
             mock_client.transport.adapter.websocket = MagicMock(state=State.OPEN)
+            await asyncio.sleep(0)  # Simulate some delay in connecting
             return session
 
         mock_client.connect_async = AsyncMock(wraps=mock_connect_async)
@@ -320,24 +321,18 @@ async def test_set_access_token_reconnects_with_new_token(
 
 
 @pytest.mark.parametrize("timeout", [0])
-async def test_connect_timeout_leaves_no_session_and_subscription_not_running(
+async def test_connect_timeout_leaves_with_session_and_subscription_not_running(
     mock_client: MagicMock,
     tibber_rt: TibberRT,
 ) -> None:
-    """When connect_async times out, subscription_running must remain False and no session is set."""
-
-    async def slow_connect(**kwargs: Any) -> Any:  # noqa: ANN401, ARG001
-        await asyncio.sleep(9999)
-
-    mock_client.connect_async = AsyncMock(side_effect=slow_connect)
-
+    """When connect_async times out, a session should be set and subscription_running must remain False."""
     await tibber_rt.connect()
 
     assert tibber_rt.subscription_running is False
 
     await tibber_rt.disconnect()
 
-    mock_client.close_async.assert_not_awaited()
+    mock_client.close_async.assert_awaited_once()
     assert tibber_rt.subscription_running is False
 
 

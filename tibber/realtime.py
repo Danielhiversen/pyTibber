@@ -4,7 +4,7 @@ import asyncio
 import logging
 from collections.abc import AsyncGenerator, Callable
 from ssl import SSLContext
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from gql import Client, GraphQLRequest
 from gql.transport.exceptions import TransportClosed, TransportConnectionFailed, TransportError
@@ -87,16 +87,18 @@ class TibberRT:
 
         self._client = self._create_client()
         try:
-            self._session = await asyncio.wait_for(
-                self._client.connect_async(
-                    reconnecting=True,
-                    retry_connect=retry(
-                        wait=wait_exponential_jitter(
-                            initial=MIN_RECONNECT_INTERVAL,
-                            max=MAX_RECONNECT_INTERVAL,
-                            jitter=MAX_RECONNECT_INTERVAL,
+            await asyncio.wait_for(
+                asyncio.shield(
+                    self._client.connect_async(
+                        reconnecting=True,
+                        retry_connect=retry(
+                            wait=wait_exponential_jitter(
+                                initial=MIN_RECONNECT_INTERVAL,
+                                max=MAX_RECONNECT_INTERVAL,
+                                jitter=MAX_RECONNECT_INTERVAL,
+                            ),
+                            before_sleep=before_sleep_log(_LOGGER, logging.INFO),
                         ),
-                        before_sleep=before_sleep_log(_LOGGER, logging.INFO),
                     ),
                 ),
                 timeout=self._timeout,
@@ -106,6 +108,9 @@ class TibberRT:
             # The connection will be retried by the reconnecting task
         else:
             self.subscription_running = True
+
+        # The client session is set even if the connection times out.
+        self._session = cast("AsyncClientSession", self._client.session)
 
     async def reconnect(self) -> None:
         """Reconnect the websocket client."""
