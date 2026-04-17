@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from typing import TYPE_CHECKING, Any
-from unittest.mock import AsyncMock, MagicMock, call, create_autospec
+from unittest.mock import AsyncMock, MagicMock, call, create_autospec, patch
 
 import aiohttp
 import pytest
@@ -216,6 +216,7 @@ async def test_rt_subscribe_multiple_items_all_delivered(
         RuntimeError("unexpected"),
     ],
 )
+@patch("tibber.home.RESUBSCRIBE_WAIT_TIME", 0)
 async def test_rt_subscribe_on_error_called_on_exception(
     mock_websession: MagicMock,
     home: tibber.TibberHome,

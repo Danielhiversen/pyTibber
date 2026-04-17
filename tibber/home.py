@@ -35,6 +35,7 @@ _LOGGER = logging.getLogger(__name__)
 MIN_IN_HOUR: int = 60
 MIN_IN_QUARTER: int = 15
 RT_SUBSCRIPTION_TIMEOUT = 60
+RESUBSCRIBE_WAIT_TIME = 60
 
 
 class HourlyData:
@@ -466,6 +467,7 @@ class TibberHome:
             if on_error is not None:
                 on_error(err)
 
+        await asyncio.sleep(random.random() * RESUBSCRIBE_WAIT_TIME)  # noqa: S311
         self._schedule_resubscribe()
 
     def _add_extra_data(self, data: dict[str, Any]) -> dict[str, Any]:
