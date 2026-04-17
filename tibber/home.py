@@ -516,6 +516,8 @@ class TibberHome:
             DeprecationWarning,
             stacklevel=2,
         )
+        if self._rt_callback is None:
+            raise RuntimeError("No callback set for rt_resubscribe, call rt_subscribe first")
         await self._rt_resubscribe()
 
     async def _rt_resubscribe(self) -> None:
