@@ -234,6 +234,14 @@ class TibberRT:
                     exc_info=_retry_count > 1,
                 )
                 await asyncio.sleep(delay_seconds)
+                # Reset sub_manager on 4403 to force a fresh websocketSubscriptionUrl
+                # on the next attempt. This handles a race condition where Tibber
+                # invalidates the session server-side (e.g. during a rolling deployment)
+                # between us fetching the URL and completing the WebSocket handshake.
+                # We only reset on 4403 specifically — transient network errors don't
+                # invalidate the URL so resetting unnecessarily would cause extra API calls.
+                if "4403" in str(err) or "Invalid token" in str(err):
+                    self.sub_manager = None
             else:
                 _LOGGER.debug("Watchdog: Reconnected successfully")
                 await asyncio.sleep(60)
