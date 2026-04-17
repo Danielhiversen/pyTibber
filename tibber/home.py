@@ -21,6 +21,7 @@ from .gql_queries import (
     HISTORIC_DATA_DATE,
     HISTORIC_PRICE,
     LIVE_SUBSCRIBE,
+    REAL_TIME_CONSUMPTION_ENABLED,
     UPDATE_INFO_PRICE,
 )
 
@@ -246,6 +247,16 @@ class TibberHome:
         except (KeyError, TypeError) as err:
             _LOGGER.error("Malformed price info data for home %s: %s", self._home_id, err)
             self.price_total = {}
+
+    async def update_real_time_consumption_enabled(self) -> None:
+        """Update the real time consumption enabled status."""
+        if not (data := await self._tibber_control.execute(REAL_TIME_CONSUMPTION_ENABLED % self._home_id)):
+            _LOGGER.error("Could not get the data.")
+            return
+        self.info["viewer"]["home"]["features"]["realTimeConsumptionEnabled"] = data["viewer"]["home"]["features"][
+            "realTimeConsumptionEnabled"
+        ]
+        self._update_has_real_time_consumption()
 
     def _update_has_real_time_consumption(self) -> None:
         try:
@@ -513,7 +524,7 @@ class TibberHome:
         self.rt_unsubscribe()
 
         with contextlib.suppress(Exception):
-            await self.update_info()  # Update home info to check if real time is enabled
+            await self.update_real_time_consumption_enabled()
         if not self.has_real_time_consumption:
             _LOGGER.debug("Home %s does not have real time consumption enabled", self.home_id)
             return

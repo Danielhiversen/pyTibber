@@ -112,6 +112,18 @@ PUSH_NOTIFICATION = """
           }}
         }}
         """
+REAL_TIME_CONSUMPTION_ENABLED = """
+        {
+          viewer {
+            home(id: "%s") {
+              id
+              features {
+                realTimeConsumptionEnabled
+              }
+            }
+          }
+        }
+        """
 UPDATE_CURRENT_PRICE = """
         {
           viewer {
