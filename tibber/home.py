@@ -538,10 +538,9 @@ class TibberHome:
     def rt_unsubscribe(self) -> None:
         """Unsubscribe to Tibber data."""
         _LOGGER.debug("Unsubscribe, %s", self.home_id)
-        if self._rt_listener is None:
-            return
-        self._rt_listener.cancel()
-        self._rt_listener = None
+        if self._rt_listener is not None:
+            self._rt_listener.cancel()
+            self._rt_listener = None
         if self._rt_subscription_timeout_task is not None:
             self._rt_subscription_timeout_task.cancel()
             self._rt_subscription_timeout_task = None
@@ -568,10 +567,13 @@ class TibberHome:
                 )
             else:
                 _LOGGER.error(
-                    "No real time data received for home %s in the last %d seconds, resubscribing",
+                    "No real time data received for home %s in the last %d seconds, reconnecting and resubscribing",
                     self.home_id,
                     RT_SUBSCRIPTION_TIMEOUT,
                 )
+            self._rt_listener.cancel()
+            self._rt_listener = None
+            await self._tibber_control.realtime.reconnect()
             self._schedule_resubscribe()
 
     @property
