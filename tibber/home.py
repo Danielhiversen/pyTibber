@@ -85,6 +85,7 @@ class TibberHome:
         self._last_rt_data_received: float | None = None
         self._rt_listener: asyncio.Task[None] | None = None
         self._rt_callback: Callable[..., Any] | None = None
+        self._rt_on_error: Callable[[Exception], None] | None = None
         self._rt_subscription_timeout_task: asyncio.Task[None] | None = None
         self._has_real_time_consumption: None | bool = None
         self._real_time_consumption_suggested_disabled: dt.datetime | None = None
@@ -402,19 +403,17 @@ class TibberHome:
             raise RuntimeError("Already subscribed to real time data, call rt_unsubscribe first")
         _LOGGER.debug("Subscribe, %s", self.home_id)
         self._rt_callback = callback
+        self._rt_on_error = on_error
         await self._tibber_control.realtime.connect()
-        self._rt_listener = asyncio.create_task(self._start_listen(callback, on_error=on_error))
+        self._rt_listener = asyncio.create_task(self._start_listen())
         self._rt_subscription_timeout_task = asyncio.create_task(
-            self._rt_subscription_timeout(callback, on_error=on_error),
+            self._rt_subscription_timeout(),
         )
 
-    async def _start_listen(
-        self,
-        callback: Callable[..., Any],
-        *,
-        on_error: Callable[[Exception], None] | None = None,
-    ) -> None:
+    async def _start_listen(self) -> None:
         """Subscribe to Tibber."""
+        callback = self._rt_callback
+        on_error = self._rt_on_error
         try:
             async for _data in self._tibber_control.realtime.subscribe(
                 gql(
@@ -451,7 +450,7 @@ class TibberHome:
             if on_error is not None:
                 on_error(err)
 
-        self._schedule_resubscribe(callback, on_error=on_error)
+        self._schedule_resubscribe()
 
     def _add_extra_data(self, data: dict[str, Any]) -> dict[str, Any]:
         """Add extra data to live subscription result."""
@@ -486,38 +485,28 @@ class TibberHome:
                 self._hourly_consumption_data.peak_hour_time = _timestamp
         return data
 
-    def _schedule_resubscribe(
-        self,
-        callback: Callable[..., Any],
-        *,
-        on_error: Callable[[Exception], None] | None = None,
-    ) -> None:
+    def _schedule_resubscribe(self) -> None:
         if self._resubscribe_task is not None:
             self._resubscribe_task.cancel()
-        self._resubscribe_task = asyncio.create_task(self._rt_resubscribe(callback=callback, on_error=on_error))
+        self._resubscribe_task = asyncio.create_task(self._rt_resubscribe())
 
     async def rt_resubscribe(self) -> None:
         """Resubscribe to Tibber data.
 
         Deprecated. Resubscription will happen automatically.
         """
-        if self._rt_callback is None:
-            raise RuntimeError("No callback set for rt_resubscribe, call rt_subscribe first")
-
         warnings.warn(
             "TibberHome.rt_resubscribe is deprecated, resubscription will happen automatically",
             DeprecationWarning,
             stacklevel=2,
         )
-        await self._rt_resubscribe(self._rt_callback)
+        await self._rt_resubscribe()
 
-    async def _rt_resubscribe(
-        self,
-        callback: Callable[..., Any],
-        *,
-        on_error: Callable[[Exception], None] | None = None,
-    ) -> None:
+    async def _rt_resubscribe(self) -> None:
         """Resubscribe to Tibber data."""
+        if (callback := self._rt_callback) is None:
+            raise RuntimeError("No callback set for rt_resubscribe, call rt_subscribe first")
+
         if self._rt_listener is None:
             _LOGGER.debug("No active subscription to resubscribe for %s", self.home_id)
             return
@@ -535,7 +524,7 @@ class TibberHome:
         with contextlib.suppress(Exception):
             await self._tibber_control.update_info()
 
-        await self.rt_subscribe(callback, on_error=on_error)
+        await self.rt_subscribe(callback, on_error=self._rt_on_error)
 
     def rt_unsubscribe(self) -> None:
         """Unsubscribe to Tibber data."""
@@ -549,13 +538,9 @@ class TibberHome:
             self._rt_subscription_timeout_task = None
         self._last_rt_data_received = None
 
-    async def _rt_subscription_timeout(
-        self,
-        callback: Callable[..., Any],
-        *,
-        on_error: Callable[[Exception], None] | None = None,
-    ) -> None:
+    async def _rt_subscription_timeout(self) -> None:
         """Resubscribe if realtime subscription is unresponsive."""
+        on_error = self._rt_on_error
         while True:
             # Add some random time to avoid all homes resubscribing at the same time
             # if there is an issue with the subscription
@@ -578,7 +563,7 @@ class TibberHome:
                     self.home_id,
                     RT_SUBSCRIPTION_TIMEOUT,
                 )
-            self._schedule_resubscribe(callback, on_error=on_error)
+            self._schedule_resubscribe()
 
     @property
     def rt_subscription_running(self) -> bool:
