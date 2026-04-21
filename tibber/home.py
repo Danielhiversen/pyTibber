@@ -383,7 +383,7 @@ class TibberHome:
                 return round(price_total, 3), price_time, price_rank
         return None, None, None
 
-    async def rt_subscribe(self, callback: Callable[..., Any]) -> None:
+    async def rt_subscribe(self, callback: Callable[..., Any]) -> None:  # noqa: PLR0915
         """Connect to Tibber and subscribe to Tibber real time subscription.
 
         :param callback: The function to call when data is received.
@@ -477,16 +477,19 @@ class TibberHome:
 
     async def _delayed_resubscribe(self) -> None:
         """Delay before retrying the realtime subscription."""
+        task = asyncio.current_task()
         try:
             await asyncio.sleep(1)
             if self._rt_stopped or self._rt_callback is None:
                 return
-            self._resubscribe_task = None
             await self.rt_resubscribe()
         except asyncio.CancelledError:
             raise
         except Exception:
             _LOGGER.exception("Error in delayed rt_resubscribe")
+        finally:
+            if self._resubscribe_task is task:
+                self._resubscribe_task = None
 
     async def rt_resubscribe(self) -> None:
         """Resubscribe to Tibber data."""
@@ -508,7 +511,7 @@ class TibberHome:
         """Unsubscribe to Tibber data."""
         _LOGGER.debug("Unsubscribe, %s", self.home_id)
         self._rt_stopped = True
-        if self._resubscribe_task is not None:
+        if self._resubscribe_task is not None and self._resubscribe_task is not asyncio.current_task():
             self._resubscribe_task.cancel()
             self._resubscribe_task = None
         if self._rt_listener is None:
