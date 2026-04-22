@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import contextlib
 import datetime as dt
 import logging
 from typing import TYPE_CHECKING, Any
 
 from gql import gql
+from gql.transport.exceptions import TransportError
 
 from .const import RESOLUTION_DAILY, RESOLUTION_HOURLY, RESOLUTION_MONTHLY, RESOLUTION_WEEKLY
 from .gql_queries import (
@@ -421,6 +421,26 @@ class TibberHome:
                     self._hourly_consumption_data.peak_hour_time = _timestamp
             return data
 
+        def _handle_subscription_data(_data: dict[str, Any]) -> None:
+            data = {"data": _data}
+            try:
+                data = _add_extra_data(data)
+            except KeyError:
+                pass
+            except Exception:
+                _LOGGER.exception("Error processing rt_subscribe data")
+            self._last_rt_data_received = dt.datetime.now(tz=dt.UTC)
+            try:
+                callback(data)
+            except Exception:
+                _LOGGER.exception("Error in rt_subscribe callback")
+                return
+            _LOGGER.debug(
+                "Data received for %s: %s",
+                self.home_id,
+                data,
+            )
+
         async def _start() -> None:
             """Subscribe to Tibber."""
             for _ in range(30):
@@ -441,25 +461,20 @@ class TibberHome:
                 if session is None or not hasattr(session, "subscribe"):
                     _LOGGER.error("Session is not connected or does not support subscribe method")
                     return
-                async for _data in session.subscribe(gql(LIVE_SUBSCRIBE % self.home_id)):
-                    data = {"data": _data}
-                    with contextlib.suppress(KeyError):
-                        data = _add_extra_data(data)
-                    callback(data)
-                    self._last_rt_data_received = dt.datetime.now(tz=dt.UTC)
-                    _LOGGER.debug(
-                        "Data received for %s: %s",
-                        self.home_id,
-                        data,
-                    )
+                async for _data in session.subscribe(
+                    gql(LIVE_SUBSCRIBE % self.home_id),
+                ):
+                    _handle_subscription_data(_data)
                     if self._rt_stopped or not self._tibber_control.realtime.subscription_running:
                         _LOGGER.debug("Stopping rt_subscribe loop")
                         return
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except TransportError:
                 _LOGGER.exception("Error in rt_subscribe")
                 self._schedule_resubscribe()
+            except Exception:
+                _LOGGER.exception("Unexpected error in rt_subscribe")
 
         self._rt_callback = callback
         self._tibber_control.realtime.add_home(self)
