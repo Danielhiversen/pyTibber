@@ -524,13 +524,13 @@ class TibberHome:
 
     async def _rt_resubscribe(self) -> None:
         """Resubscribe to Tibber data."""
-        _LOGGER.debug("Resubscribe, %s", self.home_id)
+        _LOGGER.info("Resubscribe, %s", self.home_id)
         self.rt_unsubscribe()
 
         with contextlib.suppress(Exception):
             await self.update_real_time_consumption_enabled()
         if not self.has_real_time_consumption:
-            _LOGGER.debug("Home %s does not have real time consumption enabled", self.home_id)
+            _LOGGER.info("Home %s does not have real time consumption enabled", self.home_id)
             return
 
         # Update info to set websocket subscription url
