@@ -425,8 +425,8 @@ class TibberHome:
             data = {"data": _data}
             try:
                 data = _add_extra_data(data)
-            except KeyError:
-                pass
+            except KeyError as err:
+                _LOGGER.debug("Missing expected key in rt_subscribe data, skipping enrichment: %s", err)
             except Exception:
                 _LOGGER.exception("Error processing rt_subscribe data")
             self._last_rt_data_received = dt.datetime.now(tz=dt.UTC)
