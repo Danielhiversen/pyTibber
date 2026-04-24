@@ -468,8 +468,6 @@ class TibberHome:
                     if self._rt_stopped or not self._tibber_control.realtime.subscription_running:
                         _LOGGER.debug("Stopping rt_subscribe loop")
                         return
-            except asyncio.CancelledError:
-                raise
             except TransportError:
                 _LOGGER.exception("Error in rt_subscribe")
                 self._schedule_resubscribe()
