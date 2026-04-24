@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import contextlib
 import datetime as dt
 import logging
 from typing import TYPE_CHECKING, Any
 
 from gql import gql
+from gql.transport.exceptions import TransportError
 
 from .const import RESOLUTION_DAILY, RESOLUTION_HOURLY, RESOLUTION_MONTHLY, RESOLUTION_WEEKLY
 from .gql_queries import (
@@ -79,6 +79,7 @@ class TibberHome:
         self._hourly_production_data: HourlyData = HourlyData(production=True)
         self._last_rt_data_received: dt.datetime = dt.datetime.now(tz=dt.UTC)
         self._rt_listener: None | asyncio.Task[Any] = None
+        self._resubscribe_task: None | asyncio.Task[Any] = None
         self._rt_callback: Callable[..., Any] | None = None
         self._rt_stopped: bool = True
         self._has_real_time_consumption: None | bool = None
@@ -382,7 +383,7 @@ class TibberHome:
                 return round(price_total, 3), price_time, price_rank
         return None, None, None
 
-    async def rt_subscribe(self, callback: Callable[..., Any]) -> None:
+    async def rt_subscribe(self, callback: Callable[..., Any]) -> None:  # noqa: PLR0915
         """Connect to Tibber and subscribe to Tibber real time subscription.
 
         :param callback: The function to call when data is received.
@@ -420,6 +421,26 @@ class TibberHome:
                     self._hourly_consumption_data.peak_hour_time = _timestamp
             return data
 
+        def _handle_subscription_data(_data: dict[str, Any]) -> None:
+            data = {"data": _data}
+            try:
+                data = _add_extra_data(data)
+            except KeyError as err:
+                _LOGGER.debug("Missing expected key in rt_subscribe data, skipping enrichment: %s", err)
+            except Exception:
+                _LOGGER.exception("Error processing rt_subscribe data")
+            self._last_rt_data_received = dt.datetime.now(tz=dt.UTC)
+            try:
+                callback(data)
+            except Exception:
+                _LOGGER.exception("Error in rt_subscribe callback")
+                return
+            _LOGGER.debug(
+                "Data received for %s: %s",
+                self.home_id,
+                data,
+            )
+
         async def _start() -> None:
             """Subscribe to Tibber."""
             for _ in range(30):
@@ -443,27 +464,47 @@ class TibberHome:
                 async for _data in session.subscribe(
                     gql(LIVE_SUBSCRIBE % self.home_id),
                 ):
-                    data = {"data": _data}
-                    with contextlib.suppress(KeyError):
-                        data = _add_extra_data(data)
-                    callback(data)
-                    self._last_rt_data_received = dt.datetime.now(tz=dt.UTC)
-                    _LOGGER.debug(
-                        "Data received for %s: %s",
-                        self.home_id,
-                        data,
-                    )
+                    _handle_subscription_data(_data)
                     if self._rt_stopped or not self._tibber_control.realtime.subscription_running:
                         _LOGGER.debug("Stopping rt_subscribe loop")
                         return
-            except Exception:
+            except asyncio.CancelledError:
+                raise
+            except TransportError:
                 _LOGGER.exception("Error in rt_subscribe")
+                self._schedule_resubscribe()
+            except Exception:
+                _LOGGER.exception("Unexpected error in rt_subscribe")
 
         self._rt_callback = callback
         self._tibber_control.realtime.add_home(self)
         await self._tibber_control.realtime.connect()
-        self._rt_listener = asyncio.create_task(_start())
         self._rt_stopped = False
+        self._rt_listener = asyncio.create_task(_start())
+
+    def _schedule_resubscribe(self) -> None:
+        """Schedule a resubscribe after a subscription failure."""
+        if self._rt_stopped or self._rt_callback is None:
+            return
+        if self._resubscribe_task is not None and not self._resubscribe_task.done():
+            return
+        self._resubscribe_task = asyncio.create_task(self._delayed_resubscribe())
+
+    async def _delayed_resubscribe(self) -> None:
+        """Delay before retrying the realtime subscription."""
+        task = asyncio.current_task()
+        try:
+            await asyncio.sleep(1)
+            if self._rt_stopped or self._rt_callback is None:
+                return
+            await self.rt_resubscribe()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            _LOGGER.exception("Error in delayed rt_resubscribe")
+        finally:
+            if self._resubscribe_task is task:
+                self._resubscribe_task = None
 
     async def rt_resubscribe(self) -> None:
         """Resubscribe to Tibber data."""
@@ -485,6 +526,9 @@ class TibberHome:
         """Unsubscribe to Tibber data."""
         _LOGGER.debug("Unsubscribe, %s", self.home_id)
         self._rt_stopped = True
+        if self._resubscribe_task is not None and self._resubscribe_task is not asyncio.current_task():
+            self._resubscribe_task.cancel()
+            self._resubscribe_task = None
         if self._rt_listener is None:
             return
         self._rt_listener.cancel()
