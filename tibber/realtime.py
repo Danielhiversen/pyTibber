@@ -209,7 +209,7 @@ class TibberRT:
                     delay_seconds,
                     _retry_count,
                     err,
-                    exc_info=_retry_count > 1,
+                    exc_info=True,
                 )
                 await asyncio.sleep(delay_seconds)
             else:
