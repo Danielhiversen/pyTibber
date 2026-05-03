@@ -71,6 +71,7 @@ class Tibber:
             self.timeout,
             self._user_agent,
             ssl=ssl,
+            refresh_connection_info=self.update_info,
         )
 
         self.time_zone: dt.tzinfo = time_zone or dt.UTC

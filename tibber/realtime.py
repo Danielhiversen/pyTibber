@@ -4,6 +4,7 @@ import asyncio
 import datetime as dt
 import logging
 import random
+from collections.abc import Awaitable, Callable
 from ssl import SSLContext
 from typing import Any
 
@@ -21,7 +22,14 @@ _LOGGER = logging.getLogger(__name__)
 class TibberRT:
     """Class to handle real time connection with the Tibber api."""
 
-    def __init__(self, access_token: str, timeout: int, user_agent: str, ssl: SSLContext | bool) -> None:
+    def __init__(
+        self,
+        access_token: str,
+        timeout: int,
+        user_agent: str,
+        ssl: SSLContext | bool,
+        refresh_connection_info: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
         """Initialize the Tibber connection.
 
         :param access_token: The access token to access the Tibber API with.
@@ -32,6 +40,7 @@ class TibberRT:
         self._timeout: int = timeout
         self._user_agent: str = user_agent
         self._ssl_context = ssl
+        self._refresh_connection_info = refresh_connection_info
 
         self._sub_endpoint: str | None = None
         self._homes: list[TibberHome] = []
@@ -81,6 +90,8 @@ class TibberRT:
 
     async def reconnect(self) -> None:
         """Reconnect and resubscribe all homes."""
+        if self._refresh_connection_info is not None:
+            await self._refresh_connection_info()
         await self.connect()
         await self._resubscribe_homes()
 
@@ -126,10 +137,16 @@ class TibberRT:
             return
         self.sub_manager = self._build_sub_manager()
 
+    def _current_transport(self) -> TibberWebsocketsTransport | None:
+        if self.sub_manager is None:
+            return None
+        if not isinstance(self.sub_manager.transport, TibberWebsocketsTransport):
+            return None
+        return self.sub_manager.transport
+
     async def _watchdog(self) -> None:
         """Watchdog to keep connection alive."""
-        assert self.sub_manager is not None
-        assert isinstance(self.sub_manager.transport, TibberWebsocketsTransport)
+        assert self._current_transport() is not None
 
         await asyncio.sleep(60)
 
@@ -137,9 +154,11 @@ class TibberRT:
         next_test_all_homes_running = dt.datetime.now(tz=dt.UTC)
         while self._watchdog_running:
             await asyncio.sleep(5)
+            transport = self._current_transport()
             if (
-                self.sub_manager.transport.running
-                and self.sub_manager.transport.reconnect_at
+                transport is not None
+                and transport.running
+                and transport.reconnect_at
                 > dt.datetime.now(
                     tz=dt.UTC,
                 )
@@ -166,10 +185,13 @@ class TibberRT:
                     _LOGGER.debug("Watchdog: Connection is alive")
                     continue
 
-            self.sub_manager.transport.reconnect_at = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=self._timeout)
+            reconnect_at = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=self._timeout)
+            if transport is not None:
+                transport.reconnect_at = reconnect_at
+                reconnect_at = transport.reconnect_at
             _LOGGER.error(
                 "Watchdog: Connection is down, %s",
-                self.sub_manager.transport.reconnect_at,
+                reconnect_at,
             )
 
             try:
@@ -184,12 +206,9 @@ class TibberRT:
                 _LOGGER.debug("Watchdog: Stopping")
                 return
 
-            self._create_sub_manager()
-            assert self.sub_manager is not None
             try:
-                self.session = await self.sub_manager.connect_async()
-                await self._resubscribe_homes()
-            except Exception as err:  # noqa: BLE001
+                await self.reconnect()
+            except Exception as err:
                 delay_seconds = min(
                     random.SystemRandom().randint(1, 30) + _retry_count**2,
                     5 * 60,
