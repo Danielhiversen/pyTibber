@@ -135,7 +135,8 @@ class TibberRT:
 
     async def _watchdog(self) -> None:
         """Watchdog to keep connection alive."""
-        assert self._current_transport() is not None
+        if self._current_transport() is None:
+            _LOGGER.debug("Watchdog: Starting without a current transport")
 
         await asyncio.sleep(60)
 
@@ -197,7 +198,7 @@ class TibberRT:
 
             try:
                 await self.reconnect()
-            except Exception as err:  # noqa: BLE001
+            except Exception as err:
                 delay_seconds = min(
                     random.SystemRandom().randint(1, 30) + _retry_count**2,
                     5 * 60,
