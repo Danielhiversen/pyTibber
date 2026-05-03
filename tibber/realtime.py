@@ -4,7 +4,6 @@ import asyncio
 import datetime as dt
 import logging
 import random
-from collections.abc import Awaitable, Callable
 from ssl import SSLContext
 from typing import Any
 
@@ -22,14 +21,7 @@ _LOGGER = logging.getLogger(__name__)
 class TibberRT:
     """Class to handle real time connection with the Tibber api."""
 
-    def __init__(
-        self,
-        access_token: str,
-        timeout: int,
-        user_agent: str,
-        ssl: SSLContext | bool,
-        refresh_connection_info: Callable[[], Awaitable[None]] | None = None,
-    ) -> None:
+    def __init__(self, access_token: str, timeout: int, user_agent: str, ssl: SSLContext | bool) -> None:
         """Initialize the Tibber connection.
 
         :param access_token: The access token to access the Tibber API with.
@@ -40,7 +32,6 @@ class TibberRT:
         self._timeout: int = timeout
         self._user_agent: str = user_agent
         self._ssl_context = ssl
-        self._refresh_connection_info = refresh_connection_info
 
         self._sub_endpoint: str | None = None
         self._homes: list[TibberHome] = []
@@ -90,8 +81,6 @@ class TibberRT:
 
     async def reconnect(self) -> None:
         """Reconnect and resubscribe all homes."""
-        if self._refresh_connection_info is not None:
-            await self._refresh_connection_info()
         await self.connect()
         await self._resubscribe_homes()
 
