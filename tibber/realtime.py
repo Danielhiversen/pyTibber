@@ -208,7 +208,7 @@ class TibberRT:
 
             try:
                 await self.reconnect()
-            except Exception as err:
+            except Exception as err:  # noqa: BLE001
                 delay_seconds = min(
                     random.SystemRandom().randint(1, 30) + _retry_count**2,
                     5 * 60,
