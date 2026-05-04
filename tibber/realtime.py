@@ -204,12 +204,11 @@ class TibberRT:
                     5 * 60,
                 )
                 _retry_count += 1
-                _LOGGER.error(
+                _LOGGER.exception(
                     "Error in watchdog connect, retrying in %s seconds, %s: %s",
                     delay_seconds,
                     _retry_count,
                     err,
-                    exc_info=True,
                 )
                 await asyncio.sleep(delay_seconds)
             else:
