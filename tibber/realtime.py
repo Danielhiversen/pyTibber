@@ -80,8 +80,8 @@ class TibberRT:
             if self.subscription_running:
                 return
 
-            self._create_sub_manager()
-            assert self.sub_manager is not None
+            if self.sub_manager is None:
+                self.sub_manager = self._build_sub_manager()
 
             if self._watchdog_runner is None:
                 _LOGGER.debug("Starting watchdog")
@@ -122,11 +122,6 @@ class TibberRT:
     def _sub_manager_has_session(self) -> bool:
         """Return True if the current gql client owns a session."""
         return self.sub_manager is not None and hasattr(self.sub_manager, "session")
-
-    def _create_sub_manager(self) -> None:
-        if self.sub_manager is not None:
-            return
-        self.sub_manager = self._build_sub_manager()
 
     def _current_transport(self) -> TibberWebsocketsTransport | None:
         if self.sub_manager is None:
