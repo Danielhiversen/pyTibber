@@ -228,15 +228,13 @@ class Tibber:
         return await self.realtime.disconnect()
 
     async def set_access_token(self, access_token: str) -> None:
+        """Set access token and reauthorize clients."""
         if access_token == self._access_token:
             return
-        """Set access token and reauthorize clients."""
-        restore_realtime = self.realtime.should_restore_connection
+
         self._access_token = access_token
-        await self.realtime.set_access_token(access_token)
         self.data_api.set_access_token(access_token)
-        if restore_realtime:
-            await self.realtime.reconnect()
+        await self.realtime.set_access_token(access_token)
 
     @property
     def user_id(self) -> str | None:

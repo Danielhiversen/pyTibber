@@ -13,8 +13,6 @@ from .exceptions import SubscriptionEndpointMissingError
 from .home import TibberHome
 from .websocket_transport import TibberWebsocketsTransport
 
-LOCK_CONNECT = asyncio.Lock()
-
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -37,6 +35,7 @@ class TibberRT:
         self._homes: list[TibberHome] = []
         self._watchdog_runner: None | asyncio.Task[Any] = None
         self._watchdog_running: bool = False
+        self._connection_lock = asyncio.Lock()
 
         self.sub_manager: Client | None = None
         self.session: Any | None = None
@@ -48,9 +47,17 @@ class TibberRT:
         _LOGGER.debug("Stopping subscription manager")
         await self._reset_connection(unsubscribe_homes=True)
 
-    async def _reset_connection(self, unsubscribe_homes: bool = False) -> None:
+    async def _reset_connection(self, unsubscribe_homes: bool = False, *, stop_watchdog: bool = True) -> None:
         """Reset websocket connection state."""
-        if self._watchdog_runner is not None:
+        async with self._connection_lock:
+            await self._reset_connection_locked(
+                unsubscribe_homes=unsubscribe_homes,
+                stop_watchdog=stop_watchdog,
+            )
+
+    async def _reset_connection_locked(self, unsubscribe_homes: bool = False, *, stop_watchdog: bool = True) -> None:
+        """Reset websocket connection state while the connection lock is held."""
+        if stop_watchdog and self._watchdog_runner is not None:
             _LOGGER.debug("Stopping watchdog")
             self._watchdog_running = False
             self._watchdog_runner.cancel()
@@ -66,13 +73,13 @@ class TibberRT:
 
     async def connect(self) -> None:
         """Start subscription manager."""
-        self._create_sub_manager()
-
-        assert self.sub_manager is not None
-
-        async with LOCK_CONNECT:
+        async with self._connection_lock:
             if self.subscription_running:
                 return
+
+            self._create_sub_manager()
+            assert self.sub_manager is not None
+
             if self._watchdog_runner is None:
                 _LOGGER.debug("Starting watchdog")
                 self._watchdog_running = True
@@ -85,10 +92,14 @@ class TibberRT:
         await self._resubscribe_homes()
 
     async def set_access_token(self, access_token: str) -> None:
-        """Set access token."""
-        reconnect_running = self.subscription_running or self._watchdog_runner is not None
-        self._access_token = access_token
-        await self._reset_connection(unsubscribe_homes=reconnect_running)
+        """Set access token and reconnect active realtime subscriptions."""
+        async with self._connection_lock:
+            restore_connection = self.subscription_running or self._watchdog_runner is not None
+            self._access_token = access_token
+            await self._reset_connection_locked(unsubscribe_homes=restore_connection)
+
+        if restore_connection:
+            await self.reconnect()
 
     def _build_sub_manager(self) -> Client:
         """Create a subscription manager for the current websocket endpoint."""
@@ -185,12 +196,10 @@ class TibberRT:
             )
 
             try:
-                await self._close_sub_manager()
+                async with self._connection_lock:
+                    await self._reset_connection_locked(stop_watchdog=False)
             except Exception:
                 _LOGGER.exception("Error in watchdog close")
-            finally:
-                self.session = None
-                self.sub_manager = None
 
             if not self._watchdog_running:
                 _LOGGER.debug("Watchdog: Stopping")
