@@ -30,6 +30,7 @@ _LOGGER = logging.getLogger(__name__)
 MIN_IN_HOUR: int = 60
 MIN_IN_QUARTER: int = 15
 
+MIN_REQUESTED_CONSUMPTION_HOURS: int = 3
 
 class HourlyData:
     """Holds hourly data for consumption or production."""
@@ -103,7 +104,7 @@ class TibberHome:
             n_hours = int(seconds_diff / 3600)
             if n_hours < 1:
                 return
-            n_hours = max(2, int(n_hours))
+            n_hours = max(MIN_REQUESTED_CONSUMPTION_HOURS, int(n_hours))
 
         data = await self.get_historic_data(
             n_hours,
