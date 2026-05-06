@@ -13,8 +13,9 @@ from gql.transport.common.adapters.websockets import WebSocketsAdapter
 from websockets.asyncio.connection import State
 
 import tibber.realtime as realtime_module
-from tibber.realtime import TibberRT
 from tibber.websocket_transport import TibberWebsocketsTransport
+
+TibberRT = realtime_module.TibberRT
 
 if TYPE_CHECKING:
     from collections.abc import Generator
