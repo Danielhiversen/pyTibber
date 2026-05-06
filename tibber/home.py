@@ -119,8 +119,18 @@ class TibberHome:
         if not hourly_data.data:
             hourly_data.data = data
         else:
-            hourly_data.data = [entry for entry in hourly_data.data if entry not in data]
-            hourly_data.data.extend(data)
+            merged_by_timestamp: dict[str, dict[Any, Any]] = {}
+
+            for entry in hourly_data.data:
+                if (timestamp := entry.get("from")) and isinstance(timestamp, str):
+                    merged_by_timestamp[timestamp] = entry
+
+            for entry in data:
+                if (timestamp := entry.get("from")) and isinstance(timestamp, str):
+                    # Always prefer the newest payload for an already known hour.
+                    merged_by_timestamp[timestamp] = entry
+
+            hourly_data.data = list(merged_by_timestamp.values())
 
         _month_energy = 0
         _month_money = 0
