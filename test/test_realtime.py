@@ -165,15 +165,15 @@ async def test_set_access_token_resets_connection_while_holding_lock(
         assert realtime_module.LOCK_CONNECT.locked()
         await reset_connection(unsubscribe_homes=unsubscribe_homes, stop_watchdog=stop_watchdog)
 
-    tibber_rt._watchdog_runner = asyncio.create_task(asyncio.sleep(60))  # noqa: SLF001
+    watchdog_runner = asyncio.create_task(asyncio.sleep(60))
+    tibber_rt._watchdog_runner = watchdog_runner  # noqa: SLF001
     tibber_rt._reset_connection_locked = assert_locked_reset  # type: ignore[method-assign]  # noqa: SLF001
     tibber_rt._connect_locked = connect_locked  # type: ignore[method-assign]  # noqa: SLF001
 
-    try:
-        await tibber_rt.set_access_token("new_token")
-    finally:
-        if tibber_rt._watchdog_runner is not None and not tibber_rt._watchdog_runner.done():  # noqa: SLF001
-            tibber_rt._watchdog_runner.cancel()  # noqa: SLF001
+    await tibber_rt.set_access_token("new_token")
+
+    watchdog_runner.cancel()
+    await asyncio.gather(watchdog_runner, return_exceptions=True)
 
     reset_connection.assert_awaited_once_with(unsubscribe_homes=True, stop_watchdog=True)
     connect_locked.assert_awaited_once_with()
@@ -217,19 +217,14 @@ async def test_set_access_token_does_not_reset_queued_connect(
     await asyncio.sleep(0)
     realtime_module.LOCK_CONNECT.release()
 
-    try:
-        await asyncio.gather(set_token_task, connect_task)
+    await asyncio.gather(set_token_task, connect_task)
 
-        assert len(clients) == 1
-        assert clients[0].transport.init_payload["token"] == "new_token"
-        clients[0].close_async.assert_not_awaited()
-        assert tibber_rt.subscription_running is True
-    finally:
-        if not set_token_task.done():
-            set_token_task.cancel()
-        if not connect_task.done():
-            connect_task.cancel()
-        await tibber_rt.disconnect()
+    assert len(clients) == 1
+    assert clients[0].transport.init_payload["token"] == "new_token"
+    clients[0].close_async.assert_not_awaited()
+    assert tibber_rt.subscription_running is True
+
+    await tibber_rt.disconnect()
 
 
 async def test_watchdog_resets_connection_after_releasing_lock(
