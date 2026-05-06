@@ -12,8 +12,10 @@ from gql.client import AsyncClientSession, Client
 from gql.transport.common.adapters.websockets import WebSocketsAdapter
 from websockets.asyncio.connection import State
 
-from tibber.realtime import TibberRT
+import tibber.realtime as realtime_module
 from tibber.websocket_transport import TibberWebsocketsTransport
+
+TibberRT = realtime_module.TibberRT
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -149,6 +151,112 @@ async def test_close_sub_manager_skips_clients_without_session(
     await tibber_rt.disconnect()
 
     mock_client.close_async.assert_not_awaited()
+
+
+async def test_set_access_token_resets_connection_while_holding_lock(
+    tibber_rt: TibberRT,
+) -> None:
+    """Reset stale connection state before another coroutine can connect."""
+    reset_connection = AsyncMock()
+    connect_locked = AsyncMock()
+
+    async def assert_locked_reset(unsubscribe_homes: bool = False, stop_watchdog: bool = True) -> None:
+        assert tibber_rt._access_token == "new_token"  # noqa: SLF001
+        assert realtime_module.LOCK_CONNECT.locked()
+        await reset_connection(unsubscribe_homes=unsubscribe_homes, stop_watchdog=stop_watchdog)
+
+    tibber_rt._watchdog_runner = asyncio.create_task(asyncio.sleep(60))  # noqa: SLF001
+    tibber_rt._reset_connection_locked = assert_locked_reset  # type: ignore[method-assign]  # noqa: SLF001
+    tibber_rt._connect_locked = connect_locked  # type: ignore[method-assign]  # noqa: SLF001
+
+    try:
+        await tibber_rt.set_access_token("new_token")
+    finally:
+        if tibber_rt._watchdog_runner is not None and not tibber_rt._watchdog_runner.done():  # noqa: SLF001
+            tibber_rt._watchdog_runner.cancel()  # noqa: SLF001
+
+    reset_connection.assert_awaited_once_with(unsubscribe_homes=True, stop_watchdog=True)
+    connect_locked.assert_awaited_once_with()
+
+
+async def test_set_access_token_does_not_reset_queued_connect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A connect queued behind token rotation should not be torn down by its reset."""
+    clients: list[Any] = []
+
+    class FakeClient:
+        def __init__(self, transport: TibberWebsocketsTransport) -> None:
+            self.transport = transport
+            self.close_async = AsyncMock(side_effect=self._close_async)
+            self.connect_async = AsyncMock(side_effect=self._connect_async)
+            clients.append(self)
+
+        async def _connect_async(self) -> object:
+            session = MagicMock(spec=AsyncClientSession)
+            self.session = session
+            self.transport.adapter.websocket = MagicMock(state=State.OPEN)
+            return session
+
+        async def _close_async(self) -> None:
+            self.transport.adapter.websocket = MagicMock(state=State.CLOSED)
+
+    monkeypatch.setattr(realtime_module, "Client", FakeClient)
+    tibber_rt = TibberRT(
+        access_token="old_token",
+        timeout=30,
+        user_agent="test_agent",
+        ssl=True,
+    )
+    tibber_rt.sub_endpoint = "wss://test.endpoint"
+
+    await realtime_module.LOCK_CONNECT.acquire()
+    set_token_task = asyncio.create_task(tibber_rt.set_access_token("new_token"))
+    await asyncio.sleep(0)
+    connect_task = asyncio.create_task(tibber_rt.connect())
+    await asyncio.sleep(0)
+    realtime_module.LOCK_CONNECT.release()
+
+    try:
+        await asyncio.gather(set_token_task, connect_task)
+
+        assert len(clients) == 1
+        assert clients[0].transport.init_payload["token"] == "new_token"
+        clients[0].close_async.assert_not_awaited()
+        assert tibber_rt.subscription_running is True
+    finally:
+        if not set_token_task.done():
+            set_token_task.cancel()
+        if not connect_task.done():
+            connect_task.cancel()
+        await tibber_rt.disconnect()
+
+
+async def test_watchdog_resets_connection_after_releasing_lock(
+    monkeypatch: pytest.MonkeyPatch,
+    tibber_rt: TibberRT,
+) -> None:
+    """Reset through the public wrapper when the watchdog detects a down connection."""
+    reset_connection = AsyncMock()
+
+    async def fake_sleep(_delay: float) -> None:
+        return None
+
+    async def assert_unlocked_reset(unsubscribe_homes: bool = False, stop_watchdog: bool = True) -> None:
+        assert not realtime_module.LOCK_CONNECT.locked()
+        await reset_connection(unsubscribe_homes=unsubscribe_homes, stop_watchdog=stop_watchdog)
+
+    async def stop_watchdog_reconnect() -> None:
+        tibber_rt._watchdog_running = False  # noqa: SLF001
+
+    monkeypatch.setattr(realtime_module.asyncio, "sleep", fake_sleep)
+    tibber_rt._reset_connection = assert_unlocked_reset  # type: ignore[method-assign]  # noqa: SLF001
+    tibber_rt.reconnect = AsyncMock(side_effect=stop_watchdog_reconnect)  # type: ignore[method-assign]
+    tibber_rt._watchdog_running = True  # noqa: SLF001
+
+    await tibber_rt._watchdog()  # noqa: SLF001
+
+    reset_connection.assert_awaited_once_with(unsubscribe_homes=False, stop_watchdog=False)
 
 
 async def test_websocket_transport() -> None:

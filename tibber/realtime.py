@@ -48,9 +48,17 @@ class TibberRT:
         _LOGGER.debug("Stopping subscription manager")
         await self._reset_connection(unsubscribe_homes=True)
 
-    async def _reset_connection(self, unsubscribe_homes: bool = False) -> None:
+    async def _reset_connection(self, unsubscribe_homes: bool = False, stop_watchdog: bool = True) -> None:
         """Reset websocket connection state."""
-        if self._watchdog_runner is not None:
+        async with LOCK_CONNECT:
+            await self._reset_connection_locked(
+                unsubscribe_homes=unsubscribe_homes,
+                stop_watchdog=stop_watchdog,
+            )
+
+    async def _reset_connection_locked(self, unsubscribe_homes: bool = False, stop_watchdog: bool = True) -> None:
+        """Reset websocket connection state while LOCK_CONNECT is held."""
+        if stop_watchdog and self._watchdog_runner is not None:
             _LOGGER.debug("Stopping watchdog")
             self._watchdog_running = False
             self._watchdog_runner.cancel()
@@ -59,25 +67,38 @@ class TibberRT:
             for home in self._homes:
                 home.rt_unsubscribe()
         try:
-            await self._close_sub_manager()
+            if self.sub_manager is None:
+                return
+
+            if not self._sub_manager_has_session():
+                _LOGGER.debug(
+                    "Skipping subscription manager close because the gql client has no session",
+                )
+                return
+
+            await self.sub_manager.close_async()
         finally:
             self.session = None
             self.sub_manager = None
 
     async def connect(self) -> None:
         """Start subscription manager."""
-        self._create_sub_manager()
-
-        assert self.sub_manager is not None
-
         async with LOCK_CONNECT:
-            if self.subscription_running:
-                return
-            if self._watchdog_runner is None:
-                _LOGGER.debug("Starting watchdog")
-                self._watchdog_running = True
-                self._watchdog_runner = asyncio.create_task(self._watchdog())
-            self.session = await self.sub_manager.connect_async()
+            await self._connect_locked()
+
+    async def _connect_locked(self) -> None:
+        """Start subscription manager while LOCK_CONNECT is held."""
+        if self.subscription_running:
+            return
+
+        if self.sub_manager is None:
+            self.sub_manager = self._build_sub_manager()
+
+        if self._watchdog_runner is None:
+            _LOGGER.debug("Starting watchdog")
+            self._watchdog_running = True
+            self._watchdog_runner = asyncio.create_task(self._watchdog())
+        self.session = await self.sub_manager.connect_async()
 
     async def reconnect(self) -> None:
         """Reconnect and resubscribe all homes."""
@@ -85,10 +106,15 @@ class TibberRT:
         await self._resubscribe_homes()
 
     async def set_access_token(self, access_token: str) -> None:
-        """Set access token."""
-        reconnect_running = self.subscription_running or self._watchdog_runner is not None
-        self._access_token = access_token
-        await self._reset_connection(unsubscribe_homes=reconnect_running)
+        """Set access token and reconnect active realtime subscriptions."""
+        async with LOCK_CONNECT:
+            restore_connection = self.should_restore_connection
+            self._access_token = access_token
+            await self._reset_connection_locked(unsubscribe_homes=restore_connection)
+
+            if restore_connection:
+                await self._connect_locked()
+                await self._resubscribe_homes()
 
     def _build_sub_manager(self) -> Client:
         """Create a subscription manager for the current websocket endpoint."""
@@ -107,24 +133,6 @@ class TibberRT:
     def _sub_manager_has_session(self) -> bool:
         """Return True if the current gql client owns a session."""
         return self.sub_manager is not None and hasattr(self.sub_manager, "session")
-
-    async def _close_sub_manager(self) -> None:
-        """Close the current gql client if it has an active session object."""
-        if self.sub_manager is None:
-            return
-
-        if not self._sub_manager_has_session():
-            _LOGGER.debug(
-                "Skipping subscription manager close because the gql client has no session",
-            )
-            return
-
-        await self.sub_manager.close_async()
-
-    def _create_sub_manager(self) -> None:
-        if self.sub_manager is not None:
-            return
-        self.sub_manager = self._build_sub_manager()
 
     def _current_transport(self) -> TibberWebsocketsTransport | None:
         if self.sub_manager is None:
@@ -185,12 +193,9 @@ class TibberRT:
             )
 
             try:
-                await self._close_sub_manager()
+                await self._reset_connection(stop_watchdog=False)
             except Exception:
                 _LOGGER.exception("Error in watchdog close")
-            finally:
-                self.session = None
-                self.sub_manager = None
 
             if not self._watchdog_running:
                 _LOGGER.debug("Watchdog: Stopping")
