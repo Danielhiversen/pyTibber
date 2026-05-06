@@ -116,7 +116,6 @@ class TibberRT:
                 await self._connect_locked()
 
         if restore_connection:
-            # Home resubscribe calls rt_subscribe(), which calls connect().
             await self._resubscribe_homes()
 
     def _build_sub_manager(self) -> Client:
