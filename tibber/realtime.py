@@ -114,7 +114,10 @@ class TibberRT:
 
             if restore_connection:
                 await self._connect_locked()
-                await self._resubscribe_homes()
+
+        if restore_connection:
+            # Home resubscribe calls rt_subscribe(), which calls connect().
+            await self._resubscribe_homes()
 
     def _build_sub_manager(self) -> Client:
         """Create a subscription manager for the current websocket endpoint."""
