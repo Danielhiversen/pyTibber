@@ -535,9 +535,12 @@ class TibberHome:
     @property
     def rt_subscription_running(self) -> bool:
         """Is real time subscription running."""
-        if not self._tibber_control.realtime.subscription_running:
-            return False
-        return not self._last_rt_data_received < dt.datetime.now(tz=dt.UTC) - dt.timedelta(seconds=60)
+        return self._tibber_control.realtime.subscription_running
+
+    @property
+    def rt_data_stale(self) -> bool:
+        """Is real time data stale."""
+        return self._last_rt_data_received < dt.datetime.now(tz=dt.UTC) - dt.timedelta(seconds=60)
 
     async def get_historic_data(
         self,

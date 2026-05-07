@@ -149,9 +149,7 @@ class TibberRT:
             _LOGGER.debug("Watchdog: Starting without a current transport")
 
         await asyncio.sleep(60)
-
         _retry_count = 0
-        next_test_all_homes_running = dt.datetime.now(tz=dt.UTC)
         while self._watchdog_running:
             await asyncio.sleep(5)
             transport = self._current_transport()
@@ -162,28 +160,10 @@ class TibberRT:
                 > dt.datetime.now(
                     tz=dt.UTC,
                 )
-                and dt.datetime.now(tz=dt.UTC) > next_test_all_homes_running
             ):
-                is_running = True
-                for home in self._homes:
-                    _LOGGER.debug(
-                        "Watchdog: Checking if home %s is alive, %s, %s",
-                        home.home_id,
-                        home.has_real_time_consumption,
-                        home.rt_subscription_running,
-                    )
-                    if not home.rt_subscription_running:
-                        is_running = False
-                        next_test_all_homes_running = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=60)
-                        break
-                    _LOGGER.debug(
-                        "Watchdog: Home %s is alive",
-                        home.home_id,
-                    )
-                if is_running:
-                    _retry_count = 0
-                    _LOGGER.debug("Watchdog: Connection is alive")
-                    continue
+                _retry_count = 0
+                _LOGGER.debug("Watchdog: Connection is alive")
+                continue
 
             reconnect_at = dt.datetime.now(tz=dt.UTC) + dt.timedelta(seconds=self._timeout)
             if transport is not None:
