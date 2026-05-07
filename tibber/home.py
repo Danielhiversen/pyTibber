@@ -86,6 +86,24 @@ class TibberHome:
         self._has_real_time_consumption: None | bool = None
         self._real_time_consumption_suggested_disabled: dt.datetime | None = None
 
+    def _merge_hourly_data(
+        self,
+        existing_data: list[dict[Any, Any]],
+        new_data: list[dict[Any, Any]],
+    ) -> list[dict[Any, Any]]:
+        """Merge hourly payloads by timestamp and prefer the newest entry."""
+        merged_by_timestamp: dict[str, dict[Any, Any]] = {}
+
+        for entry in existing_data:
+            if (timestamp := entry.get("from")) and isinstance(timestamp, str):
+                merged_by_timestamp[timestamp] = entry
+
+        for entry in new_data:
+            if (timestamp := entry.get("from")) and isinstance(timestamp, str):
+                merged_by_timestamp[timestamp] = entry
+
+        return list(merged_by_timestamp.values())
+
     async def _fetch_data(self, hourly_data: HourlyData) -> None:
         """Update hourly consumption or production data asynchronously."""
         now = dt.datetime.now(tz=dt.UTC)
@@ -119,18 +137,7 @@ class TibberHome:
         if not hourly_data.data:
             hourly_data.data = data
         else:
-            merged_by_timestamp: dict[str, dict[Any, Any]] = {}
-
-            for entry in hourly_data.data:
-                if (timestamp := entry.get("from")) and isinstance(timestamp, str):
-                    merged_by_timestamp[timestamp] = entry
-
-            for entry in data:
-                if (timestamp := entry.get("from")) and isinstance(timestamp, str):
-                    # Always prefer the newest payload for an already known hour.
-                    merged_by_timestamp[timestamp] = entry
-
-            hourly_data.data = list(merged_by_timestamp.values())
+            hourly_data.data = self._merge_hourly_data(hourly_data.data, data)
 
         _month_energy = 0
         _month_money = 0
