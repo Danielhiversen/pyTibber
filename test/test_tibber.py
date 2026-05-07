@@ -257,16 +257,15 @@ async def test_realtime_set_access_token_reconnects_active_subscription_manager(
     assert isinstance(old_manager.transport, TibberWebsocketsTransport)
     assert old_manager.transport.init_payload["token"] == "old-token"
 
-    try:
-        await realtime.set_access_token("new-token")
+    await realtime.set_access_token("new-token")
 
-        old_manager.close_async_mock.assert_awaited_once_with()
-        assert realtime.session is not None
-        assert realtime.sub_manager is not None
-        assert realtime.sub_manager is not old_manager
-        assert isinstance(realtime.sub_manager, FakeClient)
-        assert isinstance(realtime.sub_manager.transport, TibberWebsocketsTransport)
-        assert realtime.sub_manager.transport.init_payload["token"] == "new-token"
-        realtime.sub_manager.connect_async.assert_awaited_once_with()
-    finally:
-        await realtime.disconnect()
+    old_manager.close_async_mock.assert_awaited_once_with()
+    assert realtime.session is not None
+    assert realtime.sub_manager is not None
+    assert realtime.sub_manager is not old_manager
+    assert isinstance(realtime.sub_manager, FakeClient)
+    assert isinstance(realtime.sub_manager.transport, TibberWebsocketsTransport)
+    assert realtime.sub_manager.transport.init_payload["token"] == "new-token"
+    realtime.sub_manager.connect_async.assert_awaited_once_with()
+
+    await realtime.disconnect()
