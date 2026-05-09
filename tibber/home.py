@@ -32,6 +32,7 @@ MIN_IN_QUARTER: int = 15
 
 MIN_REQUESTED_CONSUMPTION_HOURS: int = 3
 
+
 class HourlyData:
     """Holds hourly data for consumption or production."""
 

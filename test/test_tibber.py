@@ -3,6 +3,7 @@
 import asyncio
 import datetime as dt
 import logging
+from typing import Self
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
@@ -103,10 +104,18 @@ class FixedDateTime(dt.datetime):
     current = dt.datetime(2026, 5, 6, 2, 30, 0, tzinfo=dt.UTC)
 
     @classmethod
-    def now(cls, tz: dt.tzinfo | None = None) -> dt.datetime:
+    def now(cls, tz: dt.tzinfo | None = None) -> Self:
         if tz is None:
-            return cls.current.replace(tzinfo=None)
-        return cls.current.astimezone(tz)
+            return cls(
+                cls.current.year,
+                cls.current.month,
+                cls.current.day,
+                cls.current.hour,
+                cls.current.minute,
+                cls.current.second,
+                cls.current.microsecond,
+            )
+        return cls.fromtimestamp(cls.current.timestamp(), tz=tz)
 
 
 @pytest.mark.asyncio
