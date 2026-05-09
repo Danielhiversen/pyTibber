@@ -272,9 +272,10 @@ async def test_fetch_consumption_data_merges_using_two_predefined_payloads(
 
     async def mock_get_historic_data(
         _n_hours: int,
-        _resolution: str = RESOLUTION_HOURLY,
-        _production: bool = False,
+        resolution: str = RESOLUTION_HOURLY,
+        production: bool = False,
     ) -> list[dict]:
+        _ = (resolution, production)
         return next(payloads)
 
     async with aiohttp.ClientSession() as session:
@@ -312,9 +313,10 @@ async def test_fetch_consumption_data_does_not_duplicate_overlapping_timestamp(
 
     async def mock_get_historic_data(
         _n_hours: int,
-        _resolution: str = RESOLUTION_HOURLY,
-        _production: bool = False,
+        resolution: str = RESOLUTION_HOURLY,
+        production: bool = False,
     ) -> list[dict]:
+        _ = (resolution, production)
         return next(payloads)
 
     async with aiohttp.ClientSession() as session:
