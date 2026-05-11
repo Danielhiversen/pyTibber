@@ -30,6 +30,8 @@ _LOGGER = logging.getLogger(__name__)
 MIN_IN_HOUR: int = 60
 MIN_IN_QUARTER: int = 15
 
+MIN_REQUESTED_CONSUMPTION_HOURS: int = 3
+
 
 class HourlyData:
     """Holds hourly data for consumption or production."""
@@ -85,6 +87,24 @@ class TibberHome:
         self._has_real_time_consumption: None | bool = None
         self._real_time_consumption_suggested_disabled: dt.datetime | None = None
 
+    def _merge_hourly_data(
+        self,
+        existing_data: list[dict[Any, Any]],
+        new_data: list[dict[Any, Any]],
+    ) -> list[dict[Any, Any]]:
+        """Merge hourly payloads by timestamp and prefer the newest entry."""
+        merged_by_timestamp: dict[str, dict[Any, Any]] = {}
+
+        for entry in existing_data:
+            if (timestamp := entry.get("from")) and isinstance(timestamp, str):
+                merged_by_timestamp[timestamp] = entry
+
+        for entry in new_data:
+            if (timestamp := entry.get("from")) and isinstance(timestamp, str):
+                merged_by_timestamp[timestamp] = entry
+
+        return list(merged_by_timestamp.values())
+
     async def _fetch_data(self, hourly_data: HourlyData) -> None:
         """Update hourly consumption or production data asynchronously."""
         now = dt.datetime.now(tz=dt.UTC)
@@ -103,7 +123,7 @@ class TibberHome:
             n_hours = int(seconds_diff / 3600)
             if n_hours < 1:
                 return
-            n_hours = max(2, int(n_hours))
+            n_hours = max(MIN_REQUESTED_CONSUMPTION_HOURS, int(n_hours))
 
         data = await self.get_historic_data(
             n_hours,
@@ -118,8 +138,7 @@ class TibberHome:
         if not hourly_data.data:
             hourly_data.data = data
         else:
-            hourly_data.data = [entry for entry in hourly_data.data if entry not in data]
-            hourly_data.data.extend(data)
+            hourly_data.data = self._merge_hourly_data(hourly_data.data, data)
 
         _month_energy = 0
         _month_money = 0
