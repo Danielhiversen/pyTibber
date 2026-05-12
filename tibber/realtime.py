@@ -42,7 +42,7 @@ class TibberRT:
         self._user_agent: str = user_agent
         self._ssl_context = ssl
         self._on_reconnect = on_reconnect
-        self._reconnect_running = False
+        self._reconnect_task: asyncio.Task[None] | None = None
 
         self._sub_endpoint: str | None = None
         self._homes: list[TibberHome] = []
@@ -113,24 +113,38 @@ class TibberRT:
 
     async def reconnect(self) -> None:
         """Reconnect and resubscribe all homes."""
+        current_task = asyncio.current_task()
+
         async with LOCK_CONNECT:
-            if self._reconnect_running:
-                return
-            self._reconnect_running = True
-        try:
-            if self._on_reconnect is not None:
-                await self._on_reconnect()
-            await self.connect()
-            await self._resubscribe_homes()
-        finally:
-            self._reconnect_running = False
+            reconnect_task = self._reconnect_task
+            if reconnect_task is not None and not reconnect_task.done():
+                if reconnect_task is current_task:
+                    return
+                await_task = reconnect_task
+                owns_reconnect = False
+            else:
+                await_task = asyncio.create_task(self._reconnect())
+                self._reconnect_task = await_task
+                owns_reconnect = True
+
+        if owns_reconnect:
+            await await_task
+        else:
+            await asyncio.shield(await_task)
+
+    async def _reconnect(self) -> None:
+        """Reconnect and resubscribe homes for the active reconnect task."""
+        if self._on_reconnect is not None:
+            await self._on_reconnect()
+        await self.connect()
+        await self._resubscribe_homes()
 
     async def set_access_token(self, access_token: str) -> None:
         """Set access token and reconnect active realtime subscriptions."""
         async with LOCK_CONNECT:
             restore_connection = self.should_restore_connection
             self._access_token = access_token
-            reconnect_running = self._reconnect_running
+            reconnect_running = self._reconnect_task is not None and not self._reconnect_task.done()
             await self._reset_connection_locked(
                 unsubscribe_homes=restore_connection,
                 stop_watchdog=not reconnect_running,
