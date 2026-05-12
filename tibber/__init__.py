@@ -3,6 +3,7 @@
 import asyncio
 import datetime as dt
 import logging
+from collections.abc import Awaitable, Callable
 from ssl import SSLContext
 from typing import Any
 
@@ -45,6 +46,7 @@ class Tibber:
         time_zone: dt.tzinfo | None = None,
         user_agent: str | None = None,
         ssl: SSLContext | bool = True,
+        on_reconnect: Callable[[], Awaitable[Any]] | None = None,
     ) -> None:
         """Initialize the Tibber connection.
 
@@ -54,6 +56,7 @@ class Tibber:
         :param time_zone: The time zone to display times in and to use.
         :param user_agent: User agent identifier for the platform running this. Required if websession is None.
         :param ssl: SSLContext to use.
+        :param on_reconnect: Async callback to run before reconnecting realtime subscriptions.
         """
         if websession is None:
             websession = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl))
@@ -71,6 +74,7 @@ class Tibber:
             self.timeout,
             self._user_agent,
             ssl=ssl,
+            on_reconnect=on_reconnect,
         )
 
         self.time_zone: dt.tzinfo = time_zone or dt.UTC
