@@ -42,7 +42,7 @@ class TibberRT:
         self._user_agent: str = user_agent
         self._ssl_context = ssl
         self._on_reconnect = on_reconnect
-        self._reconnect_callback_running = False
+        self._reconnect_running = False
 
         self._sub_endpoint: str | None = None
         self._homes: list[TibberHome] = []
@@ -113,32 +113,33 @@ class TibberRT:
 
     async def reconnect(self) -> None:
         """Reconnect and resubscribe all homes."""
-        if self._on_reconnect is not None:
-            async with LOCK_CONNECT:
-                self._reconnect_callback_running = True
-            try:
+        async with LOCK_CONNECT:
+            if self._reconnect_running:
+                return
+            self._reconnect_running = True
+        try:
+            if self._on_reconnect is not None:
                 await self._on_reconnect()
-            finally:
-                async with LOCK_CONNECT:
-                    self._reconnect_callback_running = False
-        await self.connect()
-        await self._resubscribe_homes()
+            await self.connect()
+            await self._resubscribe_homes()
+        finally:
+            self._reconnect_running = False
 
     async def set_access_token(self, access_token: str) -> None:
         """Set access token and reconnect active realtime subscriptions."""
         async with LOCK_CONNECT:
             restore_connection = self.should_restore_connection
             self._access_token = access_token
-            reconnect_callback_running = self._reconnect_callback_running
+            reconnect_running = self._reconnect_running
             await self._reset_connection_locked(
                 unsubscribe_homes=restore_connection,
-                stop_watchdog=not reconnect_callback_running,
+                stop_watchdog=not reconnect_running,
             )
 
-            if restore_connection and not reconnect_callback_running:
+            if restore_connection and not reconnect_running:
                 await self._connect_locked()
 
-        if restore_connection and not reconnect_callback_running:
+        if restore_connection and not reconnect_running:
             await self._resubscribe_homes()
 
     def _build_sub_manager(self) -> Client:
