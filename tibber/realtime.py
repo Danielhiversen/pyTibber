@@ -6,7 +6,7 @@ import logging
 import random
 from collections.abc import Awaitable, Callable
 from ssl import SSLContext
-from typing import Any
+from typing import Any, cast
 
 from gql import Client
 
@@ -42,7 +42,7 @@ class TibberRT:
         self._user_agent: str = user_agent
         self._ssl_context = ssl
         self._on_reconnect = on_reconnect
-        self._active_reconnect_task: asyncio.Task[Any] | None = None
+        self._active_reconnect_task: asyncio.Task[None] | None = None
 
         self._sub_endpoint: str | None = None
         self._homes: list[TibberHome] = []
@@ -119,19 +119,19 @@ class TibberRT:
         async with LOCK_CONNECT:
             active_reconnect = self._active_reconnect_task
             if active_reconnect is current_task:
-                return
+                return None
             if active_reconnect is None or active_reconnect.done():
-                self._active_reconnect_task = current_task
+                self._active_reconnect_task = cast("asyncio.Task[None]", current_task)
                 active_reconnect = None
 
         if active_reconnect is not None:
-            await active_reconnect
-            return
+            return await active_reconnect
 
         if self._on_reconnect is not None:
             await self._on_reconnect()
         await self.connect()
         await self._resubscribe_homes()
+        return None
 
     async def set_access_token(self, access_token: str) -> None:
         """Set access token and reconnect active realtime subscriptions."""
