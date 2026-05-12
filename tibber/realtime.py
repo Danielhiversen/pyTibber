@@ -114,11 +114,13 @@ class TibberRT:
     async def reconnect(self) -> None:
         """Reconnect and resubscribe all homes."""
         if self._on_reconnect is not None:
-            self._reconnect_callback_running = True
+            async with LOCK_CONNECT:
+                self._reconnect_callback_running = True
             try:
                 await self._on_reconnect()
             finally:
-                self._reconnect_callback_running = False
+                async with LOCK_CONNECT:
+                    self._reconnect_callback_running = False
         await self.connect()
         await self._resubscribe_homes()
 
