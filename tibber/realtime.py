@@ -114,26 +114,28 @@ class TibberRT:
     async def reconnect(self) -> None:
         """Reconnect and resubscribe all homes."""
         current_task = asyncio.current_task()
+        if current_task is None:
+            await self._run_reconnect()
+            return
 
         async with LOCK_CONNECT:
             reconnect_task = self._reconnect_task
             if reconnect_task is not None and not reconnect_task.done():
                 if reconnect_task is current_task:
                     return
-                await_task = reconnect_task
-                owns_reconnect = False
+                task_to_await = reconnect_task
             else:
-                await_task = asyncio.create_task(self._reconnect())
-                self._reconnect_task = await_task
-                owns_reconnect = True
+                self._reconnect_task = current_task
+                task_to_await = None
 
-        if owns_reconnect:
-            await await_task
-        else:
-            await asyncio.shield(await_task)
+        if task_to_await is not None:
+            await asyncio.shield(task_to_await)
+            return
 
-    async def _reconnect(self) -> None:
-        """Reconnect and resubscribe homes for the active reconnect task."""
+        await self._run_reconnect()
+
+    async def _run_reconnect(self) -> None:
+        """Run the reconnect callback and resubscribe homes."""
         if self._on_reconnect is not None:
             await self._on_reconnect()
         await self.connect()
