@@ -113,11 +113,7 @@ class TibberRT:
 
     async def reconnect(self) -> None:
         """Reconnect and resubscribe all homes."""
-        waited_for_reconnect = self._reconnect_lock.locked()
         async with self._reconnect_lock:
-            if waited_for_reconnect and self.subscription_running:
-                return
-
             access_token = await self._refresh_access_token() if self._refresh_access_token is not None else None
             if access_token:
                 self._access_token = access_token
