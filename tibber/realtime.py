@@ -115,7 +115,13 @@ class TibberRT:
         """Reconnect and resubscribe all homes."""
         async with self._reconnect_lock:
             access_token = await self._refresh_access_token() if self._refresh_access_token is not None else None
-            if access_token:
+            if access_token and access_token != self._access_token:
+                self._access_token = access_token
+                await self._reset_connection(
+                    unsubscribe_homes=self.subscription_running,
+                    stop_watchdog=False,
+                )
+            elif access_token:
                 self._access_token = access_token
             await self.connect()
             await self._resubscribe_homes()

@@ -56,7 +56,8 @@ class Tibber:
         :param time_zone: The time zone to display times in and to use.
         :param user_agent: User agent identifier for the platform running this. Required if websession is None.
         :param ssl: SSLContext to use.
-        :param refresh_access_token: Async callback that returns a refreshed realtime access token.
+        :param refresh_access_token: Async callback that returns a refreshed Tibber API access token before
+            reconnecting.
         """
         if websession is None:
             websession = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl))
