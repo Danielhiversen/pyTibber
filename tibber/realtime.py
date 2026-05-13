@@ -6,7 +6,7 @@ import logging
 import random
 from collections.abc import Awaitable, Callable
 from ssl import SSLContext
-from typing import Any, cast
+from typing import Any
 
 from gql import Client
 
@@ -28,21 +28,21 @@ class TibberRT:
         timeout: int,
         user_agent: str,
         ssl: SSLContext | bool,
-        on_reconnect: Callable[[], Awaitable[Any]] | None = None,
+        refresh_access_token: Callable[[], Awaitable[str | None]] | None = None,
     ) -> None:
         """Initialize the Tibber connection.
 
         :param access_token: The access token to access the Tibber API with.
         :param timeout: The timeout in seconds to use when communicating with the Tibber API.
         :param user_agent: User agent identifier for the platform running this. Required if websession is None.
-        :param on_reconnect: Async callback to run before reconnecting.
+        :param refresh_access_token: Async callback to refresh the access token before reconnecting.
         """
         self._access_token: str = access_token
         self._timeout: int = timeout
         self._user_agent: str = user_agent
         self._ssl_context = ssl
-        self._on_reconnect = on_reconnect
-        self._active_reconnect_task: asyncio.Task[None] | None = None
+        self._refresh_access_token = refresh_access_token
+        self._reconnect_lock = asyncio.Lock()
 
         self._sub_endpoint: str | None = None
         self._homes: list[TibberHome] = []
@@ -113,41 +113,31 @@ class TibberRT:
 
     async def reconnect(self) -> None:
         """Reconnect and resubscribe all homes."""
-        current_task = asyncio.current_task()
-        assert current_task is not None
+        waited_for_reconnect = self._reconnect_lock.locked()
+        async with self._reconnect_lock:
+            if waited_for_reconnect and self.subscription_running:
+                return
 
-        async with LOCK_CONNECT:
-            active_reconnect = self._active_reconnect_task
-            if active_reconnect is current_task:
-                return None
-            if active_reconnect is None or active_reconnect.done():
-                self._active_reconnect_task = cast("asyncio.Task[None]", current_task)
-                active_reconnect = None
-
-        if active_reconnect is not None:
-            return await active_reconnect
-
-        if self._on_reconnect is not None:
-            await self._on_reconnect()
-        await self.connect()
-        await self._resubscribe_homes()
-        return None
+            access_token = await self._refresh_access_token() if self._refresh_access_token is not None else None
+            if access_token:
+                self._access_token = access_token
+            await self.connect()
+            await self._resubscribe_homes()
 
     async def set_access_token(self, access_token: str) -> None:
         """Set access token and reconnect active realtime subscriptions."""
         async with LOCK_CONNECT:
             restore_connection = self.should_restore_connection
             self._access_token = access_token
-            reconnect_running = self._active_reconnect_task is not None and not self._active_reconnect_task.done()
             await self._reset_connection_locked(
                 unsubscribe_homes=restore_connection,
-                stop_watchdog=not reconnect_running,
+                stop_watchdog=True,
             )
 
-            if restore_connection and not reconnect_running:
+            if restore_connection:
                 await self._connect_locked()
 
-        if restore_connection and not reconnect_running:
+        if restore_connection:
             await self._resubscribe_homes()
 
     def _build_sub_manager(self) -> Client:
