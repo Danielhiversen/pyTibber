@@ -121,8 +121,6 @@ class TibberRT:
                     unsubscribe_homes=self.subscription_running,
                     stop_watchdog=False,
                 )
-            elif access_token:
-                self._access_token = access_token
             await self.connect()
             await self._resubscribe_homes()
 
