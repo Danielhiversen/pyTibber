@@ -3,6 +3,7 @@
 import asyncio
 import datetime as dt
 import logging
+from collections.abc import Awaitable, Callable
 from ssl import SSLContext
 from typing import Any
 
@@ -45,6 +46,7 @@ class Tibber:
         time_zone: dt.tzinfo | None = None,
         user_agent: str | None = None,
         ssl: SSLContext | bool = True,
+        refresh_access_token: Callable[[], Awaitable[str | None]] | None = None,
     ) -> None:
         """Initialize the Tibber connection.
 
@@ -54,6 +56,8 @@ class Tibber:
         :param time_zone: The time zone to display times in and to use.
         :param user_agent: User agent identifier for the platform running this. Required if websession is None.
         :param ssl: SSLContext to use.
+        :param refresh_access_token: Async callback that returns a refreshed Tibber API access token before
+            reconnecting.
         """
         if websession is None:
             websession = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl))
@@ -65,12 +69,14 @@ class Tibber:
         self.websession = websession
         self.timeout: int = timeout
         self._access_token: str = access_token
+        self._refresh_access_token = refresh_access_token
 
         self.realtime: TibberRT = TibberRT(
             self._access_token,
             self.timeout,
             self._user_agent,
             ssl=ssl,
+            refresh_access_token=self._refresh_access_token_for_reconnect if refresh_access_token is not None else None,
         )
 
         self.time_zone: dt.tzinfo = time_zone or dt.UTC
@@ -85,6 +91,17 @@ class Tibber:
             websession=websession,
             user_agent=self._user_agent,
         )
+
+    async def _refresh_access_token_for_reconnect(self) -> str | None:
+        """Refresh access token before reconnecting realtime subscriptions."""
+        if self._refresh_access_token is None:
+            return None
+
+        access_token = await self._refresh_access_token()
+        if access_token is not None and access_token != self._access_token:
+            self._access_token = access_token
+            self.data_api.set_access_token(access_token)
+        return access_token
 
     async def close_connection(self) -> None:
         """Close the Tibber connection.

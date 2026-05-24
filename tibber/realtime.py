@@ -4,6 +4,7 @@ import asyncio
 import datetime as dt
 import logging
 import random
+from collections.abc import Awaitable, Callable
 from ssl import SSLContext
 from typing import Any
 
@@ -21,17 +22,27 @@ _LOGGER = logging.getLogger(__name__)
 class TibberRT:
     """Class to handle real time connection with the Tibber api."""
 
-    def __init__(self, access_token: str, timeout: int, user_agent: str, ssl: SSLContext | bool) -> None:
+    def __init__(
+        self,
+        access_token: str,
+        timeout: int,
+        user_agent: str,
+        ssl: SSLContext | bool,
+        refresh_access_token: Callable[[], Awaitable[str | None]] | None = None,
+    ) -> None:
         """Initialize the Tibber connection.
 
         :param access_token: The access token to access the Tibber API with.
         :param timeout: The timeout in seconds to use when communicating with the Tibber API.
         :param user_agent: User agent identifier for the platform running this. Required if websession is None.
+        :param refresh_access_token: Async callback to refresh the access token before reconnecting.
         """
         self._access_token: str = access_token
         self._timeout: int = timeout
         self._user_agent: str = user_agent
         self._ssl_context = ssl
+        self._refresh_access_token = refresh_access_token
+        self._reconnect_lock = asyncio.Lock()
 
         self._sub_endpoint: str | None = None
         self._homes: list[TibberHome] = []
@@ -102,15 +113,28 @@ class TibberRT:
 
     async def reconnect(self) -> None:
         """Reconnect and resubscribe all homes."""
-        await self.connect()
-        await self._resubscribe_homes()
+        async with self._reconnect_lock:
+            access_token = await self._refresh_access_token() if self._refresh_access_token is not None else None
+            if access_token is not None:
+                async with LOCK_CONNECT:
+                    if access_token != self._access_token:
+                        self._access_token = access_token
+                        await self._reset_connection_locked(
+                            unsubscribe_homes=self.subscription_running,
+                            stop_watchdog=False,
+                        )
+            await self.connect()
+            await self._resubscribe_homes()
 
     async def set_access_token(self, access_token: str) -> None:
         """Set access token and reconnect active realtime subscriptions."""
         async with LOCK_CONNECT:
             restore_connection = self.should_restore_connection
             self._access_token = access_token
-            await self._reset_connection_locked(unsubscribe_homes=restore_connection)
+            await self._reset_connection_locked(
+                unsubscribe_homes=restore_connection,
+                stop_watchdog=True,
+            )
 
             if restore_connection:
                 await self._connect_locked()
