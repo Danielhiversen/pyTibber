@@ -710,3 +710,6 @@ class TibberHome:
         attr["peak"] = round(peak / num0, 3) if num0 > 0 else 0
         attr["off_peak_2"] = round(off_peak_2 / num2, 3) if num2 > 0 else 0
         return attr
+
+    def current_price_table(self) -> tuple[tuple[str, float], ...]:
+        return tuple(self.price_total.items())
