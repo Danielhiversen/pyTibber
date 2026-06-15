@@ -32,7 +32,7 @@ dev = [
   # Pin below 1.20.0 until the current mypy incompatibility is resolved.
   "mypy==1.19.1",
   "pre-commit==4.6.0",
-  "pytest==9.0.3",
+  "pytest==9.1.0",
   "pytest-asyncio==1.4.0",
   "pytest-cov==7.1.0",
   "ruff==0.15.16",
