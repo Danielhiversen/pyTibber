@@ -13,6 +13,7 @@ from gql.transport.common.adapters.websockets import WebSocketsAdapter
 from websockets.asyncio.connection import State
 
 import tibber.realtime as realtime_module
+import tibber.websocket_transport as websocket_transport_module
 from tibber.websocket_transport import TibberWebsocketsTransport
 
 TibberRT = realtime_module.TibberRT
@@ -162,7 +163,7 @@ async def test_set_access_token_resets_connection_while_holding_lock(
 
     async def assert_locked_reset(unsubscribe_homes: bool = False, stop_watchdog: bool = True) -> None:
         assert tibber_rt._access_token == "new_token"  # noqa: SLF001
-        assert realtime_module.LOCK_CONNECT.locked()
+        assert tibber_rt._lock_connect.locked()  # noqa: SLF001
         await reset_connection(unsubscribe_homes=unsubscribe_homes, stop_watchdog=stop_watchdog)
 
     watchdog_runner = asyncio.create_task(asyncio.sleep(60))
@@ -210,12 +211,12 @@ async def test_set_access_token_does_not_reset_queued_connect(
     )
     tibber_rt.sub_endpoint = "wss://test.endpoint"
 
-    await realtime_module.LOCK_CONNECT.acquire()
+    await tibber_rt._lock_connect.acquire()  # noqa: SLF001
     set_token_task = asyncio.create_task(tibber_rt.set_access_token("new_token"))
     await asyncio.sleep(0)
     connect_task = asyncio.create_task(tibber_rt.connect())
     await asyncio.sleep(0)
-    realtime_module.LOCK_CONNECT.release()
+    tibber_rt._lock_connect.release()  # noqa: SLF001
 
     await asyncio.gather(set_token_task, connect_task)
 
@@ -238,7 +239,7 @@ async def test_watchdog_resets_connection_after_releasing_lock(
         return None
 
     async def assert_unlocked_reset(unsubscribe_homes: bool = False, stop_watchdog: bool = True) -> None:
-        assert not realtime_module.LOCK_CONNECT.locked()
+        assert not tibber_rt._lock_connect.locked()  # noqa: SLF001
         await reset_connection(unsubscribe_homes=unsubscribe_homes, stop_watchdog=stop_watchdog)
 
     async def stop_watchdog_reconnect() -> None:
@@ -252,6 +253,82 @@ async def test_watchdog_resets_connection_after_releasing_lock(
     await tibber_rt._watchdog()  # noqa: SLF001
 
     reset_connection.assert_awaited_once_with(unsubscribe_homes=False, stop_watchdog=False)
+
+
+async def test_reconnect_rebuilds_transport_when_token_unchanged(
+    mock_client: MagicMock,
+) -> None:
+    """Rebuild the transport on reconnect even if the refreshed token is unchanged."""
+    tibber_rt = TibberRT(
+        access_token="test_token",
+        timeout=30,
+        user_agent="test_agent",
+        ssl=True,
+        refresh_access_token=AsyncMock(return_value="test_token"),
+    )
+    tibber_rt.sub_endpoint = "wss://test.endpoint"
+
+    await tibber_rt.connect()
+    first_transport = mock_client.transport
+    # Simulate a dead websocket with an expired but unchanged token
+    mock_client.transport.adapter.websocket = MagicMock(state=State.CLOSED)
+
+    await tibber_rt.reconnect()
+
+    mock_client.close_async.assert_awaited_once()
+    assert mock_client.transport is not first_transport
+    assert tibber_rt.subscription_running is True
+
+    await tibber_rt.disconnect()
+
+
+async def test_connect_lock_is_per_instance() -> None:
+    """The connect lock must not be shared between TibberRT instances."""
+    tibber_rt_1 = TibberRT(access_token="token_1", timeout=30, user_agent="test_agent", ssl=True)
+    tibber_rt_2 = TibberRT(access_token="token_2", timeout=30, user_agent="test_agent", ssl=True)
+
+    assert tibber_rt_1._lock_connect is not tibber_rt_2._lock_connect  # noqa: SLF001
+    assert not hasattr(realtime_module, "LOCK_CONNECT")
+
+
+async def test_reset_connection_times_out_on_hanging_close(
+    monkeypatch: pytest.MonkeyPatch,
+    mock_client: MagicMock,
+    tibber_rt: TibberRT,
+) -> None:
+    """A hanging gql close must not deadlock disconnect."""
+    await tibber_rt.connect()
+
+    async def hang() -> None:
+        await asyncio.Event().wait()
+
+    mock_client.close_async = AsyncMock(side_effect=hang)
+    monkeypatch.setattr(realtime_module, "SUB_MANAGER_CLOSE_TIMEOUT", 0.05)
+
+    await asyncio.wait_for(tibber_rt.disconnect(), timeout=1)
+
+    assert tibber_rt.sub_manager is None
+    assert tibber_rt.session is None
+
+
+async def test_transport_close_times_out_on_hanging_wait_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A half-dead websocket must not hang transport.close forever."""
+    transport = TibberWebsocketsTransport(
+        url="wss://test.endpoint",
+        access_token="test_token",
+        user_agent="test_agent",
+    )
+
+    async def hang() -> None:
+        await asyncio.Event().wait()
+
+    transport._fail = AsyncMock()  # type: ignore[method-assign]  # noqa: SLF001
+    transport.wait_closed = hang  # type: ignore[method-assign]
+    monkeypatch.setattr(websocket_transport_module, "CLOSE_TIMEOUT", 0.05)
+
+    await asyncio.wait_for(transport.close(), timeout=1)
 
 
 async def test_websocket_transport() -> None:

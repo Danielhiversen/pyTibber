@@ -32,6 +32,8 @@ MIN_IN_QUARTER: int = 15
 
 MIN_REQUESTED_CONSUMPTION_HOURS: int = 3
 
+RESUBSCRIBE_MAX_ATTEMPTS: int = 5
+
 
 class HourlyData:
     """Holds hourly data for consumption or production."""
@@ -508,17 +510,45 @@ class TibberHome:
         self._resubscribe_task = asyncio.create_task(self._delayed_resubscribe())
 
     async def _delayed_resubscribe(self) -> None:
-        """Delay before retrying the realtime subscription."""
+        """Retry the realtime subscription with backoff after a failure."""
         task = asyncio.current_task()
         try:
-            await asyncio.sleep(1)
-            if self._rt_stopped or self._rt_callback is None:
-                return
-            await self.rt_resubscribe()
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            _LOGGER.exception("Error in delayed rt_resubscribe")
+            for attempt in range(1, RESUBSCRIBE_MAX_ATTEMPTS + 1):
+                await asyncio.sleep(2 ** (attempt - 1))
+                if self._rt_stopped or self._rt_callback is None:
+                    return
+                if (
+                    self._tibber_control.realtime.subscription_running
+                    and self._rt_listener is not None
+                    and not self._rt_listener.done()
+                ):
+                    _LOGGER.debug("Subscription already restored for %s", self.home_id)
+                    return
+                if self._resubscribe_task is task:
+                    # reconnect() resubscribes all homes, including this one.
+                    # Detach first so rt_unsubscribe does not cancel this task mid-flight.
+                    self._resubscribe_task = None
+                try:
+                    # Use the realtime reconnect, which refreshes the access token before
+                    # rebuilding the websocket transport. Calling rt_resubscribe() directly
+                    # would reuse the cached, possibly expired, token.
+                    await self._tibber_control.realtime.reconnect()
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    if attempt >= RESUBSCRIBE_MAX_ATTEMPTS:
+                        _LOGGER.exception(
+                            "Error in delayed rt_resubscribe, giving up after %s attempts",
+                            attempt,
+                        )
+                    else:
+                        _LOGGER.exception(
+                            "Error in delayed rt_resubscribe (attempt %s of %s)",
+                            attempt,
+                            RESUBSCRIBE_MAX_ATTEMPTS,
+                        )
+                else:
+                    return
         finally:
             if self._resubscribe_task is task:
                 self._resubscribe_task = None

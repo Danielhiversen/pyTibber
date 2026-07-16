@@ -14,7 +14,7 @@ from .exceptions import SubscriptionEndpointMissingError
 from .home import TibberHome
 from .websocket_transport import TibberWebsocketsTransport
 
-LOCK_CONNECT = asyncio.Lock()
+SUB_MANAGER_CLOSE_TIMEOUT = 15
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,6 +43,7 @@ class TibberRT:
         self._ssl_context = ssl
         self._refresh_access_token = refresh_access_token
         self._reconnect_lock = asyncio.Lock()
+        self._lock_connect = asyncio.Lock()
 
         self._sub_endpoint: str | None = None
         self._homes: list[TibberHome] = []
@@ -61,14 +62,14 @@ class TibberRT:
 
     async def _reset_connection(self, unsubscribe_homes: bool = False, stop_watchdog: bool = True) -> None:
         """Reset websocket connection state."""
-        async with LOCK_CONNECT:
+        async with self._lock_connect:
             await self._reset_connection_locked(
                 unsubscribe_homes=unsubscribe_homes,
                 stop_watchdog=stop_watchdog,
             )
 
     async def _reset_connection_locked(self, unsubscribe_homes: bool = False, stop_watchdog: bool = True) -> None:
-        """Reset websocket connection state while LOCK_CONNECT is held."""
+        """Reset websocket connection state while the connect lock is held."""
         if stop_watchdog and self._watchdog_runner is not None:
             _LOGGER.debug("Stopping watchdog")
             self._watchdog_running = False
@@ -87,18 +88,24 @@ class TibberRT:
                 )
                 return
 
-            await self.sub_manager.close_async()
+            try:
+                await asyncio.wait_for(self.sub_manager.close_async(), timeout=SUB_MANAGER_CLOSE_TIMEOUT)
+            except TimeoutError:
+                _LOGGER.error(
+                    "Timed out after %s seconds closing the subscription manager, discarding it",
+                    SUB_MANAGER_CLOSE_TIMEOUT,
+                )
         finally:
             self.session = None
             self.sub_manager = None
 
     async def connect(self) -> None:
         """Start subscription manager."""
-        async with LOCK_CONNECT:
+        async with self._lock_connect:
             await self._connect_locked()
 
     async def _connect_locked(self) -> None:
-        """Start subscription manager while LOCK_CONNECT is held."""
+        """Start subscription manager while the connect lock is held."""
         if self.subscription_running:
             return
 
@@ -115,20 +122,22 @@ class TibberRT:
         """Reconnect and resubscribe all homes."""
         async with self._reconnect_lock:
             access_token = await self._refresh_access_token() if self._refresh_access_token is not None else None
-            if access_token is not None:
-                async with LOCK_CONNECT:
-                    if access_token != self._access_token:
-                        self._access_token = access_token
-                        await self._reset_connection_locked(
-                            unsubscribe_homes=self.subscription_running,
-                            stop_watchdog=False,
-                        )
+            async with self._lock_connect:
+                if access_token is not None:
+                    self._access_token = access_token
+                # Always rebuild the transport: the access token is baked into the
+                # transport init_payload at build time, so a refreshed but unchanged
+                # token (or a dead websocket) would otherwise be silently reused.
+                await self._reset_connection_locked(
+                    unsubscribe_homes=self.subscription_running,
+                    stop_watchdog=False,
+                )
             await self.connect()
             await self._resubscribe_homes()
 
     async def set_access_token(self, access_token: str) -> None:
         """Set access token and reconnect active realtime subscriptions."""
-        async with LOCK_CONNECT:
+        async with self._lock_connect:
             restore_connection = self.should_restore_connection
             self._access_token = access_token
             await self._reset_connection_locked(

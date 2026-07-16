@@ -10,9 +10,11 @@ import aiohttp
 import pytest
 
 import tibber
+import tibber.home as tibber_home
 import tibber.realtime as tibber_realtime
 from tibber.const import RESOLUTION_DAILY, RESOLUTION_HOURLY
 from tibber.exceptions import FatalHttpExceptionError, InvalidLoginError, NotForDemoUserError
+from tibber.home import TibberHome
 from tibber.websocket_transport import TibberWebsocketsTransport
 
 
@@ -451,3 +453,53 @@ async def test_realtime_set_access_token_reconnects_active_subscription_manager(
     realtime.sub_manager.connect_async.assert_awaited_once_with()
 
     await realtime.disconnect()
+
+
+@pytest.mark.asyncio
+async def test_delayed_resubscribe_uses_reconnect_and_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The delayed resubscribe must use the token-aware reconnect path and retry with backoff."""
+    tibber_control = MagicMock()
+    tibber_control.realtime.subscription_running = False
+    reconnect = AsyncMock(side_effect=[Exception("boom"), Exception("boom"), None])
+    tibber_control.realtime.reconnect = reconnect
+
+    home = TibberHome("home_id", tibber_control)
+    home._rt_callback = lambda _: None  # noqa: SLF001
+    home._rt_stopped = False  # noqa: SLF001
+
+    delays: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr(tibber_home.asyncio, "sleep", fake_sleep)
+
+    await home._delayed_resubscribe()  # noqa: SLF001
+
+    assert reconnect.await_count == 3
+    assert delays == [1, 2, 4]
+
+
+@pytest.mark.asyncio
+async def test_delayed_resubscribe_gives_up_after_max_attempts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The delayed resubscribe must stop retrying after the final attempt."""
+    tibber_control = MagicMock()
+    tibber_control.realtime.subscription_running = False
+    reconnect = AsyncMock(side_effect=Exception("boom"))
+    tibber_control.realtime.reconnect = reconnect
+
+    home = TibberHome("home_id", tibber_control)
+    home._rt_callback = lambda _: None  # noqa: SLF001
+    home._rt_stopped = False  # noqa: SLF001
+
+    delays: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        delays.append(delay)
+
+    monkeypatch.setattr(tibber_home.asyncio, "sleep", fake_sleep)
+
+    await home._delayed_resubscribe()  # noqa: SLF001
+
+    assert reconnect.await_count == 5
+    assert delays == [1, 2, 4, 8, 16]
