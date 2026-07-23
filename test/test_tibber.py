@@ -10,7 +10,6 @@ import aiohttp
 import pytest
 
 import tibber
-import tibber.home as tibber_home
 import tibber.realtime as tibber_realtime
 from tibber.const import RESOLUTION_DAILY, RESOLUTION_HOURLY
 from tibber.exceptions import FatalHttpExceptionError, InvalidLoginError, NotForDemoUserError
@@ -472,7 +471,7 @@ async def test_delayed_resubscribe_uses_reconnect_and_retries(monkeypatch: pytes
     async def fake_sleep(delay: float) -> None:
         delays.append(delay)
 
-    monkeypatch.setattr(tibber_home.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr("tibber.home.asyncio.sleep", fake_sleep)
 
     await home._delayed_resubscribe()  # noqa: SLF001
 
@@ -497,7 +496,7 @@ async def test_delayed_resubscribe_gives_up_after_max_attempts(monkeypatch: pyte
     async def fake_sleep(delay: float) -> None:
         delays.append(delay)
 
-    monkeypatch.setattr(tibber_home.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr("tibber.home.asyncio.sleep", fake_sleep)
 
     await home._delayed_resubscribe()  # noqa: SLF001
 

@@ -13,7 +13,6 @@ from gql.transport.common.adapters.websockets import WebSocketsAdapter
 from websockets.asyncio.connection import State
 
 import tibber.realtime as realtime_module
-import tibber.websocket_transport as websocket_transport_module
 from tibber.websocket_transport import TibberWebsocketsTransport
 
 TibberRT = realtime_module.TibberRT
@@ -326,7 +325,7 @@ async def test_transport_close_times_out_on_hanging_wait_closed(
 
     transport._fail = AsyncMock()  # type: ignore[method-assign]  # noqa: SLF001
     transport.wait_closed = hang  # type: ignore[method-assign]
-    monkeypatch.setattr(websocket_transport_module, "CLOSE_TIMEOUT", 0.05)
+    monkeypatch.setattr("tibber.websocket_transport.CLOSE_TIMEOUT", 0.05)
 
     await asyncio.wait_for(transport.close(), timeout=1)
 
