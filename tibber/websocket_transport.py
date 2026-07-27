@@ -11,6 +11,8 @@ from websockets.asyncio.connection import State
 
 _LOGGER = logging.getLogger(__name__)
 
+CLOSE_TIMEOUT = 10
+
 
 class TibberWebsocketsTransport(WebsocketsTransport):
     """Tibber websockets transport."""
@@ -56,4 +58,10 @@ class TibberWebsocketsTransport(WebsocketsTransport):
     async def close(self) -> None:
         """Close the websocket connection."""
         await self._fail(TransportClosed(f"Tibber websocket closed by {self._user_agent}"))
-        await self.wait_closed()
+        try:
+            await asyncio.wait_for(self.wait_closed(), timeout=CLOSE_TIMEOUT)
+        except TimeoutError:
+            _LOGGER.error(
+                "Timed out after %s seconds waiting for the Tibber websocket to close",
+                CLOSE_TIMEOUT,
+            )
