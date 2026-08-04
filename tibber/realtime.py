@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from ssl import SSLContext
 from typing import TYPE_CHECKING, Any, cast
 
@@ -16,8 +16,8 @@ from .exceptions import SubscriptionEndpointMissingError, WebsocketReconnectedEr
 if TYPE_CHECKING:
     from gql.client import AsyncClientSession
 
+CLOSE_TIMEOUT = 10
 KEEP_ALIVE_TIMEOUT = 90
-LOCK_CONNECT = asyncio.Lock()
 MIN_RECONNECT_INTERVAL = 1
 MAX_RECONNECT_INTERVAL = 60
 PING_INTERVAL = 30
@@ -29,12 +29,20 @@ _LOGGER = logging.getLogger(__name__)
 class TibberRT:
     """Class to handle real time connection with the Tibber api."""
 
-    def __init__(self, access_token: str, timeout: int, user_agent: str, ssl: SSLContext | bool) -> None:
+    def __init__(
+        self,
+        access_token: str,
+        timeout: int,
+        user_agent: str,
+        ssl: SSLContext | bool,
+        refresh_access_token: Callable[[], Awaitable[str | None]] | None = None,
+    ) -> None:
         """Initialize the Tibber connection.
 
         :param access_token: The access token to access the Tibber API with.
         :param timeout: The timeout in seconds to use when communicating with the Tibber API.
         :param user_agent: User agent identifier for the platform running this. Required if websession is None.
+        :param refresh_access_token: Async callback to refresh the access token before reconnecting.
         """
         self._access_token: str = access_token
         self._timeout: int = timeout
@@ -43,6 +51,8 @@ class TibberRT:
         self._sub_endpoint: str | None = None
         self._tibber_connected = asyncio.Event()
         self._client: Client | None = None
+        self._refresh_access_token = refresh_access_token
+        self._lock_connect = asyncio.Lock()
         self.subscription_running = False
         self._session: AsyncClientSession | None = None
 
@@ -62,7 +72,7 @@ class TibberRT:
     async def disconnect(self) -> None:
         """Disconnect the websocket client."""
         _LOGGER.debug("Stopping subscription manager")
-        async with LOCK_CONNECT:
+        async with self._lock_connect:
             await self._disconnect()
 
     async def _disconnect(self) -> None:
@@ -74,7 +84,7 @@ class TibberRT:
 
     async def connect(self) -> None:
         """Connect the websocket client."""
-        async with LOCK_CONNECT:
+        async with self._lock_connect:
             await self._connect()
 
     async def _connect(self) -> None:
@@ -114,10 +124,13 @@ class TibberRT:
 
     async def reconnect(self) -> None:
         """Reconnect the websocket client."""
-        async with LOCK_CONNECT:
+        async with self._lock_connect:
             if self._session is None:
                 return
             _LOGGER.debug("Reconnecting websocket client")
+            access_token = await self._refresh_access_token() if self._refresh_access_token is not None else None
+            if access_token is not None:
+                self._access_token = access_token
             await self._disconnect()
             await self._connect()
 
@@ -203,7 +216,13 @@ class TibberWebsocketsTransport(WebsocketsTransport):
         This method is only called by the client.
         """
         await self._fail(TransportClosed(f"Tibber websocket closed by {self._user_agent}"))
-        await self.wait_closed()
+        try:
+            await asyncio.wait_for(self.wait_closed(), timeout=CLOSE_TIMEOUT)
+        except TimeoutError:
+            _LOGGER.error(
+                "Timed out after %s seconds waiting for the Tibber websocket to close",
+                CLOSE_TIMEOUT,
+            )
 
     async def _close_hook(self) -> None:
         """Hook called by WebsocketsTransportBase on connection close.

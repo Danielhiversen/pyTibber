@@ -37,6 +37,10 @@ MIN_IN_QUARTER: int = 15
 RT_SUBSCRIPTION_TIMEOUT = 60
 RESUBSCRIBE_WAIT_TIME = 60
 
+MIN_REQUESTED_CONSUMPTION_HOURS: int = 3
+
+RESUBSCRIBE_MAX_ATTEMPTS: int = 5
+
 
 class HourlyData:
     """Holds hourly data for consumption or production."""
@@ -93,6 +97,24 @@ class TibberHome:
         self._real_time_consumption_suggested_disabled: dt.datetime | None = None
         self._resubscribe_task: asyncio.Task[None] | None = None
 
+    def _merge_hourly_data(
+        self,
+        existing_data: list[dict[Any, Any]],
+        new_data: list[dict[Any, Any]],
+    ) -> list[dict[Any, Any]]:
+        """Merge hourly payloads by timestamp and prefer the newest entry."""
+        merged_by_timestamp: dict[str, dict[Any, Any]] = {}
+
+        for entry in existing_data:
+            if (timestamp := entry.get("from")) and isinstance(timestamp, str):
+                merged_by_timestamp[timestamp] = entry
+
+        for entry in new_data:
+            if (timestamp := entry.get("from")) and isinstance(timestamp, str):
+                merged_by_timestamp[timestamp] = entry
+
+        return list(merged_by_timestamp.values())
+
     async def _fetch_data(self, hourly_data: HourlyData) -> None:
         """Update hourly consumption or production data asynchronously."""
         now = dt.datetime.now(tz=dt.UTC)
@@ -111,7 +133,7 @@ class TibberHome:
             n_hours = int(seconds_diff / 3600)
             if n_hours < 1:
                 return
-            n_hours = max(2, int(n_hours))
+            n_hours = max(MIN_REQUESTED_CONSUMPTION_HOURS, int(n_hours))
 
         data = await self.get_historic_data(
             n_hours,
@@ -126,8 +148,7 @@ class TibberHome:
         if not hourly_data.data:
             hourly_data.data = data
         else:
-            hourly_data.data = [entry for entry in hourly_data.data if entry not in data]
-            hourly_data.data.extend(data)
+            hourly_data.data = self._merge_hourly_data(hourly_data.data, data)
 
         _month_energy = 0
         _month_money = 0
@@ -438,16 +459,7 @@ class TibberHome:
                 ),
                 on_error=on_error,
             ):
-                data = {"data": _data}
-                with contextlib.suppress(KeyError):
-                    data = self._add_extra_data(data)
-                self._last_rt_data_received = time.time()
-                _LOGGER.debug(
-                    "Data received for %s: %s",
-                    self.home_id,
-                    data,
-                )
-                callback(data)
+                self._handle_subscription_data(_data)
         except WebsocketReconnectedError as err:
             _LOGGER.debug("Websocket reconnected for home %s, restarting subscription", self.home_id)
             if on_error:
@@ -470,8 +482,26 @@ class TibberHome:
         await asyncio.sleep(random.random() * RESUBSCRIBE_WAIT_TIME)  # noqa: S311
         self._schedule_resubscribe()
 
+    def _handle_subscription_data(self, _data: dict[str, Any]) -> None:
+        data = {"data": _data}
+        try:
+            data = self._add_extra_data(data)
+        except KeyError as err:
+            _LOGGER.debug("Missing expected key in rt_subscribe data, skipping enrichment: %s", err)
+        except Exception:
+            _LOGGER.exception("Error processing rt_subscribe data")
+        try:
+            self._rt_callback(data)
+        except Exception:
+            _LOGGER.exception("Error in rt_subscribe callback")
+            return
+        _LOGGER.debug(
+            "Data received for %s: %s",
+            self.home_id,
+            data,
+        )
+
     def _add_extra_data(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Add extra data to live subscription result."""
         live_data = data["data"]["liveMeasurement"]
         _timestamp = dt.datetime.fromisoformat(live_data["timestamp"]).astimezone(self._tibber_control.time_zone)
         while self._rt_power and self._rt_power[0][0] < _timestamp - dt.timedelta(minutes=5):
