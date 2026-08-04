@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, call, create_autospec, patch
 
@@ -12,6 +13,7 @@ import pytest
 import tibber
 from tibber.exceptions import WebsocketReconnectedError, WebsocketTransportError
 from tibber.gql_queries import INFO, REAL_TIME_CONSUMPTION_ENABLED
+from tibber.home import RT_SUBSCRIPTION_TIMEOUT
 from tibber.realtime import TibberRT
 
 if TYPE_CHECKING:
@@ -386,5 +388,84 @@ async def test_rt_resubscribe_emits_deprecation_warning(
 
     with pytest.warns(DeprecationWarning, match="deprecated"):
         await home.rt_resubscribe()
+
+    home.rt_unsubscribe()
+
+
+async def test_handle_subscription_data_updates_last_rt_data_received(
+    home: tibber.TibberHome,
+) -> None:
+    """Receiving realtime data must refresh the freshness timestamp the watchdog relies on."""
+    home._rt_callback = MagicMock()  # noqa: SLF001
+
+    assert home._last_rt_data_received is None  # noqa: SLF001
+    with patch("tibber.home.time.time", return_value=12345.0):
+        home._handle_subscription_data({"liveMeasurement": {}})  # noqa: SLF001
+
+    assert home._last_rt_data_received == 12345.0  # noqa: SLF001
+    home._rt_callback.assert_called_once()  # noqa: SLF001
+
+
+async def _run_timeout_until_second_sleep(home: tibber.TibberHome, now: float) -> None:
+    """Run _rt_subscription_timeout for a single iteration then abort on the next sleep."""
+    sleeps = 0
+
+    async def fake_sleep(_seconds: float) -> None:
+        nonlocal sleeps
+        sleeps += 1
+        if sleeps >= 2:
+            raise asyncio.CancelledError
+
+    with (
+        patch("tibber.home.time.time", return_value=now),
+        patch("tibber.home.asyncio.sleep", side_effect=fake_sleep),
+        contextlib.suppress(asyncio.CancelledError),
+    ):
+        await home._rt_subscription_timeout()  # noqa: SLF001
+
+
+async def test_rt_subscription_timeout_skips_reconnect_when_data_fresh(
+    home: tibber.TibberHome,
+    mock_realtime: MagicMock,
+) -> None:
+    """The watchdog must not reconnect while fresh data keeps arriving."""
+    home._rt_on_error = None  # noqa: SLF001
+    home._last_rt_data_received = 1000.0  # noqa: SLF001
+    home._schedule_resubscribe = MagicMock()  # type: ignore[method-assign]  # noqa: SLF001
+
+    await _run_timeout_until_second_sleep(home, now=1000.0 + 1)
+
+    mock_realtime.reconnect.assert_not_awaited()
+    home._schedule_resubscribe.assert_not_called()  # noqa: SLF001
+
+
+async def test_rt_subscription_timeout_reconnects_when_data_stale(
+    home: tibber.TibberHome,
+    mock_realtime: MagicMock,
+) -> None:
+    """The watchdog must reconnect and resubscribe after a data stall."""
+    home._rt_on_error = None  # noqa: SLF001
+    home._last_rt_data_received = 1000.0  # noqa: SLF001
+    home._schedule_resubscribe = MagicMock()  # type: ignore[method-assign]  # noqa: SLF001
+
+    await _run_timeout_until_second_sleep(home, now=1000.0 + 10 * RT_SUBSCRIPTION_TIMEOUT)
+
+    mock_realtime.reconnect.assert_awaited_once()
+    home._schedule_resubscribe.assert_called_once()  # noqa: SLF001
+
+
+async def test_rt_subscription_timeout_reconnects_when_no_data_received(
+    home: tibber.TibberHome,
+    mock_realtime: MagicMock,
+) -> None:
+    """A subscription that never delivered data must be treated as stale."""
+    home._rt_on_error = None  # noqa: SLF001
+    assert home._last_rt_data_received is None  # noqa: SLF001
+    home._schedule_resubscribe = MagicMock()  # type: ignore[method-assign]  # noqa: SLF001
+
+    await _run_timeout_until_second_sleep(home, now=1000.0)
+
+    mock_realtime.reconnect.assert_awaited_once()
+    home._schedule_resubscribe.assert_called_once()  # noqa: SLF001
 
     home.rt_unsubscribe()

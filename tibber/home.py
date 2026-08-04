@@ -483,6 +483,12 @@ class TibberHome:
         self._schedule_resubscribe()
 
     def _handle_subscription_data(self, _data: dict[str, Any]) -> None:
+        """Handle incoming real time subscription data.
+
+        Record that data was received to keep the subscription timeout watchdog
+        from treating a healthy, active subscription as unresponsive.
+        """
+        self._last_rt_data_received = time.time()
         data = {"data": _data}
         try:
             data = self._add_extra_data(data)
