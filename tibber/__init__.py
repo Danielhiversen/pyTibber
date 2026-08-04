@@ -98,6 +98,7 @@ class Tibber:
 
         access_token = await self._refresh_access_token()
         if access_token is not None and access_token != self._access_token:
+            _LOGGER.debug("Updating access token")
             self._access_token = access_token
             self.data_api.set_access_token(access_token)
         return access_token
@@ -251,6 +252,7 @@ class Tibber:
         """Set access token and reauthorize clients."""
         if access_token == self._access_token:
             return
+        _LOGGER.debug("Updating access token")
         self._access_token = access_token
         self.data_api.set_access_token(access_token)
         await self.realtime.set_access_token(access_token)
