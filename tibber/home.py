@@ -273,7 +273,7 @@ class TibberHome:
     async def update_real_time_consumption_enabled(self) -> None:
         """Update the real time consumption enabled status."""
         if not (data := await self._tibber_control.execute(REAL_TIME_CONSUMPTION_ENABLED % self._home_id)):
-            _LOGGER.error("Could not get the data.")
+            _LOGGER.error("Could not get real time consumption enabled status.")
             return
         self._update_has_real_time_consumption(self._extract_real_time_consumption_enabled(data))
 
