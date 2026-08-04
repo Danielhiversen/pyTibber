@@ -101,6 +101,40 @@ async def test_rt_unsubscribe_noop_when_not_subscribed(home: tibber.TibberHome) 
     assert not home.rt_subscription_running
 
 
+@pytest.mark.parametrize("enabled", [True, False])
+async def test_update_real_time_consumption_enabled_without_prior_info(
+    mock_websession: MagicMock,
+    home: tibber.TibberHome,
+    enabled: bool,
+) -> None:
+    """Updating the flag must not require info to be populated first."""
+    home._has_real_time_consumption = None  # noqa: SLF001
+    assert home.info == {}
+
+    mock_response = MagicMock()
+    mock_response.status = 200
+    mock_response.content_type = "application/json"
+    mock_response.json = AsyncMock(
+        return_value={
+            "data": {
+                "viewer": {
+                    "home": {
+                        "id": HOME_ID,
+                        "features": {"realTimeConsumptionEnabled": enabled},
+                    },
+                },
+            },
+        },
+    )
+    mock_websession.post = AsyncMock(return_value=mock_response)
+
+    await home.update_real_time_consumption_enabled()
+
+    assert home.has_real_time_consumption is enabled
+    # The method must not mutate info as a side effect.
+    assert home.info == {}
+
+
 async def test_rt_subscribe_multiple_items_all_delivered(
     home: tibber.TibberHome,
     mock_realtime: MagicMock,
@@ -226,15 +260,6 @@ async def test_rt_subscribe_on_error_called_on_exception(
     http_calls: list,
 ) -> None:
     """on_error must be called when subscribe raises an exception."""
-    # Initialize info structure so update_real_time_consumption_enabled can update it
-    home.info = {
-        "viewer": {
-            "home": {
-                "features": {"realTimeConsumptionEnabled": real_time_consumption},
-            },
-        },
-    }
-
     # Track which call number we're on to return different responses
     call_count = 0
     resubscribe_called = asyncio.Event()

@@ -234,7 +234,7 @@ class TibberHome:
             return
         self.info = data
 
-        self._update_has_real_time_consumption()
+        self._update_has_real_time_consumption(self._extract_real_time_consumption_enabled(data))
 
         # Handle inactive homes where currentSubscription might be None
         # Access currentSubscription, handle missing keys
@@ -275,17 +275,18 @@ class TibberHome:
         if not (data := await self._tibber_control.execute(REAL_TIME_CONSUMPTION_ENABLED % self._home_id)):
             _LOGGER.error("Could not get the data.")
             return
-        self.info["viewer"]["home"]["features"]["realTimeConsumptionEnabled"] = data["viewer"]["home"]["features"][
-            "realTimeConsumptionEnabled"
-        ]
-        self._update_has_real_time_consumption()
+        self._update_has_real_time_consumption(self._extract_real_time_consumption_enabled(data))
 
-    def _update_has_real_time_consumption(self) -> None:
+    @staticmethod
+    def _extract_real_time_consumption_enabled(data: dict[str, Any]) -> bool | None:
+        """Safely extract the real time consumption enabled flag from an info payload."""
         try:
-            _has_real_time_consumption = self.info["viewer"]["home"]["features"]["realTimeConsumptionEnabled"]
+            return data["viewer"]["home"]["features"]["realTimeConsumptionEnabled"]
         except (KeyError, TypeError):
-            self._has_real_time_consumption = None
-            return
+            return None
+
+    def _update_has_real_time_consumption(self, enabled: bool | None) -> None:
+        _has_real_time_consumption = enabled
         if self._has_real_time_consumption is None:
             self._has_real_time_consumption = _has_real_time_consumption
             return
