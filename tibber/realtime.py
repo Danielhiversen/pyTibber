@@ -66,6 +66,7 @@ class TibberRT:
                 self._sub_endpoint,
                 self._access_token,
                 self._user_agent,
+                connect_timeout=self._timeout,
                 ssl=self._ssl_context,
                 tibber_connected=self._tibber_connected,
             ),
@@ -185,6 +186,7 @@ class TibberWebsocketsTransport(WebsocketsTransport):
         access_token: str,
         user_agent: str,
         *,
+        connect_timeout: float = 10,
         ssl: SSLContext | bool = True,
         tibber_connected: asyncio.Event,
     ) -> None:
@@ -194,6 +196,7 @@ class TibberWebsocketsTransport(WebsocketsTransport):
             init_payload={"token": access_token},
             headers={"User-Agent": user_agent},
             ssl=ssl,
+            connect_timeout=connect_timeout,
             keep_alive_timeout=KEEP_ALIVE_TIMEOUT,
             ping_interval=PING_INTERVAL,
             pong_timeout=PONG_TIMEOUT,
