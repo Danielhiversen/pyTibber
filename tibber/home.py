@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import contextlib
 import datetime as dt
 import logging
 import random
@@ -12,6 +11,7 @@ import time
 import warnings
 from typing import TYPE_CHECKING, Any
 
+import aiohttp
 from gql import gql
 
 from .const import RESOLUTION_DAILY, RESOLUTION_HOURLY, RESOLUTION_MONTHLY, RESOLUTION_WEEKLY
@@ -26,7 +26,7 @@ from .gql_queries import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Awaitable, Callable
 
     from . import Tibber
 
@@ -559,17 +559,31 @@ class TibberHome:
         _LOGGER.info("Resubscribe, %s", self.home_id)
         self.rt_unsubscribe()
 
-        with contextlib.suppress(Exception):
-            await self.update_real_time_consumption_enabled()
+        await self._resubscribe_step(
+            self.update_real_time_consumption_enabled(),
+            "Failed to refresh real time consumption status, keeping last known status",
+        )
         if not self.has_real_time_consumption:
             _LOGGER.info("Home %s does not have real time consumption enabled", self.home_id)
             return
 
         # Update info to set websocket subscription url
-        with contextlib.suppress(Exception):
-            await self._tibber_control.update_info()
+        await self._resubscribe_step(
+            self._tibber_control.update_info(),
+            "Failed to update info, keeping last known info",
+        )
 
         await self._rt_subscribe()
+
+    async def _resubscribe_step(self, coro: Awaitable[Any], failure_message: str) -> None:
+        """Await a resubscribe step, logging a warning on failure instead of aborting."""
+        try:
+            await coro
+        except (TimeoutError, aiohttp.ClientError):
+            # Transport errors are already logged at debug level inside execute.
+            _LOGGER.warning("Home %s: %s", self.home_id, failure_message)
+        except Exception:  # noqa: BLE001
+            _LOGGER.warning("Home %s: %s", self.home_id, failure_message, exc_info=True)
 
     def rt_unsubscribe(self) -> None:
         """Unsubscribe to Tibber data."""
