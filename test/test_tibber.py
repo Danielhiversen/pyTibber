@@ -10,7 +10,7 @@ import aiohttp
 import pytest
 
 import tibber
-from tibber.const import RESOLUTION_DAILY
+from tibber.const import RESOLUTION_DAILY, RESOLUTION_HOURLY
 from tibber.exceptions import FatalHttpExceptionError, InvalidLoginError, NotForDemoUserError
 
 

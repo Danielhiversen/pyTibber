@@ -450,7 +450,6 @@ class TibberHome:
 
     async def _start_listen(self) -> None:
         """Subscribe to Tibber."""
-        callback = self._rt_callback
         on_error = self._rt_on_error
         try:
             async for _data in self._tibber_control.realtime.subscribe(
@@ -490,6 +489,8 @@ class TibberHome:
             _LOGGER.debug("Missing expected key in rt_subscribe data, skipping enrichment: %s", err)
         except Exception:
             _LOGGER.exception("Error processing rt_subscribe data")
+        if self._rt_callback is None:
+            raise RuntimeError("No subscription callback set, call rt_subscribe first")
         try:
             self._rt_callback(data)
         except Exception:
