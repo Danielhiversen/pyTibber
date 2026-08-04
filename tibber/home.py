@@ -606,8 +606,9 @@ class TibberHome:
                     self.home_id,
                     RT_SUBSCRIPTION_TIMEOUT,
                 )
-            self._rt_listener.cancel()
-            self._rt_listener = None
+            if self._rt_listener is not None:
+                self._rt_listener.cancel()
+                self._rt_listener = None
             await self._tibber_control.realtime.reconnect()
             self._schedule_resubscribe()
 

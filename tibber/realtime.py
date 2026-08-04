@@ -58,6 +58,8 @@ class TibberRT:
 
     def _create_client(self) -> Client:
         """Create a new gql Client with the current transport settings."""
+        if self._sub_endpoint is None:
+            raise SubscriptionEndpointMissingError("Subscription endpoint not initialized")
         self._tibber_connected.clear()
         return Client(
             transport=TibberWebsocketsTransport(
@@ -89,9 +91,6 @@ class TibberRT:
 
     async def _connect(self) -> None:
         """Connect the websocket client."""
-        if self._sub_endpoint is None:
-            raise SubscriptionEndpointMissingError("Subscription endpoint not initialized")
-
         if self.subscription_running or self._session:
             return
 
