@@ -4,7 +4,7 @@ import asyncio
 import datetime as dt
 import logging
 from typing import Self
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import aiohttp
 import pytest
@@ -393,3 +393,54 @@ async def test_set_access_token_noop_when_token_unchanged(monkeypatch: pytest.Mo
 
     rt_set_access_token.assert_not_awaited()
     data_api_set_access_token.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_set_access_token_updates_data_api_before_realtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    """data_api must be reauthorized before realtime, which reuses the refreshed token on reconnect."""
+    tibber_connection = tibber.Tibber(
+        access_token="existing-token",
+        websession=MagicMock(),
+        user_agent="test",
+    )
+    manager = MagicMock()
+    manager.data_api = MagicMock()
+    manager.realtime = AsyncMock()
+
+    monkeypatch.setattr(tibber_connection.realtime, "set_access_token", manager.realtime)
+    monkeypatch.setattr(tibber_connection.data_api, "set_access_token", manager.data_api)
+
+    await tibber_connection.set_access_token("new-token")
+
+    assert manager.mock_calls == [
+        call.data_api("new-token"),
+        call.realtime("new-token"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_rt_disconnect_unsubscribes_homes_before_disconnecting(monkeypatch: pytest.MonkeyPatch) -> None:
+    """rt_disconnect must unsubscribe every home before tearing down the realtime connection."""
+    tibber_connection = tibber.Tibber(
+        access_token="existing-token",
+        websession=MagicMock(),
+        user_agent="test",
+    )
+    manager = MagicMock()
+    manager.realtime_disconnect = AsyncMock()
+    monkeypatch.setattr(tibber_connection.realtime, "disconnect", manager.realtime_disconnect)
+
+    home_a = MagicMock()
+    home_b = MagicMock()
+    home_a.rt_unsubscribe = manager.unsubscribe_a
+    home_b.rt_unsubscribe = manager.unsubscribe_b
+    tibber_connection._homes = {"a": home_a, "b": home_b}  # noqa: SLF001
+
+    await tibber_connection.rt_disconnect()
+
+    # Both homes are unsubscribed, and the realtime disconnect happens last.
+    assert manager.mock_calls == [
+        call.unsubscribe_a(),
+        call.unsubscribe_b(),
+        call.realtime_disconnect(),
+    ]

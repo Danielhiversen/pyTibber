@@ -96,6 +96,17 @@ class TibberRT:
             return
 
         self._client = self._create_client()
+        # gql's built-in reconnect (reconnecting=True + retry_connect) reuses this transport
+        # instance, so it keeps replaying the access token baked into init_payload at build
+        # time. That means an expired token is not refreshed by gql's internal retry loop.
+        # We deliberately do NOT override gql's connection handshake to refresh mid-retry, as
+        # that reaches into gql internals and collides with the explicit token passed to
+        # set_access_token. Instead, token refresh happens on our own reconnect() path, which
+        # rebuilds the transport with a fresh token. reconnect() is driven by set_access_token,
+        # set_subscription_endpoint, and the per-home subscription timeout watchdog: if an
+        # expired token stalls the stream, the watchdog reconnects within RT_SUBSCRIPTION_TIMEOUT
+        # and refreshes the token. Recovery is therefore a little slower than a dedicated
+        # handshake hook, but avoids coupling to gql internals.
         try:
             await asyncio.wait_for(
                 asyncio.shield(
