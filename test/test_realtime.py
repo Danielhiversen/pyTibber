@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import json
+import weakref
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -382,6 +384,48 @@ async def test_connect_timeout_leaves_with_session_and_subscription_not_running(
 
     mock_client.close_async.assert_awaited_once()
     assert tibber_rt.subscription_running is False
+
+
+@pytest.mark.parametrize("timeout", [0])
+async def test_connect_timeout_keeps_background_task_alive(
+    mock_client: MagicMock,
+    tibber_rt: TibberRT,
+) -> None:
+    """A connect that times out must keep its background connection task alive.
+
+    The connection attempt is shielded so it keeps running after a timeout, but
+    the event loop only holds weak references to tasks. Unless the task is
+    referenced elsewhere it can be garbage collected mid-execution.
+    """
+    task_ref: weakref.ref[asyncio.Task[Any]] | None = None
+
+    async def never_finishing_connect(**kwargs: Any) -> MagicMock:  # noqa: ANN401, ARG001
+        nonlocal task_ref
+        task_ref = weakref.ref(asyncio.current_task())  # type: ignore[arg-type]
+        session = mock_client.session = MagicMock(spec=AsyncClientSession)
+        # Park on a future nothing else references, so only TibberRT can keep
+        # this task from being garbage collected.
+        await asyncio.get_running_loop().create_future()
+        return session
+
+    mock_client.connect_async = AsyncMock(wraps=never_finishing_connect)
+
+    await tibber_rt.connect()
+    # Let the shielded task start and suspend on the pending future.
+    await asyncio.sleep(0)
+
+    assert tibber_rt.subscription_running is False
+    assert task_ref is not None
+
+    # The background task must survive garbage collection.
+    gc.collect()
+    assert task_ref() is not None
+
+    # Disconnecting terminates the background task.
+    await tibber_rt.disconnect()
+    await asyncio.sleep(0)  # let the cancellation settle
+    released = task_ref()
+    assert released is None or released.cancelled()
 
 
 async def test_subscribe_transport_connection_failed_without_on_error_raises_reconnected(

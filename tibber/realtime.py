@@ -55,6 +55,7 @@ class TibberRT:
         self._lock_connect = asyncio.Lock()
         self.subscription_running = False
         self._session: AsyncClientSession | None = None
+        self._connect_task: asyncio.Task[Any] | None = None
 
     def _create_client(self) -> Client:
         """Create a new gql Client with the current transport settings."""
@@ -80,6 +81,9 @@ class TibberRT:
 
     async def _disconnect(self) -> None:
         """Disconnect the websocket client."""
+        if self._connect_task is not None and not self._connect_task.done():
+            self._connect_task.cancel()
+        self._connect_task = None
         if self._client is not None and self._session is not None:
             await self._client.close_async()
             self._session = None
@@ -107,23 +111,26 @@ class TibberRT:
         # expired token stalls the stream, the watchdog reconnects within RT_SUBSCRIPTION_TIMEOUT
         # and refreshes the token. Recovery is therefore a little slower than a dedicated
         # handshake hook, but avoids coupling to gql internals.
-        try:
-            await asyncio.wait_for(
-                asyncio.shield(
-                    self._client.connect_async(
-                        reconnecting=True,
-                        retry_connect=retry(
-                            wait=wait_exponential_jitter(
-                                initial=MIN_RECONNECT_INTERVAL,
-                                max=MAX_RECONNECT_INTERVAL,
-                                jitter=MAX_RECONNECT_INTERVAL,
-                            ),
-                            before_sleep=before_sleep_log(_LOGGER, logging.INFO),
-                        ),
+        # We store a strong reference to the connect task. The task is shielded below so a
+        # connect timeout does not cancel the ongoing connection attempt, letting it keep
+        # retrying in the background. The event loop only keeps weak references to tasks, so
+        # without this reference the shielded task could be garbage collected mid-execution.
+        self._connect_task = asyncio.create_task(
+            self._client.connect_async(
+                reconnecting=True,
+                retry_connect=retry(
+                    wait=wait_exponential_jitter(
+                        initial=MIN_RECONNECT_INTERVAL,
+                        max=MAX_RECONNECT_INTERVAL,
+                        jitter=MAX_RECONNECT_INTERVAL,
                     ),
+                    before_sleep=before_sleep_log(_LOGGER, logging.INFO),
                 ),
-                timeout=self._timeout,
-            )
+            ),
+        )
+        self._connect_task.add_done_callback(self._on_connect_task_done)
+        try:
+            await asyncio.wait_for(asyncio.shield(self._connect_task), timeout=self._timeout)
         except TimeoutError as err:
             _LOGGER.debug("Timeout connecting to websocket: %s", err)
             # The connection will be retried by the reconnecting task
@@ -132,6 +139,11 @@ class TibberRT:
 
         # The client session is set even if the connection times out.
         self._session = cast("AsyncClientSession", self._client.session)
+
+    def _on_connect_task_done(self, task: asyncio.Task[Any]) -> None:
+        """Clear the connect task reference once it settles."""
+        if task is self._connect_task:
+            self._connect_task = None
 
     async def reconnect(self) -> None:
         """Reconnect the websocket client."""
