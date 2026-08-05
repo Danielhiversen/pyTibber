@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, call, create_autospec, patch
 
@@ -10,7 +11,11 @@ import aiohttp
 import pytest
 
 import tibber
-from tibber.exceptions import WebsocketReconnectedError, WebsocketTransportError
+from tibber.exceptions import (
+    SubscriptionFailedError,
+    WebsocketReconnectedError,
+    WebsocketTransportError,
+)
 from tibber.gql_queries import INFO, REAL_TIME_CONSUMPTION_ENABLED
 from tibber.realtime import TibberRT
 
@@ -327,14 +332,23 @@ async def test_rt_subscribe_on_error_called_on_exception(
     assert not home.rt_subscription_running
 
 
+@pytest.mark.parametrize(
+    "error",
+    [
+        WebsocketTransportError("transport error"),
+        WebsocketReconnectedError("reconnected"),
+    ],
+)
+@patch("tibber.home.RESUBSCRIBE_WAIT_TIME", 0)
 async def test_rt_subscribe_no_crash_when_subscribe_raises_without_on_error(
     home: tibber.TibberHome,
     mock_realtime: MagicMock,
+    error: Exception,
 ) -> None:
     """_start_listen must not propagate exceptions when no on_error is provided."""
 
     async def subscribe_raises(*args: Any, **kwargs: Any) -> AsyncGenerator:  # noqa: ANN401, ARG001
-        raise WebsocketTransportError("transport error")
+        raise error
         yield
 
     mock_realtime.subscribe = subscribe_raises
@@ -496,5 +510,265 @@ async def test_rt_subscription_reconnects_when_no_data_received(
 
     mock_realtime.reconnect.assert_awaited_once()
     assert not home.rt_subscription_running
+
+    home.rt_unsubscribe()
+
+
+@pytest.mark.parametrize(
+    "post_error",
+    [
+        aiohttp.ClientError("boom"),
+        TimeoutError(),
+        ValueError("boom"),
+    ],
+)
+@patch("tibber.home.RESUBSCRIBE_WAIT_TIME", 0)
+async def test_rt_subscribe_recovers_when_resubscribe_step_fails(
+    home: tibber.TibberHome,
+    mock_realtime: MagicMock,
+    mock_websession: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+    post_error: Exception,
+) -> None:
+    """A failing resubscribe step is logged and must not abort the subscription.
+
+    The consumption-status refresh and the info update both run on the initial
+    subscribe. When they fail (transport errors take the TimeoutError/ClientError
+    branch, other errors the generic branch) the last known state is kept and the
+    subscription still comes up.
+    """
+    mock_websession.post.side_effect = post_error
+
+    sample_data = {"key": "value"}
+    _, subscribe_fn = _make_blocking_subscribe([sample_data])
+    mock_realtime.subscribe = subscribe_fn
+
+    received: list[dict] = []
+    callback_called = asyncio.Event()
+
+    def callback(data: dict) -> None:
+        received.append(data)
+        callback_called.set()
+
+    with caplog.at_level(logging.WARNING):
+        await home.rt_subscribe(callback)
+        await asyncio.wait_for(callback_called.wait(), timeout=1.0)
+
+    mock_realtime.connect.assert_awaited_once()
+    assert received == [{"data": sample_data}]
+    assert home.rt_subscription_running
+    assert "keeping last known status" in caplog.text
+    assert "keeping last known info" in caplog.text
+
+    home.rt_unsubscribe()
+
+
+@patch("tibber.home.RT_SUBSCRIPTION_TIMEOUT", 0)
+async def test_rt_subscription_timeout_calls_on_error(
+    home: tibber.TibberHome,
+    mock_realtime: MagicMock,
+) -> None:
+    """The watchdog must deliver a SubscriptionFailedError to on_error on timeout."""
+    reconnected, reconnect = _make_reconnect_watchdog_stopper()
+    mock_realtime.reconnect = reconnect
+
+    # Never yields any data, so the watchdog treats the subscription as stale.
+    _, subscribe_fn = _make_blocking_subscribe([])
+    mock_realtime.subscribe = subscribe_fn
+
+    caught: list[Exception] = []
+    on_error_called = asyncio.Event()
+
+    def on_error(exc: Exception) -> None:
+        caught.append(exc)
+        on_error_called.set()
+
+    await home.rt_subscribe(MagicMock(), on_error=on_error)
+    await asyncio.wait_for(on_error_called.wait(), timeout=2.0)
+    await asyncio.wait_for(reconnected.wait(), timeout=2.0)
+
+    assert len(caught) == 1
+    assert isinstance(caught[0], SubscriptionFailedError)
+    assert HOME_ID in str(caught[0])
+    mock_realtime.reconnect.assert_awaited_once()
+
+    home.rt_unsubscribe()
+
+
+async def test_rt_subscribe_survives_callback_exception(
+    home: tibber.TibberHome,
+    mock_realtime: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An exception raised by the callback must not stop later items from arriving."""
+    items = [{"first": 1}, {"second": 2}]
+    _, subscribe_fn = _make_blocking_subscribe(items)
+    mock_realtime.subscribe = subscribe_fn
+
+    calls: list[dict] = []
+    second_received = asyncio.Event()
+
+    def callback(data: dict) -> None:
+        calls.append(data)
+        if len(calls) == 1:
+            raise ValueError("callback boom")
+        second_received.set()
+
+    with caplog.at_level(logging.ERROR):
+        await home.rt_subscribe(callback)
+        await asyncio.wait_for(second_received.wait(), timeout=1.0)
+
+    assert calls == [{"data": items[0]}, {"data": items[1]}]
+    assert home.rt_subscription_running
+    assert "Error in rt_subscribe callback" in caplog.text
+
+    home.rt_unsubscribe()
+
+
+async def test_update_real_time_consumption_enabled_ignores_empty_response(
+    home: tibber.TibberHome,
+    mock_websession: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An empty response must leave has_real_time_consumption unchanged."""
+    mock_response = MagicMock()
+    mock_response.status = 200
+    mock_response.content_type = "application/json"
+    mock_response.json = AsyncMock(return_value={})
+    mock_websession.post = AsyncMock(return_value=mock_response)
+
+    with caplog.at_level(logging.ERROR):
+        await home.update_real_time_consumption_enabled()
+
+    assert home.has_real_time_consumption is True
+    assert "Could not get real time consumption enabled status." in caplog.text
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"viewer": {"home": {}}},  # missing "features" -> KeyError
+        {"viewer": None},  # not subscriptable -> TypeError
+    ],
+)
+async def test_update_real_time_consumption_enabled_handles_malformed_payload(
+    home: tibber.TibberHome,
+    mock_websession: MagicMock,
+    payload: dict,
+) -> None:
+    """A malformed payload must resolve the flag to None."""
+    mock_response = MagicMock()
+    mock_response.status = 200
+    mock_response.content_type = "application/json"
+    mock_response.json = AsyncMock(return_value={"data": payload})
+    mock_websession.post = AsyncMock(return_value=mock_response)
+
+    await home.update_real_time_consumption_enabled()
+
+    assert home.has_real_time_consumption is None
+
+
+def _make_enabled_response() -> AsyncMock:
+    """Return a post mock whose response reports real time consumption enabled."""
+    mock_response = MagicMock()
+    mock_response.status = 200
+    mock_response.content_type = "application/json"
+    mock_response.json = AsyncMock(
+        return_value={
+            "data": {
+                "viewer": {
+                    "home": {
+                        "id": HOME_ID,
+                        "features": {"realTimeConsumptionEnabled": True},
+                    },
+                },
+            },
+        },
+    )
+    return AsyncMock(return_value=mock_response)
+
+
+@patch("tibber.home.RESUBSCRIBE_WAIT_TIME", 0)
+@patch("tibber.home.RT_SUBSCRIPTION_TIMEOUT", 0.05)
+async def test_rt_subscription_resubscribes_after_watchdog_reconnect(
+    home: tibber.TibberHome,
+    mock_realtime: MagicMock,
+    mock_websession: MagicMock,
+) -> None:
+    """After a watchdog reconnect the subscription must resubscribe and resume data.
+
+    The first subscription never yields, so its data goes stale and the watchdog
+    reconnects. When reconnect succeeds (instead of raising) the watchdog schedules
+    a resubscribe, which brings up a fresh subscription that delivers data again.
+    """
+    mock_websession.post = _make_enabled_response()
+
+    call_count = 0
+    stop = asyncio.Event()
+    got_data = asyncio.Event()
+
+    async def subscribe(*args: Any, **kwargs: Any) -> AsyncGenerator[Any, None]:  # noqa: ANN401, ARG001
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            # First subscription never yields: the data goes stale.
+            await asyncio.Event().wait()
+        else:
+            # After the reconnect the fresh subscription keeps data flowing.
+            while not stop.is_set():
+                yield {"liveMeasurement": {}}
+                await asyncio.sleep(0.01)
+
+    mock_realtime.subscribe = subscribe
+
+    def callback(data: dict) -> None:  # noqa: ARG001
+        got_data.set()
+
+    await home.rt_subscribe(callback)
+    await asyncio.wait_for(got_data.wait(), timeout=2.0)
+
+    assert mock_realtime.reconnect.await_count >= 1
+    assert home.rt_subscription_running
+
+    stop.set()
+    home.rt_unsubscribe()
+
+
+@patch("tibber.home.RESUBSCRIBE_WAIT_TIME", 0)
+@patch("tibber.home.RT_SUBSCRIPTION_TIMEOUT", 3600)
+async def test_rt_subscribe_recovers_from_repeated_errors(
+    home: tibber.TibberHome,
+    mock_realtime: MagicMock,
+    mock_websession: MagicMock,
+) -> None:
+    """Repeated subscription errors keep triggering resubscription until it holds.
+
+    The second resubscribe schedule cancels the previous (already completed)
+    resubscribe task, and the subscription ends up running once subscribe stops
+    failing. The watchdog is kept idle with a long timeout.
+    """
+    mock_websession.post = _make_enabled_response()
+
+    call_count = 0
+    settled = asyncio.Event()
+    block = asyncio.Event()
+
+    async def subscribe(*args: Any, **kwargs: Any) -> AsyncGenerator[Any, None]:  # noqa: ANN401, ARG001
+        nonlocal call_count
+        call_count += 1
+        if call_count <= 2:
+            raise WebsocketTransportError("transport error")
+            yield
+        # The third subscription stays open, so resubscription settles.
+        settled.set()
+        await block.wait()
+
+    mock_realtime.subscribe = subscribe
+
+    await home.rt_subscribe(MagicMock())
+    await asyncio.wait_for(settled.wait(), timeout=1.0)
+
+    assert home.rt_subscription_running
+    assert mock_realtime.connect.await_count == 3
 
     home.rt_unsubscribe()

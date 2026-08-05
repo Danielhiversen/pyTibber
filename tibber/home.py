@@ -543,6 +543,9 @@ class TibberHome:
 
     def _schedule_resubscribe(self) -> None:
         if self._resubscribe_task is not None:
+            # Cancelling the resubscribe task is a defensive no-op,
+            # since the the only callers of _schedule_resubscribe,
+            # _rt_listener and _rt_subscription_timeout_task, get cancelled on resubscribe.
             self._resubscribe_task.cancel()
         self._resubscribe_task = asyncio.create_task(self._rt_resubscribe())
 
