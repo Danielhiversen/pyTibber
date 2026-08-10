@@ -98,6 +98,7 @@ class TibberDataAPI:
             headers[aiohttp.hdrs.USER_AGENT] = self._user_agent
 
         response: aiohttp.ClientResponse | None = None
+        _LOGGER.debug("Request %s: %s with params %s", method, url, params)
         try:
             response = await self.websession.request(
                 method,

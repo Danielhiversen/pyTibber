@@ -4,17 +4,14 @@ import asyncio
 import datetime as dt
 import logging
 from typing import Self
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import aiohttp
 import pytest
 
 import tibber
-import tibber.realtime as tibber_realtime
 from tibber.const import RESOLUTION_DAILY, RESOLUTION_HOURLY
 from tibber.exceptions import FatalHttpExceptionError, InvalidLoginError, NotForDemoUserError
-from tibber.home import TibberHome
-from tibber.websocket_transport import TibberWebsocketsTransport
 
 
 @pytest.fixture
@@ -362,16 +359,14 @@ async def test_logging_rt_subscribe(caplog: pytest.LogCaptureFixture) -> None:
 
 
 @pytest.mark.asyncio
-async def test_set_access_token_updates_clients_without_realtime(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_set_access_token_updates_clients(monkeypatch: pytest.MonkeyPatch) -> None:
     tibber_connection = tibber.Tibber(
         websession=MagicMock(),
         user_agent="test",
     )
-    reconnect = AsyncMock()
     rt_set_access_token = AsyncMock()
     data_api_set_access_token = MagicMock()
 
-    monkeypatch.setattr(tibber_connection.realtime, "reconnect", reconnect)
     monkeypatch.setattr(tibber_connection.realtime, "set_access_token", rt_set_access_token)
     monkeypatch.setattr(tibber_connection.data_api, "set_access_token", data_api_set_access_token)
 
@@ -379,126 +374,73 @@ async def test_set_access_token_updates_clients_without_realtime(monkeypatch: py
 
     rt_set_access_token.assert_awaited_once_with("new-token")
     data_api_set_access_token.assert_called_once_with("new-token")
-    reconnect.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_set_access_token_delegates_realtime_reauthorization(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_set_access_token_noop_when_token_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
     tibber_connection = tibber.Tibber(
+        access_token="existing-token",
         websession=MagicMock(),
         user_agent="test",
     )
-    calls: list[str] = []
+    rt_set_access_token = AsyncMock()
+    data_api_set_access_token = MagicMock()
 
-    async def fake_realtime_set_access_token(_access_token: str) -> None:
-        calls.append("realtime.set_access_token")
+    monkeypatch.setattr(tibber_connection.realtime, "set_access_token", rt_set_access_token)
+    monkeypatch.setattr(tibber_connection.data_api, "set_access_token", data_api_set_access_token)
 
-    def fake_data_api_set_access_token(_access_token: str) -> None:
-        calls.append("data_api.set_access_token")
+    await tibber_connection.set_access_token("existing-token")
 
-    monkeypatch.setattr(
-        tibber_connection.realtime,
-        "set_access_token",
-        AsyncMock(side_effect=fake_realtime_set_access_token),
+    rt_set_access_token.assert_not_awaited()
+    data_api_set_access_token.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_set_access_token_updates_data_api_before_realtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    """data_api must be reauthorized before realtime, which reuses the refreshed token on reconnect."""
+    tibber_connection = tibber.Tibber(
+        access_token="existing-token",
+        websession=MagicMock(),
+        user_agent="test",
     )
-    reconnect = AsyncMock()
-    monkeypatch.setattr(tibber_connection.realtime, "reconnect", reconnect)
-    monkeypatch.setattr(tibber_connection.data_api, "set_access_token", fake_data_api_set_access_token)
+    manager = MagicMock()
+    manager.data_api = MagicMock()
+    manager.realtime = AsyncMock()
+
+    monkeypatch.setattr(tibber_connection.realtime, "set_access_token", manager.realtime)
+    monkeypatch.setattr(tibber_connection.data_api, "set_access_token", manager.data_api)
 
     await tibber_connection.set_access_token("new-token")
 
-    assert calls == ["data_api.set_access_token", "realtime.set_access_token"]
-    reconnect.assert_not_awaited()
+    assert manager.mock_calls == [
+        call.data_api("new-token"),
+        call.realtime("new-token"),
+    ]
 
 
 @pytest.mark.asyncio
-async def test_realtime_set_access_token_reconnects_active_subscription_manager(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class FakeClient:
-        def __init__(self, transport: TibberWebsocketsTransport) -> None:
-            self.transport = transport
-            self.close_async_mock = AsyncMock()
-            self.close_async = self.close_async_mock
+async def test_rt_disconnect_unsubscribes_homes_before_disconnecting(monkeypatch: pytest.MonkeyPatch) -> None:
+    """rt_disconnect must unsubscribe every home before tearing down the realtime connection."""
+    tibber_connection = tibber.Tibber(
+        access_token="existing-token",
+        websession=MagicMock(),
+        user_agent="test",
+    )
+    manager = MagicMock()
+    manager.realtime_disconnect = AsyncMock()
+    monkeypatch.setattr(tibber_connection.realtime, "disconnect", manager.realtime_disconnect)
 
-            async def mock_connect_async() -> object:
-                session = object()
-                self.session = session
-                return session
+    home_a = MagicMock()
+    home_b = MagicMock()
+    home_a.rt_unsubscribe = manager.unsubscribe_a
+    home_b.rt_unsubscribe = manager.unsubscribe_b
+    tibber_connection._homes = {"a": home_a, "b": home_b}  # noqa: SLF001
 
-            self.connect_async = AsyncMock(side_effect=mock_connect_async)
+    await tibber_connection.rt_disconnect()
 
-    monkeypatch.setattr(tibber_realtime, "Client", FakeClient)
-
-    realtime = tibber_realtime.TibberRT("old-token", 10, "test-agent", True)
-    realtime.sub_endpoint = "wss://example.test/v1-beta/gql/subscriptions"
-
-    await realtime.connect()
-    old_manager = realtime.sub_manager
-    assert old_manager is not None
-    assert isinstance(old_manager, FakeClient)
-    assert isinstance(old_manager.transport, TibberWebsocketsTransport)
-    assert old_manager.transport.init_payload["token"] == "old-token"
-
-    await realtime.set_access_token("new-token")
-
-    old_manager.close_async_mock.assert_awaited_once_with()
-    assert realtime.session is not None
-    assert realtime.sub_manager is not None
-    assert realtime.sub_manager is not old_manager
-    assert isinstance(realtime.sub_manager, FakeClient)
-    assert isinstance(realtime.sub_manager.transport, TibberWebsocketsTransport)
-    assert realtime.sub_manager.transport.init_payload["token"] == "new-token"
-    realtime.sub_manager.connect_async.assert_awaited_once_with()
-
-    await realtime.disconnect()
-
-
-@pytest.mark.asyncio
-async def test_delayed_resubscribe_uses_reconnect_and_retries(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The delayed resubscribe must use the token-aware reconnect path and retry with backoff."""
-    tibber_control = MagicMock()
-    tibber_control.realtime.subscription_running = False
-    reconnect = AsyncMock(side_effect=[Exception("boom"), Exception("boom"), None])
-    tibber_control.realtime.reconnect = reconnect
-
-    home = TibberHome("home_id", tibber_control)
-    home._rt_callback = lambda _: None  # noqa: SLF001
-    home._rt_stopped = False  # noqa: SLF001
-
-    delays: list[float] = []
-
-    async def fake_sleep(delay: float) -> None:
-        delays.append(delay)
-
-    monkeypatch.setattr("tibber.home.asyncio.sleep", fake_sleep)
-
-    await home._delayed_resubscribe()  # noqa: SLF001
-
-    assert reconnect.await_count == 3
-    assert delays == [1, 2, 4]
-
-
-@pytest.mark.asyncio
-async def test_delayed_resubscribe_gives_up_after_max_attempts(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The delayed resubscribe must stop retrying after the final attempt."""
-    tibber_control = MagicMock()
-    tibber_control.realtime.subscription_running = False
-    reconnect = AsyncMock(side_effect=Exception("boom"))
-    tibber_control.realtime.reconnect = reconnect
-
-    home = TibberHome("home_id", tibber_control)
-    home._rt_callback = lambda _: None  # noqa: SLF001
-    home._rt_stopped = False  # noqa: SLF001
-
-    delays: list[float] = []
-
-    async def fake_sleep(delay: float) -> None:
-        delays.append(delay)
-
-    monkeypatch.setattr("tibber.home.asyncio.sleep", fake_sleep)
-
-    await home._delayed_resubscribe()  # noqa: SLF001
-
-    assert reconnect.await_count == 5
-    assert delays == [1, 2, 4, 8, 16]
+    # Both homes are unsubscribed, and the realtime disconnect happens last.
+    assert manager.mock_calls == [
+        call.unsubscribe_a(),
+        call.unsubscribe_b(),
+        call.realtime_disconnect(),
+    ]

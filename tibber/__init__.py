@@ -70,10 +70,9 @@ class Tibber:
         self.timeout: int = timeout
         self._access_token: str = access_token
         self._refresh_access_token = refresh_access_token
-
-        self.realtime: TibberRT = TibberRT(
-            self._access_token,
-            self.timeout,
+        self.realtime = TibberRT(
+            access_token,
+            timeout,
             self._user_agent,
             ssl=ssl,
             refresh_access_token=self._refresh_access_token_for_reconnect if refresh_access_token is not None else None,
@@ -99,6 +98,7 @@ class Tibber:
 
         access_token = await self._refresh_access_token()
         if access_token is not None and access_token != self._access_token:
+            _LOGGER.debug("Updating access token")
             self._access_token = access_token
             self.data_api.set_access_token(access_token)
         return access_token
@@ -127,6 +127,11 @@ class Tibber:
 
         payload = {"query": document, "variables": variable_values or {}}
 
+        _LOGGER.debug(
+            "Executing query: %s with variables: %s",
+            document.replace(" ", "").replace("\n", "_"),
+            variable_values,
+        )
         try:
             resp = await self.websession.post(
                 API_ENDPOINT,
@@ -161,8 +166,7 @@ class Tibber:
             return
 
         if sub_endpoint := viewer.get("websocketSubscriptionUrl"):
-            _LOGGER.debug("Using websocket subscription url %s", sub_endpoint)
-            self.realtime.sub_endpoint = sub_endpoint
+            await self.realtime.set_subscription_endpoint(sub_endpoint)
 
         self._name = viewer.get("name")
         self._user_id = viewer.get("userId")
@@ -239,16 +243,16 @@ class Tibber:
         )
 
     async def rt_disconnect(self) -> None:
-        """Stop subscription manager.
-        This method simply calls the stop method of the SubscriptionManager if it is defined.
-        """
-        return await self.realtime.disconnect()
+        """Stop subscription manager."""
+        for home in self._homes.values():
+            home.rt_unsubscribe()
+        await self.realtime.disconnect()
 
     async def set_access_token(self, access_token: str) -> None:
         """Set access token and reauthorize clients."""
         if access_token == self._access_token:
             return
-
+        _LOGGER.debug("Updating access token")
         self._access_token = access_token
         self.data_api.set_access_token(access_token)
         await self.realtime.set_access_token(access_token)
