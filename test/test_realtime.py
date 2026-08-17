@@ -15,6 +15,7 @@ from gql.transport.common.adapters.websockets import WebSocketsAdapter
 from gql.transport.exceptions import TransportConnectionFailed, TransportError
 from websockets.asyncio.connection import State
 
+import tibber
 from tibber.exceptions import SubscriptionEndpointMissingError, WebsocketReconnectedError, WebsocketTransportError
 from tibber.realtime import TibberRT, TibberWebsocketsTransport
 
@@ -203,6 +204,31 @@ async def test_reconnect_rebuilds_transport_when_token_unchanged(
     assert tibber_rt.subscription_running is True
 
     await tibber_rt.disconnect()
+
+
+async def test_reconnect_completes_when_refresh_token_callback_raises(
+    mock_client: MagicMock,
+) -> None:
+    """A raising refresh_access_token callback must not abort the reconnect flow."""
+    tibber_connection = tibber.Tibber(
+        access_token="test_token",
+        websession=MagicMock(),
+        user_agent="test_agent",
+        refresh_access_token=AsyncMock(side_effect=Exception),
+    )
+    await tibber_connection.realtime.set_subscription_endpoint("wss://test.endpoint")
+
+    await tibber_connection.realtime.connect()
+    first_transport = mock_client.transport
+    mock_client.transport.adapter.websocket = MagicMock(state=State.CLOSED)
+
+    await tibber_connection.realtime.reconnect()
+
+    mock_client.close_async.assert_awaited_once()
+    assert mock_client.transport is not first_transport
+    assert tibber_connection.realtime.subscription_running is True
+
+    await tibber_connection.realtime.disconnect()
 
 
 async def test_transport_close_times_out_on_hanging_wait_closed(
