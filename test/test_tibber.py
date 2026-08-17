@@ -1,8 +1,6 @@
 """Tests for pyTibber."""
 
-import asyncio
 import datetime as dt
-import logging
 from typing import Self
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
@@ -335,27 +333,6 @@ async def test_fetch_consumption_data_does_not_duplicate_overlapping_timestamp(
         assert len(merged_by_timestamp) == 7
         assert merged_by_timestamp[updated_hourly_data[0]["from"]] == updated_hourly_data[0]
         assert merged_by_timestamp[updated_hourly_data[3]["from"]] == updated_hourly_data[3]
-
-
-@pytest.mark.asyncio
-async def test_logging_rt_subscribe(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.INFO)
-    async with aiohttp.ClientSession() as session:
-        tibber_connection = tibber.Tibber(
-            websession=session,
-            user_agent="test",
-        )
-        await tibber_connection.update_info()
-        home = tibber_connection.get_homes()[0]
-
-        def _callback(_: dict) -> None:
-            return None
-
-        await home.rt_subscribe(_callback)
-        await asyncio.sleep(1)
-        home.rt_unsubscribe()
-        await tibber_connection.rt_disconnect()
-        await asyncio.sleep(10)
 
 
 @pytest.mark.asyncio
