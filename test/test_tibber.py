@@ -444,3 +444,94 @@ async def test_rt_disconnect_unsubscribes_homes_before_disconnecting(monkeypatch
         call.unsubscribe_b(),
         call.realtime_disconnect(),
     ]
+
+
+@pytest.mark.asyncio
+async def test_execute_refreshes_token_before_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When refresh_access_token is configured, execute() must refresh the token before posting."""
+    mock_websession = MagicMock(spec=aiohttp.ClientSession)
+    refresh_calls: list[None] = []
+
+    async def refresh_callback() -> str:
+        refresh_calls.append(None)
+        return "new-token"
+
+    tibber_connection = tibber.Tibber(
+        access_token="old-token",
+        websession=mock_websession,
+        user_agent="test",
+        refresh_access_token=refresh_callback,
+    )
+
+    set_access_token = MagicMock()
+    monkeypatch.setattr(tibber_connection.data_api, "set_access_token", set_access_token)
+
+    mock_response = MagicMock()
+    mock_response.status = 200
+    mock_response.content_type = "application/json"
+    mock_response.json = AsyncMock(return_value={"data": {"viewer": {}}})
+    mock_websession.post = AsyncMock(return_value=mock_response)
+
+    await tibber_connection.execute("{ viewer { name } }")
+
+    assert refresh_calls, "refresh_access_token callback must be called before the request"
+    # The refreshed token must be used in the Authorization header.
+    post_call = mock_websession.post.call_args
+    assert post_call.kwargs["headers"]["Authorization"] == "Bearer new-token"
+    # data_api must be notified of the updated token.
+    set_access_token.assert_called_once_with("new-token")
+
+
+@pytest.mark.asyncio
+async def test_execute_without_refresh_callback_skips_refresh() -> None:
+    """When no refresh_access_token is configured, execute() must not call any refresh."""
+    mock_websession = MagicMock(spec=aiohttp.ClientSession)
+    tibber_connection = tibber.Tibber(
+        access_token="static-token",
+        websession=mock_websession,
+        user_agent="test",
+    )
+
+    mock_response = MagicMock()
+    mock_response.status = 200
+    mock_response.content_type = "application/json"
+    mock_response.json = AsyncMock(return_value={"data": {"viewer": {}}})
+    mock_websession.post = AsyncMock(return_value=mock_response)
+
+    await tibber_connection.execute("{ viewer { name } }")
+
+    post_call = mock_websession.post.call_args
+    assert post_call.kwargs["headers"]["Authorization"] == "Bearer static-token"
+
+
+@pytest.mark.asyncio
+async def test_execute_proceeds_with_existing_token_when_refresh_returns_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When refresh_access_token returns None, execute() must continue with the existing token."""
+    mock_websession = MagicMock(spec=aiohttp.ClientSession)
+
+    async def refresh_callback() -> None:
+        return None
+
+    tibber_connection = tibber.Tibber(
+        access_token="current-token",
+        websession=mock_websession,
+        user_agent="test",
+        refresh_access_token=refresh_callback,
+    )
+
+    set_access_token = MagicMock()
+    monkeypatch.setattr(tibber_connection.data_api, "set_access_token", set_access_token)
+
+    mock_response = MagicMock()
+    mock_response.status = 200
+    mock_response.content_type = "application/json"
+    mock_response.json = AsyncMock(return_value={"data": {"viewer": {}}})
+    mock_websession.post = AsyncMock(return_value=mock_response)
+
+    await tibber_connection.execute("{ viewer { name } }")
+
+    post_call = mock_websession.post.call_args
+    assert post_call.kwargs["headers"]["Authorization"] == "Bearer current-token"
+    set_access_token.assert_not_called()

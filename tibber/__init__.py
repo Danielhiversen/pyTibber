@@ -75,7 +75,7 @@ class Tibber:
             timeout,
             self._user_agent,
             ssl=ssl,
-            refresh_access_token=self._refresh_access_token_for_reconnect if refresh_access_token is not None else None,
+            refresh_access_token=self._ensure_fresh_access_token if refresh_access_token is not None else None,
         )
 
         self.time_zone: dt.tzinfo = time_zone or dt.UTC
@@ -91,8 +91,15 @@ class Tibber:
             user_agent=self._user_agent,
         )
 
-    async def _refresh_access_token_for_reconnect(self) -> str | None:
-        """Refresh access token before reconnecting realtime subscriptions."""
+    async def _ensure_fresh_access_token(self) -> str | None:
+        """Refresh access token if a refresh callback is configured.
+
+        Calls the user-supplied refresh_access_token callback and updates the
+        internal token when a new value is returned. This is called before every
+        execute() request and before reconnecting realtime subscriptions so that
+        an expiring token is renewed proactively. If the callback raises, the
+        exception propagates to the caller.
+        """
         if self._refresh_access_token is None:
             return None
 
@@ -124,6 +131,9 @@ class Tibber:
         :param retry: The number of times to retry the request.
         """
         timeout = timeout or self.timeout
+
+        if self._refresh_access_token is not None:
+            await self._ensure_fresh_access_token()
 
         payload = {"query": document, "variables": variable_values or {}}
 
