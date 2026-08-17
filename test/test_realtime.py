@@ -17,6 +17,7 @@ from websockets.asyncio.connection import State
 
 from tibber.exceptions import SubscriptionEndpointMissingError, WebsocketReconnectedError, WebsocketTransportError
 from tibber.realtime import TibberRT, TibberWebsocketsTransport
+from tibber.token_manager import TokenManager
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -31,7 +32,7 @@ def timeout() -> int:
 async def tibber_rt_fixture(mock_client: MagicMock, timeout: int) -> TibberRT:  # noqa: ARG001, ASYNC109
     """Create a TibberRT instance for testing."""
     tibber_rt = TibberRT(
-        access_token="test_token",
+        token_manager=TokenManager("test_token"),
         timeout=timeout,
         user_agent="test_agent",
         ssl=True,
@@ -115,7 +116,7 @@ async def test_subscription_running(
 async def test_update_endpoint(mock_client: MagicMock) -> None:
     """Test update subscription endpoint."""
     tibber_rt = TibberRT(
-        access_token="test_token",
+        token_manager=TokenManager("test_token"),
         timeout=30,
         user_agent="test_agent",
         ssl=True,
@@ -178,22 +179,21 @@ async def test_update_endpoint(mock_client: MagicMock) -> None:
     assert mock_client.connect_async.call_count == 2
 
 
-async def test_reconnect_rebuilds_transport_when_token_unchanged(
+async def test_reconnect_always_rebuilds_transport(
     mock_client: MagicMock,
 ) -> None:
-    """Rebuild the transport on reconnect even if the refreshed token is unchanged."""
+    """reconnect() must always tear down and rebuild the transport."""
     tibber_rt = TibberRT(
-        access_token="test_token",
+        token_manager=TokenManager("test_token"),
         timeout=30,
         user_agent="test_agent",
         ssl=True,
-        refresh_access_token=AsyncMock(return_value="test_token"),
     )
     await tibber_rt.set_subscription_endpoint("wss://test.endpoint")
 
     await tibber_rt.connect()
     first_transport = mock_client.transport
-    # Simulate a dead websocket with an expired but unchanged token
+    # Simulate a dead websocket
     mock_client.transport.adapter.websocket = MagicMock(state=State.CLOSED)
 
     await tibber_rt.reconnect()
@@ -211,7 +211,7 @@ async def test_transport_close_times_out_on_hanging_wait_closed(
     """A half-dead websocket must not hang transport.close forever."""
     transport = TibberWebsocketsTransport(
         url="wss://test.endpoint",
-        access_token="test_token",
+        token_manager=TokenManager("test_token"),
         user_agent="test_agent",
         tibber_connected=asyncio.Event(),
     )
@@ -231,7 +231,7 @@ async def test_websocket_transport() -> None:
     tibber_connected = asyncio.Event()
     transport = TibberWebsocketsTransport(
         url="wss://test.endpoint",
-        access_token="test_token",
+        token_manager=TokenManager("test_token"),
         user_agent="test_agent",
         tibber_connected=tibber_connected,
     )
@@ -270,6 +270,64 @@ async def test_websocket_transport() -> None:
     mock_adapter.receive.assert_awaited()
     assert mock_adapter.close.await_count == 1
     assert not tibber_connected.is_set()
+
+
+async def test_initialize_fetches_fresh_token_from_manager() -> None:
+    """_initialize must pull a fresh token from the manager into init_payload before handshake.
+
+    This test guards the gql coupling: if a future gql upgrade renames or removes
+    ``_initialize`` the test will fail loudly, prompting a review of the refresh mechanism.
+    """
+    refresh_callback = AsyncMock(return_value="refreshed_token")
+    token_manager = TokenManager("initial_token", refresh_access_token=refresh_callback)
+    transport = TibberWebsocketsTransport(
+        url="wss://test.endpoint",
+        token_manager=token_manager,
+        user_agent="test_agent",
+        tibber_connected=asyncio.Event(),
+    )
+
+    # Seed a different initial value to verify _initialize overwrites it.
+    assert transport.init_payload["token"] == "initial_token"
+
+    # Stub super()._initialize so we don't need a live websocket.
+    async def noop_super_initialize() -> None:
+        pass
+
+    with patch.object(
+        TibberWebsocketsTransport.__bases__[0],  # WebsocketsTransport
+        "_initialize",
+        new=AsyncMock(side_effect=noop_super_initialize),
+    ):
+        await transport._initialize()  # noqa: SLF001
+
+    assert transport.init_payload["token"] == "refreshed_token"
+    refresh_callback.assert_awaited_once()
+
+
+async def test_initialize_calls_super_after_setting_payload() -> None:
+    """_initialize must call super()._initialize() so the handshake actually runs."""
+    token_manager = TokenManager("test_token")
+    transport = TibberWebsocketsTransport(
+        url="wss://test.endpoint",
+        token_manager=token_manager,
+        user_agent="test_agent",
+        tibber_connected=asyncio.Event(),
+    )
+
+    super_calls: list[str] = []
+
+    async def record_super() -> None:
+        super_calls.append("called")
+
+    with patch.object(
+        TibberWebsocketsTransport.__bases__[0],
+        "_initialize",
+        new=AsyncMock(side_effect=record_super),
+    ):
+        await transport._initialize()  # noqa: SLF001
+
+    assert super_calls == ["called"]
 
 
 async def test_subscribe_raises_when_not_connected(tibber_rt: TibberRT) -> None:
@@ -354,20 +412,37 @@ async def test_reconnect_noop_when_not_connected(
     mock_client.close_async.assert_not_awaited()
 
 
-async def test_set_access_token_reconnects_with_new_token(
+async def test_reconnect_uses_updated_token(
     mock_client: MagicMock,
-    tibber_rt: TibberRT,
 ) -> None:
-    """set_access_token must update the token and reconnect so the new token is used."""
+    """After updating the token in the manager, reconnect must build a transport using it.
+
+    The token is injected into init_payload by _initialize at connect time.  Since
+    mock_client.connect_async does not run the real gql machinery, we verify the manager
+    holds the new token and that a fresh transport was created (old and new are distinct
+    objects).
+    """
+    token_manager = TokenManager("old_token")
+    tibber_rt = TibberRT(
+        token_manager=token_manager,
+        timeout=30,
+        user_agent="test_agent",
+        ssl=True,
+    )
+    await tibber_rt.set_subscription_endpoint("wss://test.endpoint")
+
     await tibber_rt.connect()
+    first_transport = mock_client.transport
     mock_client.connect_async.reset_mock()
     mock_client.close_async.reset_mock()
 
-    await tibber_rt.set_access_token("new_token")
+    token_manager.set_access_token("new_token")
+    await tibber_rt.reconnect()
 
     mock_client.close_async.assert_awaited_once()
     mock_client.connect_async.assert_awaited_once()
-    assert mock_client.transport.init_payload["token"] == "new_token"
+    assert mock_client.transport is not first_transport
+    assert token_manager.access_token == "new_token"
 
 
 @pytest.mark.parametrize("timeout", [0])

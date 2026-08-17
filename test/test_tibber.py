@@ -359,63 +359,67 @@ async def test_logging_rt_subscribe(caplog: pytest.LogCaptureFixture) -> None:
 
 
 @pytest.mark.asyncio
-async def test_set_access_token_updates_clients(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_set_access_token_emits_deprecation_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    """set_access_token must emit a DeprecationWarning."""
     tibber_connection = tibber.Tibber(
+        access_token="existing-token",
         websession=MagicMock(),
         user_agent="test",
     )
-    rt_set_access_token = AsyncMock()
-    data_api_set_access_token = MagicMock()
+    monkeypatch.setattr(tibber_connection.realtime, "reconnect", AsyncMock())
 
-    monkeypatch.setattr(tibber_connection.realtime, "set_access_token", rt_set_access_token)
-    monkeypatch.setattr(tibber_connection.data_api, "set_access_token", data_api_set_access_token)
+    with pytest.warns(DeprecationWarning, match="refresh_access_token"):
+        await tibber_connection.set_access_token("new-token")
 
-    await tibber_connection.set_access_token("new-token")
 
-    rt_set_access_token.assert_awaited_once_with("new-token")
-    data_api_set_access_token.assert_called_once_with("new-token")
+@pytest.mark.asyncio
+async def test_set_access_token_updates_shared_token_manager(monkeypatch: pytest.MonkeyPatch) -> None:
+    """set_access_token must update the shared TokenManager that all clients read from."""
+    tibber_connection = tibber.Tibber(
+        access_token="existing-token",
+        websession=MagicMock(),
+        user_agent="test",
+    )
+    monkeypatch.setattr(tibber_connection.realtime, "reconnect", AsyncMock())
+
+    with pytest.warns(DeprecationWarning):
+        await tibber_connection.set_access_token("new-token")
+
+    assert tibber_connection._token_manager.access_token == "new-token"  # noqa: SLF001
+
+
+@pytest.mark.asyncio
+async def test_set_access_token_triggers_reconnect(monkeypatch: pytest.MonkeyPatch) -> None:
+    """set_access_token must call reconnect() so an active RT session picks up the new token."""
+    tibber_connection = tibber.Tibber(
+        access_token="existing-token",
+        websession=MagicMock(),
+        user_agent="test",
+    )
+    mock_reconnect = AsyncMock()
+    monkeypatch.setattr(tibber_connection.realtime, "reconnect", mock_reconnect)
+
+    with pytest.warns(DeprecationWarning):
+        await tibber_connection.set_access_token("new-token")
+
+    mock_reconnect.assert_awaited_once()
 
 
 @pytest.mark.asyncio
 async def test_set_access_token_noop_when_token_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    """set_access_token must be a no-op (no reconnect) when the token has not changed."""
     tibber_connection = tibber.Tibber(
         access_token="existing-token",
         websession=MagicMock(),
         user_agent="test",
     )
-    rt_set_access_token = AsyncMock()
-    data_api_set_access_token = MagicMock()
+    mock_reconnect = AsyncMock()
+    monkeypatch.setattr(tibber_connection.realtime, "reconnect", mock_reconnect)
 
-    monkeypatch.setattr(tibber_connection.realtime, "set_access_token", rt_set_access_token)
-    monkeypatch.setattr(tibber_connection.data_api, "set_access_token", data_api_set_access_token)
+    with pytest.warns(DeprecationWarning):
+        await tibber_connection.set_access_token("existing-token")
 
-    await tibber_connection.set_access_token("existing-token")
-
-    rt_set_access_token.assert_not_awaited()
-    data_api_set_access_token.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_set_access_token_updates_data_api_before_realtime(monkeypatch: pytest.MonkeyPatch) -> None:
-    """data_api must be reauthorized before realtime, which reuses the refreshed token on reconnect."""
-    tibber_connection = tibber.Tibber(
-        access_token="existing-token",
-        websession=MagicMock(),
-        user_agent="test",
-    )
-    manager = MagicMock()
-    manager.data_api = MagicMock()
-    manager.realtime = AsyncMock()
-
-    monkeypatch.setattr(tibber_connection.realtime, "set_access_token", manager.realtime)
-    monkeypatch.setattr(tibber_connection.data_api, "set_access_token", manager.data_api)
-
-    await tibber_connection.set_access_token("new-token")
-
-    assert manager.mock_calls == [
-        call.data_api("new-token"),
-        call.realtime("new-token"),
-    ]
+    mock_reconnect.assert_not_awaited()
 
 
 @pytest.mark.asyncio

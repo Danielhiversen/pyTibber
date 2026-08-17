@@ -3,6 +3,7 @@
 import asyncio
 import datetime as dt
 import logging
+import warnings
 from collections.abc import Awaitable, Callable
 from ssl import SSLContext
 from typing import Any
@@ -21,6 +22,7 @@ from .gql_queries import INFO, PUSH_NOTIFICATION
 from .home import TibberHome
 from .realtime import TibberRT
 from .response_handler import extract_response_data
+from .token_manager import TokenManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,6 +34,7 @@ __all__ = [
     "TibberDataAPI",
     "TibberHome",
     "TibberRT",
+    "TokenManager",
 ]
 
 
@@ -56,8 +59,10 @@ class Tibber:
         :param time_zone: The time zone to display times in and to use.
         :param user_agent: User agent identifier for the platform running this. Required if websession is None.
         :param ssl: SSLContext to use.
-        :param refresh_access_token: Async callback that returns a refreshed Tibber API access token before
-            reconnecting.
+        :param refresh_access_token: Async callback that returns a refreshed Tibber API access token.
+            Called before every request; concurrent calls coalesce into a single invocation.
+            This is the recommended mechanism for token refresh — prefer it over
+            :meth:`set_access_token`.
         """
         if websession is None:
             websession = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl))
@@ -68,14 +73,12 @@ class Tibber:
         self._user_agent: str = f"{user_agent} pyTibber/{__version__} "
         self.websession = websession
         self.timeout: int = timeout
-        self._access_token: str = access_token
-        self._refresh_access_token = refresh_access_token
+        self._token_manager = TokenManager(access_token, refresh_access_token=refresh_access_token)
         self.realtime = TibberRT(
-            access_token,
+            self._token_manager,
             timeout,
             self._user_agent,
             ssl=ssl,
-            refresh_access_token=self._refresh_access_token_for_reconnect if refresh_access_token is not None else None,
         )
 
         self.time_zone: dt.tzinfo = time_zone or dt.UTC
@@ -85,23 +88,11 @@ class Tibber:
         self._all_home_ids: list[str] = []
         self._homes: dict[str, TibberHome] = {}
         self.data_api: TibberDataAPI = TibberDataAPI(
-            access_token,
+            self._token_manager,
             timeout=timeout,
             websession=websession,
             user_agent=self._user_agent,
         )
-
-    async def _refresh_access_token_for_reconnect(self) -> str | None:
-        """Refresh access token before reconnecting realtime subscriptions."""
-        if self._refresh_access_token is None:
-            return None
-
-        access_token = await self._refresh_access_token()
-        if access_token is not None and access_token != self._access_token:
-            _LOGGER.debug("Updating access token")
-            self._access_token = access_token
-            self.data_api.set_access_token(access_token)
-        return access_token
 
     async def close_connection(self) -> None:
         """Close the Tibber connection.
@@ -121,7 +112,7 @@ class Tibber:
         :param document: The GraphQL query to request.
         :param variable_values: The GraphQL variables to parse with the request.
         :param timeout: The timeout to use for the request.
-        :param retry: The number of times to retry the request.
+        :param retry: The number of times to retry the request on transport errors.
         """
         timeout = timeout or self.timeout
 
@@ -133,10 +124,11 @@ class Tibber:
             variable_values,
         )
         try:
+            access_token = await self._token_manager.async_get_access_token()
             resp = await self.websession.post(
                 API_ENDPOINT,
                 headers={
-                    "Authorization": "Bearer " + self._access_token,
+                    "Authorization": "Bearer " + access_token,
                     aiohttp.hdrs.USER_AGENT: self._user_agent,
                 },
                 data=payload,
@@ -249,13 +241,26 @@ class Tibber:
         await self.realtime.disconnect()
 
     async def set_access_token(self, access_token: str) -> None:
-        """Set access token and reauthorize clients."""
-        if access_token == self._access_token:
+        """Set access token and reauthorize clients.
+
+        .. deprecated::
+            Prefer providing a ``refresh_access_token`` callback at construction time so all
+            clients share a single token source and the token is refreshed proactively before
+            every request.  This method will be removed in a future release.
+        """
+        warnings.warn(
+            "Tibber.set_access_token is deprecated; provide a refresh_access_token callback "
+            "at construction time instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        if access_token == self._token_manager.access_token:
             return
         _LOGGER.debug("Updating access token")
-        self._access_token = access_token
-        self.data_api.set_access_token(access_token)
-        await self.realtime.set_access_token(access_token)
+        self._token_manager.set_access_token(access_token)
+        # reconnect() is a no-op when not connected; if a live session exists, the new token
+        # is applied immediately so the active subscription does not continue with a stale one.
+        await self.realtime.reconnect()
 
     @property
     def user_id(self) -> str | None:

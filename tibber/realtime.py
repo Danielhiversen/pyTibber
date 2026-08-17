@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Callable
 from ssl import SSLContext
 from typing import TYPE_CHECKING, Any, cast
 
@@ -12,6 +12,7 @@ from gql.transport.websockets import WebsocketsTransport
 from tenacity import before_sleep_log, retry, wait_exponential_jitter
 
 from .exceptions import SubscriptionEndpointMissingError, WebsocketReconnectedError, WebsocketTransportError
+from .token_manager import TokenManager
 
 if TYPE_CHECKING:
     from gql.client import AsyncClientSession
@@ -31,27 +32,27 @@ class TibberRT:
 
     def __init__(
         self,
-        access_token: str,
+        token_manager: TokenManager,
         timeout: int,
         user_agent: str,
         ssl: SSLContext | bool,
-        refresh_access_token: Callable[[], Awaitable[str | None]] | None = None,
     ) -> None:
         """Initialize the Tibber connection.
 
-        :param access_token: The access token to access the Tibber API with.
+        :param token_manager: Shared token manager that provides the access token and optional
+            refresh callback.  The token is fetched fresh on every websocket handshake via
+            ``TibberWebsocketsTransport._initialize``.
         :param timeout: The timeout in seconds to use when communicating with the Tibber API.
-        :param user_agent: User agent identifier for the platform running this. Required if websession is None.
-        :param refresh_access_token: Async callback to refresh the access token before reconnecting.
+        :param user_agent: User agent identifier for the platform running this.
+        :param ssl: SSLContext to use.
         """
-        self._access_token: str = access_token
+        self._token_manager = token_manager
         self._timeout: int = timeout
         self._user_agent: str = user_agent
         self._ssl_context = ssl
         self._sub_endpoint: str | None = None
         self._tibber_connected = asyncio.Event()
         self._client: Client | None = None
-        self._refresh_access_token = refresh_access_token
         self._lock_connect = asyncio.Lock()
         self.subscription_running = False
         self._session: AsyncClientSession | None = None
@@ -65,7 +66,7 @@ class TibberRT:
         return Client(
             transport=TibberWebsocketsTransport(
                 self._sub_endpoint,
-                self._access_token,
+                self._token_manager,
                 self._user_agent,
                 connect_timeout=self._timeout,
                 ssl=self._ssl_context,
@@ -100,18 +101,13 @@ class TibberRT:
             return
 
         self._client = self._create_client()
-        # gql's built-in reconnect (reconnecting=True + retry_connect) reuses this transport
-        # instance, so it keeps replaying the access token baked into init_payload at build
-        # time. That means an expired token is not refreshed by gql's internal retry loop.
-        # We deliberately do NOT override gql's connection handshake to refresh mid-retry, as
-        # that reaches into gql internals and collides with the explicit token passed to
-        # set_access_token. Instead, token refresh happens on our own reconnect() path, which
-        # rebuilds the transport with a fresh token. reconnect() is driven by set_access_token,
-        # set_subscription_endpoint, and the per-home subscription timeout watchdog: if an
-        # expired token stalls the stream, the watchdog reconnects within RT_SUBSCRIPTION_TIMEOUT
-        # and refreshes the token. Recovery is therefore a little slower than a dedicated
-        # handshake hook, but avoids coupling to gql internals.
-        # We store a strong reference to the connect task. The task is shielded below so a
+        # Token refresh now happens inside TibberWebsocketsTransport._initialize, which gql
+        # calls on every (re)connect including its internal reconnect loop.  This means gql's
+        # own reconnect self-heals an expired token within one reconnect cycle without any
+        # external intervention. The per-home subscription timeout watchdog remains as a
+        # no-data-received safety net only.
+        #
+        # We store a strong reference to the connect task.  The task is shielded below so a
         # connect timeout does not cancel the ongoing connection attempt, letting it keep
         # retrying in the background. The event loop only keeps weak references to tasks, so
         # without this reference the shielded task could be garbage collected mid-execution.
@@ -146,21 +142,17 @@ class TibberRT:
             self._connect_task = None
 
     async def reconnect(self) -> None:
-        """Reconnect the websocket client."""
+        """Reconnect the websocket client.
+
+        The fresh token is picked up automatically via ``TibberWebsocketsTransport._initialize``
+        on the next gql connect, so no explicit token refresh is performed here.
+        """
         async with self._lock_connect:
             if self._session is None:
                 return
             _LOGGER.debug("Reconnecting websocket client")
-            access_token = await self._refresh_access_token() if self._refresh_access_token is not None else None
-            if access_token is not None:
-                self._access_token = access_token
             await self._disconnect()
             await self._connect()
-
-    async def set_access_token(self, access_token: str) -> None:
-        """Set access token."""
-        self._access_token = access_token
-        await self.reconnect()
 
     async def subscribe(
         self,
@@ -206,7 +198,7 @@ class TibberWebsocketsTransport(WebsocketsTransport):
     def __init__(
         self,
         url: str,
-        access_token: str,
+        token_manager: TokenManager,
         user_agent: str,
         *,
         connect_timeout: float = 10,
@@ -216,7 +208,7 @@ class TibberWebsocketsTransport(WebsocketsTransport):
         """Initialize TibberWebsocketsTransport."""
         super().__init__(
             url=url,
-            init_payload={"token": access_token},
+            init_payload={"token": token_manager.access_token},
             headers={"User-Agent": user_agent},
             ssl=ssl,
             connect_timeout=connect_timeout,
@@ -224,8 +216,24 @@ class TibberWebsocketsTransport(WebsocketsTransport):
             ping_interval=PING_INTERVAL,
             pong_timeout=PONG_TIMEOUT,
         )
+        self._token_manager = token_manager
         self._tibber_connected = tibber_connected
         self._user_agent = user_agent
+
+    async def _initialize(self) -> None:
+        """Fetch a fresh token and send the GraphQL connection_init message.
+
+        gql calls this method on every (re)connect, including its internal reconnect loop, so
+        an expired token is automatically refreshed before each handshake attempt.  This is
+        the mechanism that makes gql's built-in reconnect self-heal expired tokens without
+        requiring an external ``reconnect()`` call.
+
+        Note: this couples us to gql calling ``_initialize`` on each reconnect.  A dedicated
+        unit test in ``test_realtime.py`` guards this assumption so a future gql change that
+        renames or reworks ``_initialize`` fails loudly.
+        """
+        self.init_payload = {"token": await self._token_manager.async_get_access_token()}
+        await super()._initialize()
 
     async def _after_connect(self) -> None:
         """Hook to add custom code for subclasses.
