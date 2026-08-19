@@ -102,12 +102,12 @@ class TibberRT:
 
         self._client = self._create_client()
         # Token refresh now happens inside TibberWebsocketsTransport._initialize, which gql
-        # calls on every (re)connect including its internal reconnect loop.  This means gql's
+        # calls on every (re)connect including its internal reconnect loop. This means gql's
         # own reconnect self-heals an expired token within one reconnect cycle without any
         # external intervention. The per-home subscription timeout watchdog remains as a
         # no-data-received safety net only.
         #
-        # We store a strong reference to the connect task.  The task is shielded below so a
+        # We store a strong reference to the connect task. The task is shielded below so a
         # connect timeout does not cancel the ongoing connection attempt, letting it keep
         # retrying in the background. The event loop only keeps weak references to tasks, so
         # without this reference the shielded task could be garbage collected mid-execution.
