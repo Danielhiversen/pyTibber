@@ -96,7 +96,11 @@ class Tibber:
         if self._refresh_access_token is None:
             return None
 
-        access_token = await self._refresh_access_token()
+        try:
+            access_token = await self._refresh_access_token()
+        except Exception:
+            _LOGGER.exception("Error refreshing access token")
+            return None
         if access_token is not None and access_token != self._access_token:
             _LOGGER.debug("Updating access token")
             self._access_token = access_token
