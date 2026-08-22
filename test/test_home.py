@@ -12,6 +12,7 @@ import pytest
 
 import tibber
 from tibber.exceptions import (
+    InvalidLoginError,
     SubscriptionFailedError,
     WebsocketReconnectedError,
     WebsocketTransportError,
@@ -520,6 +521,7 @@ async def test_rt_subscription_reconnects_when_no_data_received(
         aiohttp.ClientError("boom"),
         TimeoutError(),
         ValueError("boom"),
+        InvalidLoginError(400, '"exp" claim timestamp check failed', "UNAUTHENTICATED"),
     ],
 )
 @patch("tibber.home.RESUBSCRIBE_WAIT_TIME", 0)
@@ -559,6 +561,57 @@ async def test_rt_subscribe_recovers_when_resubscribe_step_fails(
     assert home.rt_subscription_running
     assert "keeping last known status" in caplog.text
     assert "keeping last known info" in caplog.text
+
+    home.rt_unsubscribe()
+
+
+@patch("tibber.home.RESUBSCRIBE_WAIT_TIME", 0)
+@pytest.mark.asyncio
+async def test_resubscribe_step_known_error_logs_without_traceback(
+    home: tibber.TibberHome,
+    mock_realtime: MagicMock,
+    mock_websession: MagicMock,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Known API errors (HttpExceptionError) must log without a traceback.
+
+    Unknown errors (e.g. ValueError) must still emit exc_info so the traceback
+    is preserved for debugging.
+    """
+    # --- known error: no traceback ---
+    mock_websession.post.side_effect = InvalidLoginError(
+        400,
+        '"exp" claim timestamp check failed',
+        "UNAUTHENTICATED",
+    )
+    _, subscribe_fn = _make_blocking_subscribe([])
+    mock_realtime.subscribe = subscribe_fn
+
+    with caplog.at_level(logging.WARNING):
+        await home.rt_subscribe(MagicMock())
+
+    # The warning message contains the failure_message text; exc_info must be None.
+    known_records = [r for r in caplog.records if "keeping last known" in r.message]
+    assert known_records, "Expected warning records for the resubscribe step"
+    for rec in known_records:
+        assert rec.exc_info is None, "Known API error must not include traceback"
+
+    home.rt_unsubscribe()
+    caplog.clear()
+
+    # --- unknown error: traceback preserved ---
+    mock_websession.post.side_effect = ValueError("something unexpected")
+    _, subscribe_fn2 = _make_blocking_subscribe([])
+    mock_realtime.subscribe = subscribe_fn2
+
+    with caplog.at_level(logging.WARNING):
+        await home.rt_subscribe(MagicMock())
+
+    # exc_info must be set so the traceback is visible in logs for unexpected errors.
+    unknown_records = [r for r in caplog.records if "keeping last known" in r.message]
+    assert unknown_records, "Expected warning records for the resubscribe step"
+    for rec in unknown_records:
+        assert rec.exc_info is not None, "Unknown error must include traceback"
 
     home.rt_unsubscribe()
 
