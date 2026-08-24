@@ -164,6 +164,15 @@ class TibberRT:
         if self._session is None:
             raise RuntimeError("Connect must be called before subscribe")
 
+        # gql's ReconnectingAsyncClientSession exposes the session before the
+        # transport handshake completes, and gql 4.0's _send_query reads
+        # transport.subprotocol, which is only set in _after_connect. Sending a
+        # subscribe query before the handshake therefore raises AttributeError.
+        # Wait for the handshake (which sets subprotocol, then this event) before
+        # subscribing. If it never connects, the per-home watchdog cancels this
+        # task and reconnects.
+        await self._tibber_connected.wait()
+
         try:
             async for result in self._session.subscribe(request):
                 yield result

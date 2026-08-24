@@ -15,7 +15,7 @@ import aiohttp
 from gql import gql
 
 from .const import RESOLUTION_DAILY, RESOLUTION_HOURLY, RESOLUTION_MONTHLY, RESOLUTION_WEEKLY
-from .exceptions import SubscriptionFailedError, WebsocketReconnectedError, WebsocketTransportError
+from .exceptions import HttpExceptionError, SubscriptionFailedError, WebsocketReconnectedError, WebsocketTransportError
 from .gql_queries import (
     HISTORIC_DATA,
     HISTORIC_DATA_DATE,
@@ -591,6 +591,9 @@ class TibberHome:
         except (TimeoutError, aiohttp.ClientError):
             # Transport errors are already logged at debug level inside execute.
             _LOGGER.warning("Home %s: %s", self.home_id, failure_message)
+        except HttpExceptionError as err:
+            # Known API errors (e.g. an expired token) are expected here and don't warrant a traceback.
+            _LOGGER.warning("Home %s: %s: %s", self.home_id, failure_message, err)
         except Exception:  # noqa: BLE001
             _LOGGER.warning("Home %s: %s", self.home_id, failure_message, exc_info=True)
 
