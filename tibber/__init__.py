@@ -247,6 +247,10 @@ class Tibber:
             Prefer providing a ``refresh_access_token`` callback at construction time so all
             clients share a single token source and the token is refreshed proactively before
             every request.  This method will be removed in a future release.
+
+            Do not combine this method with a ``refresh_access_token`` callback: when a callback
+            is configured it is the authoritative token source and will overwrite any manually
+            supplied value on the next refresh invocation.
         """
         warnings.warn(
             "Tibber.set_access_token is deprecated; provide a refresh_access_token callback "

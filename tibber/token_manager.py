@@ -44,7 +44,12 @@ class TokenManager:
         return self._access_token
 
     def set_access_token(self, access_token: str) -> None:
-        """Update the stored access token synchronously."""
+        """Update the stored access token synchronously.
+
+        Do not combine this with a ``refresh_access_token`` callback.  When a callback is
+        configured it is the single source of truth: the next refresh invocation will overwrite
+        any value written here.  Use one mechanism or the other, not both.
+        """
         self._access_token = access_token
 
     async def async_get_access_token(self) -> str:

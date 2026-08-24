@@ -73,6 +73,10 @@ class TibberDataAPI:
 
         Deprecated: prefer providing a ``refresh_access_token`` callback via
         ``TokenManager`` so all clients share a single token source.
+
+        Do not combine this with a ``refresh_access_token`` callback: when a callback is
+        configured it is the authoritative token source and will overwrite any manually
+        supplied value on the next refresh invocation.
         """
         self._token_manager.set_access_token(access_token)
 
