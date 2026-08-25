@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from tibber.data_api import TibberDataAPI, TibberDevice
+from tibber.token_manager import TokenManager
 
 
 @pytest.fixture
@@ -13,7 +14,7 @@ def data_api() -> TibberDataAPI:
     """Provide a TibberDataAPI instance with a mocked websession."""
     websession = MagicMock()
     return TibberDataAPI(
-        access_token="test-token",
+        token_manager=TokenManager("test-token"),
         timeout=10,
         websession=websession,
         user_agent="test-agent",

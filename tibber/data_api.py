@@ -7,7 +7,7 @@ import datetime as dt
 import logging
 import random
 from http import HTTPStatus
-from typing import Any, NoReturn, TypeAlias
+from typing import TYPE_CHECKING, Any, NoReturn, TypeAlias
 
 import aiohttp
 
@@ -21,6 +21,9 @@ from .exceptions import (
 )
 from .response_handler import extract_response_data
 
+if TYPE_CHECKING:
+    from .token_manager import TokenManager
+
 _LOGGER = logging.getLogger(__name__)
 
 MAX_RATE_LIMIT_ATTEMPTS = 2
@@ -33,14 +36,15 @@ class TibberDataAPI:
 
     def __init__(
         self,
-        access_token: str,
+        token_manager: TokenManager,
         timeout: int = DEFAULT_TIMEOUT,
         websession: aiohttp.ClientSession | None = None,
         user_agent: str | None = None,
     ) -> None:
         """Initialize the Tibber Data API client.
 
-        :param access_token: The access token to access the Tibber Data API with.
+        :param token_manager: Shared token manager that provides the access token and optional
+            refresh callback.  The token is fetched fresh before every request.
         :param timeout: The timeout in seconds to use when communicating with the API.
         :param websession: The websession to use when communicating with the API.
         :param user_agent: Optional user agent string attached to outgoing requests.
@@ -59,14 +63,22 @@ class TibberDataAPI:
         self.websession = websession
         self._owns_session = owns_session
         self.timeout = timeout
-        self._access_token = access_token
+        self._token_manager = token_manager
         self._user_agent = f"{user_agent} pyTibber/{__version__} "
         self._devices: dict[str, TibberDevice] = {}
         self._rate_limit_attempt = 0
 
     def set_access_token(self, access_token: str) -> None:
-        """Set the access token."""
-        self._access_token = access_token
+        """Set the access token.
+
+        Deprecated: prefer providing a ``refresh_access_token`` callback via
+        ``TokenManager`` so all clients share a single token source.
+
+        Do not combine this with a ``refresh_access_token`` callback: when a callback is
+        configured it is the authoritative token source and will overwrite any manually
+        supplied value on the next refresh invocation.
+        """
+        self._token_manager.set_access_token(access_token)
 
     async def close_connection(self) -> None:
         """Close the Data API connection."""
@@ -88,9 +100,10 @@ class TibberDataAPI:
         :param retry: Number of retries on failure.
         """
         url = f"{DATA_API_ENDPOINT}{endpoint}"
+        access_token = await self._token_manager.async_get_access_token()
 
         headers = {
-            "Authorization": f"Bearer {self._access_token}",
+            "Authorization": f"Bearer {access_token}",
             "Accept": "application/json",
             "Content-Type": "application/json",
         }
@@ -300,8 +313,9 @@ class TibberDataAPI:
 
     async def get_userinfo(self) -> dict[str, Any]:
         """Return OpenID Connect user info for the current access token."""
+        access_token = await self._token_manager.async_get_access_token()
         headers = {
-            "Authorization": f"Bearer {self._access_token}",
+            "Authorization": f"Bearer {access_token}",
             "Accept": "application/json",
         }
 
