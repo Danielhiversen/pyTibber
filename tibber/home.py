@@ -420,7 +420,7 @@ class TibberHome:
             time_diff = (now - price_time).total_seconds() / MIN_IN_HOUR
             if 0 <= time_diff < MIN_IN_QUARTER:
                 price_rank = self.current_price_rank(self.price_total, price_time)
-                return round(price_total, 3), price_time, price_rank
+                return round(price_total, 4), price_time, price_rank
         return None, None, None
 
     async def rt_subscribe(
@@ -772,7 +772,7 @@ class TibberHome:
         now = dt.datetime.now(self._tibber_control.time_zone)
         for key, _price_total in self.price_total.items():
             price_time = dt.datetime.fromisoformat(key).astimezone(self._tibber_control.time_zone)
-            price_total = round(_price_total, 3)
+            price_total = round(_price_total, 4)
             if now.date() == price_time.date():
                 max_price = max(max_price, price_total)
                 min_price = min(min_price, price_total)
@@ -790,9 +790,9 @@ class TibberHome:
 
         attr = {}
         attr["max_price"] = max_price
-        attr["avg_price"] = round(sum_price / num, 3) if num > 0 else 0
+        attr["avg_price"] = round(sum_price / num, 4) if num > 0 else 0
         attr["min_price"] = min_price
-        attr["off_peak_1"] = round(off_peak_1 / num1, 3) if num1 > 0 else 0
-        attr["peak"] = round(peak / num0, 3) if num0 > 0 else 0
-        attr["off_peak_2"] = round(off_peak_2 / num2, 3) if num2 > 0 else 0
+        attr["off_peak_1"] = round(off_peak_1 / num1, 4) if num1 > 0 else 0
+        attr["peak"] = round(peak / num0, 4) if num0 > 0 else 0
+        attr["off_peak_2"] = round(off_peak_2 / num2, 4) if num2 > 0 else 0
         return attr
