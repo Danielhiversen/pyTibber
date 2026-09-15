@@ -893,47 +893,41 @@ async def test_rt_subscribe_recovers_from_repeated_errors(
 
 
 @patch("tibber.home.RESUBSCRIBE_WAIT_TIME", 0)
-@patch("tibber.home.REAL_TIME_CONSUMPTION_DISABLED_GRACE", dt.timedelta(seconds=-1))
 async def test_rt_resubscribe_confirmed_disable_notifies_on_error(
     home: tibber.TibberHome,
     mock_realtime: MagicMock,
     mock_websession: MagicMock,
+    frozen_clock: type[FixedDateTime],
 ) -> None:
     """A confirmed disable (False sustained past the grace period) must notify on_error and stop.
 
     Only a status that has been False for the whole grace period may end the resubscribe loop,
-    and it must do so visibly. The grace period is patched to an already-elapsed duration
-    so two consecutive False readings (one per resubscribe cycle, driven by repeated
-    subscribe failures) are enough to confirm the disable.
+    and it must do so visibly. Repeated subscribe failures drive one status query per resubscribe
+    cycle: the first False arms the grace-period timer, and the clock is advanced past the grace
+    window before the second False so it confirms the disable.
     """
-    call_count = 0
+    armed = dt.datetime(2026, 5, 6, 0, 0, 0, tzinfo=dt.UTC)
+    status_calls = 0
 
-    def make_response(rt_enabled: bool) -> MagicMock:
-        mock_response = MagicMock()
-        mock_response.status = 200
-        mock_response.content_type = "application/json"
-        mock_response.json = AsyncMock(
-            return_value={
-                "data": {
-                    "viewer": {
-                        "home": {
-                            "id": HOME_ID,
-                            "features": {"realTimeConsumptionEnabled": rt_enabled},
-                        },
-                    },
-                },
-            },
-        )
-        return mock_response
+    async def post_side_effect(*args: Any, **kwargs: Any) -> MagicMock:  # noqa: ANN401, ARG001
+        nonlocal status_calls
+        if kwargs["data"]["query"] != REAL_TIME_CONSUMPTION_ENABLED % HOME_ID:
+            # Info refresh: a benign payload that carries no status, so it stays a no-op reading.
+            return _json_response(
+                {"data": {"viewer": {"name": "n", "userId": "u", "homes": [], "websocketSubscriptionUrl": None}}},
+            )
+        status_calls += 1
+        if status_calls == 1:
+            # Initial subscription reports real time consumption enabled.
+            return _json_response(_status_payload(rt_enabled=True))
+        if status_calls == 2:
+            # First False: arms the grace-period timer at the armed time, status stays True.
+            return _json_response(_status_payload(rt_enabled=False))
+        # Second False, now past the grace window: confirms the disable.
+        frozen_clock.current = armed + REAL_TIME_CONSUMPTION_DISABLED_GRACE + dt.timedelta(seconds=1)
+        return _json_response(_status_payload(rt_enabled=False))
 
-    async def post_side_effect(*args: Any, **kwargs: Any) -> MagicMock:  # noqa: ARG001, ANN401
-        nonlocal call_count
-        call_count += 1
-        # Initial subscription reports real time consumption enabled; every resubscription
-        # status query afterwards reports it disabled.
-        return make_response(call_count <= 2)
-
-    mock_websession.post.side_effect = post_side_effect
+    mock_websession.post = AsyncMock(side_effect=post_side_effect)
 
     async def subscribe_raises(*args: Any, **kwargs: Any) -> AsyncGenerator:  # noqa: ANN401, ARG001
         raise WebsocketTransportError("transport error")
@@ -949,8 +943,10 @@ async def test_rt_resubscribe_confirmed_disable_notifies_on_error(
         if isinstance(exc, RealTimeConsumptionDisabledError):
             disabled_error_seen.set()
 
-    await home.rt_subscribe(MagicMock(), on_error=on_error)
-    await asyncio.wait_for(disabled_error_seen.wait(), timeout=1.0)
+    with patch("tibber.home.dt.datetime", frozen_clock):
+        frozen_clock.current = armed
+        await home.rt_subscribe(MagicMock(), on_error=on_error)
+        await asyncio.wait_for(disabled_error_seen.wait(), timeout=1.0)
 
     assert home.has_real_time_consumption is False
     assert isinstance(caught[-1], RealTimeConsumptionDisabledError)
