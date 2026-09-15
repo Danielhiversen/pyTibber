@@ -1239,6 +1239,59 @@ async def test_live_data_restarts_grace_period_armed_by_price_poll(
     home.rt_unsubscribe()
 
 
+@patch("tibber.home.RESUBSCRIBE_WAIT_TIME", 0)
+async def test_live_data_recovers_confirmed_false_status(
+    home: tibber.TibberHome,
+    mock_realtime: MagicMock,
+    mock_websession: MagicMock,
+    frozen_clock: type[FixedDateTime],
+) -> None:
+    """A live measurement must recover a status that has already flipped to False.
+
+    A live measurement is proof that real time consumption works right now, so it counts as a
+    successful True status reading, not merely a timer clear. Once a sustained False from periodic
+    info and price polls has confirmed a disable while a listener is still attached, resumed live
+    data must restore the believed status to True so the next resubscribe does not stop.
+    """
+    armed = dt.datetime(2026, 5, 6, 0, 0, 0, tzinfo=dt.UTC)
+    mock_websession.post = _make_status_query_router(rt_enabled=True)
+
+    measurements: asyncio.Queue[Any] = asyncio.Queue()
+    gate = asyncio.Event()
+
+    async def subscribe(*args: Any, **kwargs: Any) -> AsyncGenerator[Any, None]:  # noqa: ANN401, ARG001
+        yield {"liveMeasurement": {}}
+        await gate.wait()
+        yield {"liveMeasurement": {}}
+        await asyncio.Event().wait()
+
+    mock_realtime.subscribe = subscribe
+
+    with patch("tibber.home.dt.datetime", frozen_clock):
+        frozen_clock.current = armed
+        await home.rt_subscribe(measurements.put_nowait)
+        await asyncio.wait_for(measurements.get(), timeout=1.0)
+        assert home.has_real_time_consumption is True
+
+        # A price poll reports disabled, arming the grace-period timer without flipping the status.
+        mock_websession.post = AsyncMock(return_value=_json_response(_info_price_payload(rt_enabled=False)))
+        await home.update_info_and_price_info()
+        assert home.has_real_time_consumption is True
+
+        # A second False poll past the grace window, with no live data in between, confirms the disable.
+        frozen_clock.current = armed + REAL_TIME_CONSUMPTION_DISABLED_GRACE + dt.timedelta(seconds=1)
+        await home.update_info_and_price_info()
+        assert home.has_real_time_consumption is False
+
+        # Live data resumes and proves real time consumption is working, restoring the status.
+        gate.set()
+        await asyncio.wait_for(measurements.get(), timeout=1.0)
+
+    assert home.has_real_time_consumption is True
+
+    home.rt_unsubscribe()
+
+
 async def test_rt_resubscribe_confirmed_disable_without_on_error_logs_and_stops(
     tibber_connection: tibber.Tibber,
     mock_realtime: MagicMock,

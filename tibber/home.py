@@ -512,17 +512,20 @@ class TibberHome:
         """Handle incoming real time subscription data.
 
         Record that data was received to keep the subscription timeout watchdog
-        from treating a healthy, active subscription as unresponsive, and clear any suspected
-        real time consumption disable: a live measurement proves real time consumption is working
-        right now, and it is the only such proof available while a subscription runs healthily.
+        from treating a healthy, active subscription as unresponsive, and treat the live
+        measurement as a successful `True` status reading: it proves real time consumption is
+        working right now, and it is the only such proof available while a subscription runs
+        healthily. This both clears any suspected-disable grace timer and restores the believed
+        status to `True`, so live data can recover a status that was already flipped to `False`.
         """
         self._last_rt_data_received = time.time()
-        if self._real_time_consumption_suggested_disabled is not None:
+        if self._has_real_time_consumption is not True or self._real_time_consumption_suggested_disabled is not None:
             _LOGGER.debug(
-                "Real time data received for home %s, clearing suspected real time consumption disable",
+                "Real time data received for home %s, treating live measurement as proof "
+                "real time consumption is enabled",
                 self.home_id,
             )
-            self._real_time_consumption_suggested_disabled = None
+            self._update_has_real_time_consumption(True)
         data = {"data": _data}
         try:
             data = self._add_extra_data(data)
