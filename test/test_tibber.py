@@ -1,7 +1,6 @@
 """Tests for pyTibber."""
 
 import datetime as dt
-from typing import Self
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import aiohttp
@@ -10,6 +9,8 @@ import pytest
 import tibber
 from tibber.const import RESOLUTION_DAILY, RESOLUTION_HOURLY
 from tibber.exceptions import FatalHttpExceptionError, InvalidLoginError, NotForDemoUserError
+
+from .conftest import FixedDateTime
 
 
 @pytest.fixture
@@ -92,26 +93,6 @@ def updated_hourly_data() -> list[dict]:
             "cost": 0.7,
         },
     ]
-
-
-class FixedDateTime(dt.datetime):
-    """Controllable datetime for deterministic fetch intervals."""
-
-    current = dt.datetime(2026, 5, 6, 2, 30, 0, tzinfo=dt.UTC)
-
-    @classmethod
-    def now(cls, tz: dt.tzinfo | None = None) -> Self:
-        if tz is None:
-            return cls(
-                cls.current.year,
-                cls.current.month,
-                cls.current.day,
-                cls.current.hour,
-                cls.current.minute,
-                cls.current.second,
-                cls.current.microsecond,
-            )
-        return cls.fromtimestamp(cls.current.timestamp(), tz=tz)
 
 
 @pytest.mark.asyncio
@@ -261,9 +242,10 @@ async def test_fetch_consumption_data_merges_using_two_predefined_payloads(
     monkeypatch: pytest.MonkeyPatch,
     initial_hourly_data: list[dict],
     updated_hourly_data: list[dict],
+    frozen_clock: type[FixedDateTime],
 ) -> None:
     """Second fetch merges old and new values through public API."""
-    FixedDateTime.current = dt.datetime(2026, 5, 6, 2, 30, 0, tzinfo=dt.UTC)
+    frozen_clock.current = dt.datetime(2026, 5, 6, 2, 30, 0, tzinfo=dt.UTC)
     payloads = iter([initial_hourly_data, updated_hourly_data])
 
     async def mock_get_historic_data(
@@ -281,9 +263,9 @@ async def test_fetch_consumption_data_merges_using_two_predefined_payloads(
 
         monkeypatch.setattr(home, "get_historic_data", mock_get_historic_data)
 
-        with patch("tibber.home.dt.datetime", FixedDateTime):
+        with patch("tibber.home.dt.datetime", frozen_clock):
             await home.fetch_consumption_data()
-            FixedDateTime.current = dt.datetime(2026, 5, 6, 4, 30, 0, tzinfo=dt.UTC)
+            frozen_clock.current = dt.datetime(2026, 5, 6, 4, 30, 0, tzinfo=dt.UTC)
             await home.fetch_consumption_data()
 
         assert home.hourly_consumption_data == [
@@ -302,9 +284,10 @@ async def test_fetch_consumption_data_does_not_duplicate_overlapping_timestamp(
     monkeypatch: pytest.MonkeyPatch,
     initial_hourly_data: list[dict],
     updated_hourly_data: list[dict],
+    frozen_clock: type[FixedDateTime],
 ) -> None:
     """Overlapping hour should be replaced, not duplicated."""
-    FixedDateTime.current = dt.datetime(2026, 5, 6, 2, 15, 0, tzinfo=dt.UTC)
+    frozen_clock.current = dt.datetime(2026, 5, 6, 2, 15, 0, tzinfo=dt.UTC)
     payloads = iter([initial_hourly_data, updated_hourly_data])
 
     async def mock_get_historic_data(
@@ -322,9 +305,9 @@ async def test_fetch_consumption_data_does_not_duplicate_overlapping_timestamp(
 
         monkeypatch.setattr(home, "get_historic_data", mock_get_historic_data)
 
-        with patch("tibber.home.dt.datetime", FixedDateTime):
+        with patch("tibber.home.dt.datetime", frozen_clock):
             await home.fetch_consumption_data()
-            FixedDateTime.current = dt.datetime(2026, 5, 6, 4, 15, 0, tzinfo=dt.UTC)
+            frozen_clock.current = dt.datetime(2026, 5, 6, 4, 15, 0, tzinfo=dt.UTC)
             await home.fetch_consumption_data()
 
         merged_by_timestamp = {entry["from"]: entry for entry in home.hourly_consumption_data}

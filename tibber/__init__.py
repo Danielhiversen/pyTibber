@@ -15,6 +15,7 @@ from .data_api import TibberDataAPI
 from .exceptions import (
     FatalHttpExceptionError,
     InvalidLoginError,
+    RealTimeConsumptionDisabledError,
     RetryableHttpExceptionError,
     UserAgentMissingError,
 )
@@ -29,6 +30,7 @@ _LOGGER = logging.getLogger(__name__)
 __all__ = [
     "FatalHttpExceptionError",
     "InvalidLoginError",
+    "RealTimeConsumptionDisabledError",
     "RetryableHttpExceptionError",
     "Tibber",
     "TibberDataAPI",

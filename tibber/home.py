@@ -15,7 +15,13 @@ import aiohttp
 from gql import gql
 
 from .const import RESOLUTION_DAILY, RESOLUTION_HOURLY, RESOLUTION_MONTHLY, RESOLUTION_WEEKLY
-from .exceptions import HttpExceptionError, SubscriptionFailedError, WebsocketReconnectedError, WebsocketTransportError
+from .exceptions import (
+    HttpExceptionError,
+    RealTimeConsumptionDisabledError,
+    SubscriptionFailedError,
+    WebsocketReconnectedError,
+    WebsocketTransportError,
+)
 from .gql_queries import (
     HISTORIC_DATA,
     HISTORIC_DATA_DATE,
@@ -36,6 +42,7 @@ MIN_IN_HOUR: int = 60
 MIN_IN_QUARTER: int = 15
 RT_SUBSCRIPTION_TIMEOUT = 60
 RESUBSCRIBE_WAIT_TIME = 60
+REAL_TIME_CONSUMPTION_DISABLED_GRACE = dt.timedelta(hours=1)
 
 MIN_REQUESTED_CONSUMPTION_HOURS: int = 3
 
@@ -281,31 +288,46 @@ class TibberHome:
     def _extract_real_time_consumption_enabled(data: dict[str, Any]) -> bool | None:
         """Safely extract the real time consumption enabled flag from an info payload."""
         try:
-            return data["viewer"]["home"]["features"]["realTimeConsumptionEnabled"]
+            value = data["viewer"]["home"]["features"]["realTimeConsumptionEnabled"]
         except (KeyError, TypeError):
             return None
+        # Anything but a bool carries no usable information, treat it like a malformed payload.
+        return value if isinstance(value, bool) else None
 
     def _update_has_real_time_consumption(self, enabled: bool | None) -> None:
-        _has_real_time_consumption = enabled
-        if self._has_real_time_consumption is None:
-            self._has_real_time_consumption = _has_real_time_consumption
+        """Update the believed real time consumption status from a single reading.
+
+        `enabled` is None when the reading carried no usable information (a malformed or
+        degraded API payload) and must not change the believed status at all.
+
+        A `False` reading following a known `True` does not immediately flip the status: it only
+        arms a grace-period timer and the home keeps reporting its last known `True`, so a single
+        bad or transiently-correct reading during a Tibber-side outage cannot strand the real time
+        subscription. The status flips to `False` only when a later `False` reading arrives more
+        than REAL_TIME_CONSUMPTION_DISABLED_GRACE after the timer was armed. Both a `True` reading
+        and incoming real time data (see `_handle_subscription_data`) clear the timer, so the grace
+        period always measures the time since the last evidence that real time consumption works.
+        """
+        if enabled is None:
             return
 
-        if self._has_real_time_consumption is True and _has_real_time_consumption is False:
-            now = dt.datetime.now(tz=dt.UTC)
-            if self._real_time_consumption_suggested_disabled is None:
-                self._real_time_consumption_suggested_disabled = now
-                self._has_real_time_consumption = None
-            elif now - self._real_time_consumption_suggested_disabled > dt.timedelta(hours=1):
-                self._real_time_consumption_suggested_disabled = None
-                self._has_real_time_consumption = False
-            else:
-                self._has_real_time_consumption = None
-            return
-
-        if _has_real_time_consumption is True:
+        if enabled is True:
             self._real_time_consumption_suggested_disabled = None
-        self._has_real_time_consumption = _has_real_time_consumption
+            self._has_real_time_consumption = True
+            return
+
+        # enabled is False from here on.
+        if self._has_real_time_consumption is not True:
+            self._real_time_consumption_suggested_disabled = None
+            self._has_real_time_consumption = False
+            return
+
+        now = dt.datetime.now(tz=dt.UTC)
+        if self._real_time_consumption_suggested_disabled is None:
+            self._real_time_consumption_suggested_disabled = now
+        elif now - self._real_time_consumption_suggested_disabled > REAL_TIME_CONSUMPTION_DISABLED_GRACE:
+            self._real_time_consumption_suggested_disabled = None
+            self._has_real_time_consumption = False
 
     @property
     def home_id(self) -> str:
@@ -432,7 +454,11 @@ class TibberHome:
         """Connect to Tibber and subscribe to Tibber real time subscription.
 
         :param callback: The function to call when data is received.
-        :param on_error: The function to call when an error occurs.
+        :param on_error: The function to call when an error occurs. Most errors are transient and
+            resubscription continues automatically, but a `RealTimeConsumptionDisabledError` is
+            terminal: the resubscribe loop has stopped and will not retry on its own. To resume,
+            call `rt_subscribe` again, from a separate task rather than directly from this
+            callback, and rate limit the retries.
         """
         if self._rt_listener is not None:
             raise RuntimeError("Already subscribed to real time data, call rt_unsubscribe first")
@@ -486,9 +512,20 @@ class TibberHome:
         """Handle incoming real time subscription data.
 
         Record that data was received to keep the subscription timeout watchdog
-        from treating a healthy, active subscription as unresponsive.
+        from treating a healthy, active subscription as unresponsive, and treat the live
+        measurement as a successful `True` status reading: it proves real time consumption is
+        working right now, and it is the only such proof available while a subscription runs
+        healthily. This both clears any suspected-disable grace timer and restores the believed
+        status to `True`, so live data can recover a status that was already flipped to `False`.
         """
         self._last_rt_data_received = time.time()
+        if self._has_real_time_consumption is not True or self._real_time_consumption_suggested_disabled is not None:
+            _LOGGER.debug(
+                "Real time data received for home %s, treating live measurement as proof "
+                "real time consumption is enabled",
+                self.home_id,
+            )
+            self._update_has_real_time_consumption(True)
         data = {"data": _data}
         try:
             data = self._add_extra_data(data)
@@ -572,8 +609,14 @@ class TibberHome:
             self.update_real_time_consumption_enabled(),
             "Failed to refresh real time consumption status, keeping last known status",
         )
-        if not self.has_real_time_consumption:
+        if self.has_real_time_consumption is False:
             _LOGGER.info("Home %s does not have real time consumption enabled", self.home_id)
+            if (on_error := self._rt_on_error) is not None:
+                on_error(
+                    RealTimeConsumptionDisabledError(
+                        f"Home {self.home_id} does not have real time consumption enabled",
+                    ),
+                )
             return
 
         # Update info to set websocket subscription url
