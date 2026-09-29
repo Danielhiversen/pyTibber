@@ -319,38 +319,25 @@ async def test_fetch_consumption_data_does_not_duplicate_overlapping_timestamp(
 
 
 @pytest.mark.asyncio
-async def test_set_access_token_emits_deprecation_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_set_access_token_emits_deprecation_warning() -> None:
     """set_access_token must emit a DeprecationWarning."""
     tibber_connection = tibber.Tibber(
         access_token="existing-token",
         websession=MagicMock(),
         user_agent="test",
     )
-    monkeypatch.setattr(tibber_connection.realtime, "reconnect", AsyncMock())
 
     with pytest.warns(DeprecationWarning, match="refresh_access_token"):
         await tibber_connection.set_access_token("new-token")
 
 
 @pytest.mark.asyncio
-async def test_set_access_token_updates_shared_token_manager(monkeypatch: pytest.MonkeyPatch) -> None:
-    """set_access_token must update the shared TokenManager that all clients read from."""
-    tibber_connection = tibber.Tibber(
-        access_token="existing-token",
-        websession=MagicMock(),
-        user_agent="test",
-    )
-    monkeypatch.setattr(tibber_connection.realtime, "reconnect", AsyncMock())
-
-    with pytest.warns(DeprecationWarning):
-        await tibber_connection.set_access_token("new-token")
-
-    assert tibber_connection._token_manager.access_token == "new-token"  # noqa: SLF001
-
-
-@pytest.mark.asyncio
-async def test_set_access_token_triggers_reconnect(monkeypatch: pytest.MonkeyPatch) -> None:
-    """set_access_token must call reconnect() so an active RT session picks up the new token."""
+@pytest.mark.parametrize("access_token", ["new-token", "existing-token"])
+async def test_set_access_token_updates_token_manager_without_reconnect(
+    monkeypatch: pytest.MonkeyPatch,
+    access_token: str,
+) -> None:
+    """set_access_token must update the shared TokenManager and leave the RT session running."""
     tibber_connection = tibber.Tibber(
         access_token="existing-token",
         websession=MagicMock(),
@@ -359,26 +346,10 @@ async def test_set_access_token_triggers_reconnect(monkeypatch: pytest.MonkeyPat
     mock_reconnect = AsyncMock()
     monkeypatch.setattr(tibber_connection.realtime, "reconnect", mock_reconnect)
 
-    with pytest.warns(DeprecationWarning):
-        await tibber_connection.set_access_token("new-token")
+    with pytest.warns(DeprecationWarning, match="refresh_access_token"):
+        await tibber_connection.set_access_token(access_token)
 
-    mock_reconnect.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_set_access_token_noop_when_token_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
-    """set_access_token must be a no-op (no reconnect) when the token has not changed."""
-    tibber_connection = tibber.Tibber(
-        access_token="existing-token",
-        websession=MagicMock(),
-        user_agent="test",
-    )
-    mock_reconnect = AsyncMock()
-    monkeypatch.setattr(tibber_connection.realtime, "reconnect", mock_reconnect)
-
-    with pytest.warns(DeprecationWarning):
-        await tibber_connection.set_access_token("existing-token")
-
+    assert tibber_connection._token_manager.access_token == access_token  # noqa: SLF001
     mock_reconnect.assert_not_awaited()
 
 
