@@ -243,7 +243,10 @@ class Tibber:
         await self.realtime.disconnect()
 
     async def set_access_token(self, access_token: str) -> None:
-        """Set access token and reauthorize clients.
+        """Set access token for subsequent requests and websocket handshakes.
+
+        An active realtime session is left running: the server only validates the token when
+        the connection is established, and the next handshake picks up the new token.
 
         .. deprecated::
             Prefer providing a ``refresh_access_token`` callback at construction time so all
@@ -260,13 +263,7 @@ class Tibber:
             DeprecationWarning,
             stacklevel=2,
         )
-        if access_token == self._token_manager.access_token:
-            return
-        _LOGGER.debug("Updating access token")
         self._token_manager.set_access_token(access_token)
-        # reconnect() is a no-op when not connected; if a live session exists, the new token
-        # is applied immediately so the active subscription does not continue with a stale one.
-        await self.realtime.reconnect()
 
     @property
     def user_id(self) -> str | None:
