@@ -407,9 +407,9 @@ class TibberDevice:
         return self._data["info"]["brand"]
 
     @property
-    def model(self) -> str:
-        """Return the device model."""
-        return self._data["info"]["model"]
+    def model(self) -> str | None:
+        """Return the device model, if reported."""
+        return self._data["info"].get("model")
 
     def __repr__(self) -> str:
         """Return the representation of the device."""
