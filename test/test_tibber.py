@@ -1,19 +1,16 @@
 """Tests for pyTibber."""
 
-import asyncio
 import datetime as dt
-import logging
-from typing import Self
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import aiohttp
 import pytest
 
 import tibber
-import tibber.realtime as tibber_realtime
 from tibber.const import RESOLUTION_DAILY, RESOLUTION_HOURLY
 from tibber.exceptions import FatalHttpExceptionError, InvalidLoginError, NotForDemoUserError
-from tibber.websocket_transport import TibberWebsocketsTransport
+
+from .conftest import FixedDateTime
 
 
 @pytest.fixture
@@ -96,26 +93,6 @@ def updated_hourly_data() -> list[dict]:
             "cost": 0.7,
         },
     ]
-
-
-class FixedDateTime(dt.datetime):
-    """Controllable datetime for deterministic fetch intervals."""
-
-    current = dt.datetime(2026, 5, 6, 2, 30, 0, tzinfo=dt.UTC)
-
-    @classmethod
-    def now(cls, tz: dt.tzinfo | None = None) -> Self:
-        if tz is None:
-            return cls(
-                cls.current.year,
-                cls.current.month,
-                cls.current.day,
-                cls.current.hour,
-                cls.current.minute,
-                cls.current.second,
-                cls.current.microsecond,
-            )
-        return cls.fromtimestamp(cls.current.timestamp(), tz=tz)
 
 
 @pytest.mark.asyncio
@@ -265,9 +242,10 @@ async def test_fetch_consumption_data_merges_using_two_predefined_payloads(
     monkeypatch: pytest.MonkeyPatch,
     initial_hourly_data: list[dict],
     updated_hourly_data: list[dict],
+    frozen_clock: type[FixedDateTime],
 ) -> None:
     """Second fetch merges old and new values through public API."""
-    FixedDateTime.current = dt.datetime(2026, 5, 6, 2, 30, 0, tzinfo=dt.UTC)
+    frozen_clock.current = dt.datetime(2026, 5, 6, 2, 30, 0, tzinfo=dt.UTC)
     payloads = iter([initial_hourly_data, updated_hourly_data])
 
     async def mock_get_historic_data(
@@ -285,9 +263,9 @@ async def test_fetch_consumption_data_merges_using_two_predefined_payloads(
 
         monkeypatch.setattr(home, "get_historic_data", mock_get_historic_data)
 
-        with patch("tibber.home.dt.datetime", FixedDateTime):
+        with patch("tibber.home.dt.datetime", frozen_clock):
             await home.fetch_consumption_data()
-            FixedDateTime.current = dt.datetime(2026, 5, 6, 4, 30, 0, tzinfo=dt.UTC)
+            frozen_clock.current = dt.datetime(2026, 5, 6, 4, 30, 0, tzinfo=dt.UTC)
             await home.fetch_consumption_data()
 
         assert home.hourly_consumption_data == [
@@ -306,9 +284,10 @@ async def test_fetch_consumption_data_does_not_duplicate_overlapping_timestamp(
     monkeypatch: pytest.MonkeyPatch,
     initial_hourly_data: list[dict],
     updated_hourly_data: list[dict],
+    frozen_clock: type[FixedDateTime],
 ) -> None:
     """Overlapping hour should be replaced, not duplicated."""
-    FixedDateTime.current = dt.datetime(2026, 5, 6, 2, 15, 0, tzinfo=dt.UTC)
+    frozen_clock.current = dt.datetime(2026, 5, 6, 2, 15, 0, tzinfo=dt.UTC)
     payloads = iter([initial_hourly_data, updated_hourly_data])
 
     async def mock_get_historic_data(
@@ -326,9 +305,9 @@ async def test_fetch_consumption_data_does_not_duplicate_overlapping_timestamp(
 
         monkeypatch.setattr(home, "get_historic_data", mock_get_historic_data)
 
-        with patch("tibber.home.dt.datetime", FixedDateTime):
+        with patch("tibber.home.dt.datetime", frozen_clock):
             await home.fetch_consumption_data()
-            FixedDateTime.current = dt.datetime(2026, 5, 6, 4, 15, 0, tzinfo=dt.UTC)
+            frozen_clock.current = dt.datetime(2026, 5, 6, 4, 15, 0, tzinfo=dt.UTC)
             await home.fetch_consumption_data()
 
         merged_by_timestamp = {entry["from"]: entry for entry in home.hourly_consumption_data}
@@ -340,114 +319,63 @@ async def test_fetch_consumption_data_does_not_duplicate_overlapping_timestamp(
 
 
 @pytest.mark.asyncio
-async def test_logging_rt_subscribe(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.INFO)
-    async with aiohttp.ClientSession() as session:
-        tibber_connection = tibber.Tibber(
-            websession=session,
-            user_agent="test",
-        )
-        await tibber_connection.update_info()
-        home = tibber_connection.get_homes()[0]
-
-        def _callback(_: dict) -> None:
-            return None
-
-        await home.rt_subscribe(_callback)
-        await asyncio.sleep(1)
-        home.rt_unsubscribe()
-        await tibber_connection.rt_disconnect()
-        await asyncio.sleep(10)
-
-
-@pytest.mark.asyncio
-async def test_set_access_token_updates_clients_without_realtime(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_set_access_token_emits_deprecation_warning() -> None:
+    """set_access_token must emit a DeprecationWarning."""
     tibber_connection = tibber.Tibber(
+        access_token="existing-token",
         websession=MagicMock(),
         user_agent="test",
     )
-    reconnect = AsyncMock()
-    rt_set_access_token = AsyncMock()
-    data_api_set_access_token = MagicMock()
 
-    monkeypatch.setattr(tibber_connection.realtime, "reconnect", reconnect)
-    monkeypatch.setattr(tibber_connection.realtime, "set_access_token", rt_set_access_token)
-    monkeypatch.setattr(tibber_connection.data_api, "set_access_token", data_api_set_access_token)
-
-    await tibber_connection.set_access_token("new-token")
-
-    rt_set_access_token.assert_awaited_once_with("new-token")
-    data_api_set_access_token.assert_called_once_with("new-token")
-    reconnect.assert_not_awaited()
+    with pytest.warns(DeprecationWarning, match="refresh_access_token"):
+        await tibber_connection.set_access_token("new-token")
 
 
 @pytest.mark.asyncio
-async def test_set_access_token_delegates_realtime_reauthorization(monkeypatch: pytest.MonkeyPatch) -> None:
-    tibber_connection = tibber.Tibber(
-        websession=MagicMock(),
-        user_agent="test",
-    )
-    calls: list[str] = []
-
-    async def fake_realtime_set_access_token(_access_token: str) -> None:
-        calls.append("realtime.set_access_token")
-
-    def fake_data_api_set_access_token(_access_token: str) -> None:
-        calls.append("data_api.set_access_token")
-
-    monkeypatch.setattr(
-        tibber_connection.realtime,
-        "set_access_token",
-        AsyncMock(side_effect=fake_realtime_set_access_token),
-    )
-    reconnect = AsyncMock()
-    monkeypatch.setattr(tibber_connection.realtime, "reconnect", reconnect)
-    monkeypatch.setattr(tibber_connection.data_api, "set_access_token", fake_data_api_set_access_token)
-
-    await tibber_connection.set_access_token("new-token")
-
-    assert calls == ["data_api.set_access_token", "realtime.set_access_token"]
-    reconnect.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_realtime_set_access_token_reconnects_active_subscription_manager(
+@pytest.mark.parametrize("access_token", ["new-token", "existing-token"])
+async def test_set_access_token_updates_token_manager_without_reconnect(
     monkeypatch: pytest.MonkeyPatch,
+    access_token: str,
 ) -> None:
-    class FakeClient:
-        def __init__(self, transport: TibberWebsocketsTransport) -> None:
-            self.transport = transport
-            self.close_async_mock = AsyncMock()
-            self.close_async = self.close_async_mock
+    """set_access_token must update the shared TokenManager and leave the RT session running."""
+    tibber_connection = tibber.Tibber(
+        access_token="existing-token",
+        websession=MagicMock(),
+        user_agent="test",
+    )
+    mock_reconnect = AsyncMock()
+    monkeypatch.setattr(tibber_connection.realtime, "reconnect", mock_reconnect)
 
-            async def mock_connect_async() -> object:
-                session = object()
-                self.session = session
-                return session
+    with pytest.warns(DeprecationWarning, match="refresh_access_token"):
+        await tibber_connection.set_access_token(access_token)
 
-            self.connect_async = AsyncMock(side_effect=mock_connect_async)
+    assert tibber_connection._token_manager.access_token == access_token  # noqa: SLF001
+    mock_reconnect.assert_not_awaited()
 
-    monkeypatch.setattr(tibber_realtime, "Client", FakeClient)
 
-    realtime = tibber_realtime.TibberRT("old-token", 10, "test-agent", True)
-    realtime.sub_endpoint = "wss://example.test/v1-beta/gql/subscriptions"
+@pytest.mark.asyncio
+async def test_rt_disconnect_unsubscribes_homes_before_disconnecting(monkeypatch: pytest.MonkeyPatch) -> None:
+    """rt_disconnect must unsubscribe every home before tearing down the realtime connection."""
+    tibber_connection = tibber.Tibber(
+        access_token="existing-token",
+        websession=MagicMock(),
+        user_agent="test",
+    )
+    manager = MagicMock()
+    manager.realtime_disconnect = AsyncMock()
+    monkeypatch.setattr(tibber_connection.realtime, "disconnect", manager.realtime_disconnect)
 
-    await realtime.connect()
-    old_manager = realtime.sub_manager
-    assert old_manager is not None
-    assert isinstance(old_manager, FakeClient)
-    assert isinstance(old_manager.transport, TibberWebsocketsTransport)
-    assert old_manager.transport.init_payload["token"] == "old-token"
+    home_a = MagicMock()
+    home_b = MagicMock()
+    home_a.rt_unsubscribe = manager.unsubscribe_a
+    home_b.rt_unsubscribe = manager.unsubscribe_b
+    tibber_connection._homes = {"a": home_a, "b": home_b}  # noqa: SLF001
 
-    await realtime.set_access_token("new-token")
+    await tibber_connection.rt_disconnect()
 
-    old_manager.close_async_mock.assert_awaited_once_with()
-    assert realtime.session is not None
-    assert realtime.sub_manager is not None
-    assert realtime.sub_manager is not old_manager
-    assert isinstance(realtime.sub_manager, FakeClient)
-    assert isinstance(realtime.sub_manager.transport, TibberWebsocketsTransport)
-    assert realtime.sub_manager.transport.init_payload["token"] == "new-token"
-    realtime.sub_manager.connect_async.assert_awaited_once_with()
-
-    await realtime.disconnect()
+    # Both homes are unsubscribed, and the realtime disconnect happens last.
+    assert manager.mock_calls == [
+        call.unsubscribe_a(),
+        call.unsubscribe_b(),
+        call.realtime_disconnect(),
+    ]

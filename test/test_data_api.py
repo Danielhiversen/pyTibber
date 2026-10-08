@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from tibber.data_api import TibberDataAPI, TibberDevice
+from tibber.token_manager import TokenManager
 
 
 @pytest.fixture
@@ -13,7 +14,7 @@ def data_api() -> TibberDataAPI:
     """Provide a TibberDataAPI instance with a mocked websession."""
     websession = MagicMock()
     return TibberDataAPI(
-        access_token="test-token",
+        token_manager=TokenManager("test-token"),
         timeout=10,
         websession=websession,
         user_agent="test-agent",
@@ -64,14 +65,27 @@ async def test_get_devices_for_home_returns_raw_devices(
 
 
 @pytest.mark.asyncio
-async def test_get_device_returns_tibber_device(data_api: TibberDataAPI, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("device_info", "expected_model"),
+    [
+        pytest.param({"name": "Device 1", "brand": "Brand", "model": "Model"}, "Model", id="with-model"),
+        pytest.param({"name": "Device 1", "brand": "Brand", "model": ""}, "", id="empty-model"),
+        pytest.param({"name": "Device 1", "brand": "Brand"}, None, id="without-model"),
+    ],
+)
+async def test_get_device_returns_tibber_device(
+    data_api: TibberDataAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    device_info: dict[str, str],
+    expected_model: str | None,
+) -> None:
     """Confirm a detailed device request produces a TibberDevice instance."""
     home_id = "home-1"
     device_id = "device-1"
     device_payload = {
         "id": device_id,
         "externalId": "external-id",
-        "info": {"name": "Device 1", "brand": "Brand", "model": "Model"},
+        "info": device_info,
         "capabilities": [],
     }
     mocked_make_request = AsyncMock(return_value=device_payload)
@@ -85,7 +99,7 @@ async def test_get_device_returns_tibber_device(data_api: TibberDataAPI, monkeyp
     assert device.external_id == "external-id"
     assert device.name == "Device 1"
     assert device.brand == "Brand"
-    assert device.model == "Model"
+    assert device.model == expected_model
     assert device.home_id == home_id
 
 
