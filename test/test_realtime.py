@@ -6,6 +6,7 @@ import asyncio
 import gc
 import json
 import weakref
+from contextlib import suppress
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -485,6 +486,86 @@ async def test_connect_timeout_leaves_with_session_and_subscription_not_running(
     await tibber_rt.disconnect()
 
     mock_client.close_async.assert_awaited_once()
+    assert tibber_rt.subscription_running is False
+
+
+@pytest.mark.parametrize("timeout", [0])
+async def test_connect_timeout_recovers_after_late_success(
+    mock_client: MagicMock,
+    tibber_rt: TibberRT,
+) -> None:
+    """A successful background connection must restore subscription availability."""
+    connected = asyncio.Event()
+
+    async def delayed_connect(**kwargs: Any) -> MagicMock:  # noqa: ANN401, ARG001
+        session = mock_client.session = MagicMock(spec=AsyncClientSession)
+        await connected.wait()
+        return session
+
+    mock_client.connect_async = AsyncMock(side_effect=delayed_connect)
+    await tibber_rt.connect()
+    task = tibber_rt._connect_task  # noqa: SLF001
+    assert task is not None
+    assert tibber_rt.subscription_running is False
+
+    connected.set()
+    await task
+
+    assert tibber_rt.subscription_running is True
+    await tibber_rt.disconnect()
+    assert tibber_rt.subscription_running is False
+
+
+@pytest.mark.parametrize("timeout", [0])
+@pytest.mark.parametrize("error_type", [RuntimeError, asyncio.CancelledError])
+async def test_connect_timeout_unsuccessful_completion(
+    mock_client: MagicMock,
+    tibber_rt: TibberRT,
+    error_type: type[BaseException],
+) -> None:
+    """Failed and cancelled background connections must remain unavailable."""
+    finished = asyncio.Event()
+
+    async def failed_connect(**kwargs: Any) -> None:  # noqa: ANN401, ARG001
+        mock_client.session = MagicMock(spec=AsyncClientSession)
+        await finished.wait()
+        raise error_type
+
+    mock_client.connect_async = AsyncMock(side_effect=failed_connect)
+    await tibber_rt.connect()
+    task = tibber_rt._connect_task  # noqa: SLF001
+    assert task is not None
+    finished.set()
+    with pytest.raises(error_type):
+        await task
+
+    assert tibber_rt.subscription_running is False
+    await tibber_rt.disconnect()
+
+
+@pytest.mark.parametrize("timeout", [0])
+async def test_disconnect_ignores_late_connection_success(
+    mock_client: MagicMock,
+    tibber_rt: TibberRT,
+) -> None:
+    """A connection completing during disconnect must not restore availability."""
+    started = asyncio.Event()
+
+    async def delayed_connect(**kwargs: Any) -> MagicMock:  # noqa: ANN401, ARG001
+        session = mock_client.session = MagicMock(spec=AsyncClientSession)
+        started.set()
+        with suppress(asyncio.CancelledError):
+            await asyncio.Event().wait()
+        return session
+
+    mock_client.connect_async = AsyncMock(side_effect=delayed_connect)
+    await tibber_rt.connect()
+    await started.wait()
+    task = tibber_rt._connect_task  # noqa: SLF001
+    assert task is not None
+    await tibber_rt.disconnect()
+    await task
+
     assert tibber_rt.subscription_running is False
 
 
