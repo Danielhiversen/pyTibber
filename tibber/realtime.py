@@ -139,6 +139,7 @@ class TibberRT:
         if task is self._connect_task:
             self._connect_task = None
             if not task.cancelled() and task.exception() is None:
+                self._session = task.result()
                 self.subscription_running = True
 
     async def reconnect(self) -> None:

@@ -22,7 +22,7 @@ from tibber.realtime import TibberRT, TibberWebsocketsTransport
 from tibber.token_manager import TokenManager
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import AsyncGenerator, Generator
 
 
 @pytest.fixture
@@ -541,6 +541,46 @@ async def test_connect_timeout_unsuccessful_completion(
 
     assert tibber_rt.subscription_running is False
     await tibber_rt.disconnect()
+
+
+async def test_connect_caller_cancelled_before_late_success(
+    mock_client: MagicMock,
+    tibber_rt: TibberRT,
+) -> None:
+    """Caller cancellation must not leave a successful connection without a session."""
+    started = asyncio.Event()
+    connected = asyncio.Event()
+    original_connect = mock_client.connect_async
+
+    async def delayed_connect(**kwargs: Any) -> MagicMock:  # noqa: ANN401
+        session = await original_connect(**kwargs)
+        started.set()
+        await connected.wait()
+        return session
+
+    async def measurements(request: Any) -> AsyncGenerator[dict[str, int]]:  # noqa: ANN401, ARG001
+        yield {"power": 123}
+
+    mock_client.connect_async = AsyncMock(side_effect=delayed_connect)
+    caller = asyncio.create_task(tibber_rt.connect())
+    await started.wait()
+    task = tibber_rt._connect_task  # noqa: SLF001
+    assert task is not None
+    caller.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await caller
+    assert not task.cancelled()
+
+    connected.set()
+    await task
+    assert tibber_rt.subscription_running is True
+    await tibber_rt.connect()
+    mock_client.session.subscribe = measurements
+    assert [data async for data in tibber_rt.subscribe(MagicMock())] == [{"power": 123}]
+
+    await tibber_rt.disconnect()
+    mock_client.close_async.assert_awaited_once()
+    assert tibber_rt.subscription_running is False
 
 
 @pytest.mark.parametrize("timeout", [0])
