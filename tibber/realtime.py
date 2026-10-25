@@ -130,16 +130,17 @@ class TibberRT:
         except TimeoutError as err:
             _LOGGER.debug("Timeout connecting to websocket: %s", err)
             # The connection will be retried by the reconnecting task
-        else:
-            self.subscription_running = True
 
         # The client session is set even if the connection times out.
         self._session = cast("AsyncClientSession", self._client.session)
 
     def _on_connect_task_done(self, task: asyncio.Task[Any]) -> None:
-        """Clear the connect task reference once it settles."""
+        """Update connection state when the current connection attempt settles."""
         if task is self._connect_task:
             self._connect_task = None
+            if not task.cancelled() and task.exception() is None:
+                self._session = task.result()
+                self.subscription_running = True
 
     async def reconnect(self) -> None:
         """Reconnect the websocket client.
