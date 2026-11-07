@@ -48,6 +48,34 @@ MIN_REQUESTED_CONSUMPTION_HOURS: int = 3
 
 RESUBSCRIBE_MAX_ATTEMPTS: int = 5
 
+ACTIVE_SUBSCRIPTION_STATUSES: tuple[str, ...] = (
+    "running",
+    "awaiting market",
+    "awaiting time restriction",
+    "awaiting termination",
+)
+
+
+def is_ended_subscription_still_valid(subscription: dict[str, Any] | None, now: dt.datetime | None = None) -> bool:
+    """Return True if a subscription is reported as "ended" but its validTo is still in the future.
+
+    When a customer cancels the contract, Tibber reports the subscription status as
+    "ended" right away, although the contract (and its prices) stays valid until validTo.
+    """
+    if not subscription:
+        return False
+    status = subscription.get("status")
+    valid_to = subscription.get("validTo")
+    if not isinstance(status, str) or status.lower() != "ended" or not isinstance(valid_to, str):
+        return False
+    try:
+        end = dt.datetime.fromisoformat(valid_to)
+    except ValueError:
+        return False
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=dt.UTC)
+    return end > (now or dt.datetime.now(tz=dt.UTC))
+
 
 class HourlyData:
     """Holds hourly data for consumption or production."""
@@ -336,17 +364,13 @@ class TibberHome:
 
     @property
     def has_active_subscription(self) -> bool:
-        """Return home id."""
+        """Return True if the home has an active subscription."""
         try:
-            sub = self.info["viewer"]["home"]["currentSubscription"]["status"]
+            subscription = self.info["viewer"]["home"]["currentSubscription"]
+            sub = subscription["status"]
         except (KeyError, TypeError):
             return False
-        return sub in [
-            "running",
-            "awaiting market",
-            "awaiting time restriction",
-            "awaiting termination",
-        ]
+        return sub in ACTIVE_SUBSCRIPTION_STATUSES or is_ended_subscription_still_valid(subscription)
 
     @property
     def has_real_time_consumption(self) -> None | bool:
