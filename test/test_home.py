@@ -1306,3 +1306,76 @@ async def test_rt_resubscribe_confirmed_disable_without_on_error_logs_and_stops(
     mock_realtime.connect.assert_not_awaited()
     assert not fresh_home.rt_subscription_running
     assert f"Home {HOME_ID} does not have real time consumption enabled" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("subscription", "expected"),
+    [
+        ({"status": "ended", "validTo": "2026-11-17T00:00:00.000+01:00"}, True),
+        ({"status": "ended", "validTo": "2026-11-01T00:00:00.000+01:00"}, False),
+        ({"status": "ended", "validTo": None}, False),
+        ({"status": "ended"}, False),
+        ({"status": "ended", "validTo": "not a date"}, False),
+        ({"status": "running", "validTo": None}, False),
+        ({"status": "Ended", "validTo": "2026-11-17T00:00:00"}, True),
+        (None, False),
+    ],
+)
+def test_is_ended_subscription_still_valid(subscription: dict[str, Any] | None, expected: bool) -> None:
+    """A cancelled ("ended") subscription counts as valid only until validTo."""
+    now = dt.datetime(2026, 11, 7, 12, 0, tzinfo=dt.UTC)
+    assert tibber.home.is_ended_subscription_still_valid(subscription, now) is expected
+
+
+@pytest.mark.parametrize(
+    ("current_subscription", "expected"),
+    [
+        ({"status": "running", "validTo": None}, True),
+        ({"status": "awaiting termination", "validTo": "2099-01-01T00:00:00.000+01:00"}, True),
+        ({"status": "ended", "validTo": "2099-01-01T00:00:00.000+01:00"}, True),
+        ({"status": "ended", "validTo": "2000-01-01T00:00:00.000+01:00"}, False),
+        (None, False),
+    ],
+)
+def test_has_active_subscription_ended_until_valid_to(
+    tibber_connection: tibber.Tibber,
+    current_subscription: dict[str, Any] | None,
+    expected: bool,
+) -> None:
+    """A home with a cancelled subscription keeps an active subscription until validTo."""
+    home = tibber.TibberHome(HOME_ID, tibber_connection)
+    home.info = {"viewer": {"home": {"currentSubscription": current_subscription}}}
+    assert home.has_active_subscription is expected
+
+
+@pytest.mark.parametrize(
+    ("subscriptions", "active"),
+    [
+        ([{"status": "running", "validTo": None}], True),
+        ([{"status": "ended", "validTo": "2099-01-01T00:00:00.000+01:00"}], True),
+        ([{"status": "ended", "validTo": "2000-01-01T00:00:00.000+01:00"}], False),
+        ([{"status": "awaiting market", "validTo": None}], False),
+        ([], False),
+    ],
+)
+async def test_update_info_active_homes_with_ended_subscription(
+    tibber_connection: tibber.Tibber,
+    mock_websession: MagicMock,
+    subscriptions: list[dict[str, Any]],
+    active: bool,
+) -> None:
+    """update_info treats a cancelled subscription as active until validTo."""
+    payload = {
+        "data": {
+            "viewer": {
+                "name": "Test",
+                "userId": "user",
+                "homes": [{"id": HOME_ID, "subscriptions": subscriptions}],
+                "websocketSubscriptionUrl": None,
+            },
+        },
+    }
+    mock_websession.post = AsyncMock(return_value=_json_response(payload))
+    await tibber_connection.update_info()
+    assert tibber_connection.get_home_ids(only_active=False) == [HOME_ID]
+    assert tibber_connection.get_home_ids(only_active=True) == ([HOME_ID] if active else [])
