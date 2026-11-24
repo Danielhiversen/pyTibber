@@ -15,6 +15,15 @@ class SubscriptionFailedError(TibberError):
     """Exception raised when subscription fails."""
 
 
+class RealTimeConsumptionDisabledError(TibberError):
+    """Exception raised when a home is confirmed to have real time consumption disabled.
+
+    Passed to the `on_error` callback of `TibberHome.rt_subscribe`. This error is terminal: the
+    resubscribe loop has stopped and will not retry on its own. To resume, call `rt_subscribe`
+    again, from a separate task rather than directly from the callback, and rate limit the retries.
+    """
+
+
 class UserAgentMissingError(TibberError):
     """Exception raised when user agent is missing."""
 

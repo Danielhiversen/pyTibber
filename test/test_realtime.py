@@ -6,6 +6,7 @@ import asyncio
 import gc
 import json
 import weakref
+from contextlib import suppress
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -15,11 +16,13 @@ from gql.transport.common.adapters.websockets import WebSocketsAdapter
 from gql.transport.exceptions import TransportConnectionFailed, TransportError
 from websockets.asyncio.connection import State
 
+import tibber
 from tibber.exceptions import SubscriptionEndpointMissingError, WebsocketReconnectedError, WebsocketTransportError
 from tibber.realtime import TibberRT, TibberWebsocketsTransport
+from tibber.token_manager import TokenManager
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import AsyncGenerator, Generator
 
 
 @pytest.fixture
@@ -31,7 +34,7 @@ def timeout() -> int:
 async def tibber_rt_fixture(mock_client: MagicMock, timeout: int) -> TibberRT:  # noqa: ARG001, ASYNC109
     """Create a TibberRT instance for testing."""
     tibber_rt = TibberRT(
-        access_token="test_token",
+        token_manager=TokenManager("test_token"),
         timeout=timeout,
         user_agent="test_agent",
         ssl=True,
@@ -59,6 +62,7 @@ def mock_client_fixture() -> Generator[MagicMock]:
         async def mock_connect_async(**kwargs: Any) -> MagicMock:  # noqa: ANN401, ARG001
             session = mock_client.session = MagicMock(spec=AsyncClientSession)
             mock_client.transport.adapter.websocket = MagicMock(state=State.OPEN)
+            mock_client.transport._tibber_connected.set()  # simulate _after_connect  # noqa: SLF001
             await asyncio.sleep(0)  # Simulate some delay in connecting
             return session
 
@@ -115,7 +119,7 @@ async def test_subscription_running(
 async def test_update_endpoint(mock_client: MagicMock) -> None:
     """Test update subscription endpoint."""
     tibber_rt = TibberRT(
-        access_token="test_token",
+        token_manager=TokenManager("test_token"),
         timeout=30,
         user_agent="test_agent",
         ssl=True,
@@ -178,22 +182,21 @@ async def test_update_endpoint(mock_client: MagicMock) -> None:
     assert mock_client.connect_async.call_count == 2
 
 
-async def test_reconnect_rebuilds_transport_when_token_unchanged(
+async def test_reconnect_always_rebuilds_transport(
     mock_client: MagicMock,
 ) -> None:
-    """Rebuild the transport on reconnect even if the refreshed token is unchanged."""
+    """reconnect() must always tear down and rebuild the transport."""
     tibber_rt = TibberRT(
-        access_token="test_token",
+        token_manager=TokenManager("test_token"),
         timeout=30,
         user_agent="test_agent",
         ssl=True,
-        refresh_access_token=AsyncMock(return_value="test_token"),
     )
     await tibber_rt.set_subscription_endpoint("wss://test.endpoint")
 
     await tibber_rt.connect()
     first_transport = mock_client.transport
-    # Simulate a dead websocket with an expired but unchanged token
+    # Simulate a dead websocket
     mock_client.transport.adapter.websocket = MagicMock(state=State.CLOSED)
 
     await tibber_rt.reconnect()
@@ -205,13 +208,38 @@ async def test_reconnect_rebuilds_transport_when_token_unchanged(
     await tibber_rt.disconnect()
 
 
+async def test_reconnect_completes_when_refresh_token_callback_raises(
+    mock_client: MagicMock,
+) -> None:
+    """A raising refresh_access_token callback must not abort the reconnect flow."""
+    tibber_connection = tibber.Tibber(
+        access_token="test_token",
+        websession=MagicMock(),
+        user_agent="test_agent",
+        refresh_access_token=AsyncMock(side_effect=Exception),
+    )
+    await tibber_connection.realtime.set_subscription_endpoint("wss://test.endpoint")
+
+    await tibber_connection.realtime.connect()
+    first_transport = mock_client.transport
+    mock_client.transport.adapter.websocket = MagicMock(state=State.CLOSED)
+
+    await tibber_connection.realtime.reconnect()
+
+    mock_client.close_async.assert_awaited_once()
+    assert mock_client.transport is not first_transport
+    assert tibber_connection.realtime.subscription_running is True
+
+    await tibber_connection.realtime.disconnect()
+
+
 async def test_transport_close_times_out_on_hanging_wait_closed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A half-dead websocket must not hang transport.close forever."""
     transport = TibberWebsocketsTransport(
         url="wss://test.endpoint",
-        access_token="test_token",
+        token_manager=TokenManager("test_token"),
         user_agent="test_agent",
         tibber_connected=asyncio.Event(),
     )
@@ -231,7 +259,7 @@ async def test_websocket_transport() -> None:
     tibber_connected = asyncio.Event()
     transport = TibberWebsocketsTransport(
         url="wss://test.endpoint",
-        access_token="test_token",
+        token_manager=TokenManager("test_token"),
         user_agent="test_agent",
         tibber_connected=tibber_connected,
     )
@@ -270,6 +298,64 @@ async def test_websocket_transport() -> None:
     mock_adapter.receive.assert_awaited()
     assert mock_adapter.close.await_count == 1
     assert not tibber_connected.is_set()
+
+
+async def test_initialize_fetches_fresh_token_from_manager() -> None:
+    """_initialize must pull a fresh token from the manager into init_payload before handshake.
+
+    This test guards the gql coupling: if a future gql upgrade renames or removes
+    ``_initialize`` the test will fail loudly, prompting a review of the refresh mechanism.
+    """
+    refresh_callback = AsyncMock(return_value="refreshed_token")
+    token_manager = TokenManager("initial_token", refresh_access_token=refresh_callback)
+    transport = TibberWebsocketsTransport(
+        url="wss://test.endpoint",
+        token_manager=token_manager,
+        user_agent="test_agent",
+        tibber_connected=asyncio.Event(),
+    )
+
+    # Seed a different initial value to verify _initialize overwrites it.
+    assert transport.init_payload["token"] == "initial_token"
+
+    # Stub super()._initialize so we don't need a live websocket.
+    async def noop_super_initialize() -> None:
+        pass
+
+    with patch.object(
+        TibberWebsocketsTransport.__bases__[0],  # WebsocketsTransport
+        "_initialize",
+        new=AsyncMock(side_effect=noop_super_initialize),
+    ):
+        await transport._initialize()  # noqa: SLF001
+
+    assert transport.init_payload["token"] == "refreshed_token"
+    refresh_callback.assert_awaited_once()
+
+
+async def test_initialize_calls_super_after_setting_payload() -> None:
+    """_initialize must call super()._initialize() so the handshake actually runs."""
+    token_manager = TokenManager("test_token")
+    transport = TibberWebsocketsTransport(
+        url="wss://test.endpoint",
+        token_manager=token_manager,
+        user_agent="test_agent",
+        tibber_connected=asyncio.Event(),
+    )
+
+    super_calls: list[str] = []
+
+    async def record_super() -> None:
+        super_calls.append("called")
+
+    with patch.object(
+        TibberWebsocketsTransport.__bases__[0],
+        "_initialize",
+        new=AsyncMock(side_effect=record_super),
+    ):
+        await transport._initialize()  # noqa: SLF001
+
+    assert super_calls == ["called"]
 
 
 async def test_subscribe_raises_when_not_connected(tibber_rt: TibberRT) -> None:
@@ -354,20 +440,37 @@ async def test_reconnect_noop_when_not_connected(
     mock_client.close_async.assert_not_awaited()
 
 
-async def test_set_access_token_reconnects_with_new_token(
+async def test_reconnect_uses_updated_token(
     mock_client: MagicMock,
-    tibber_rt: TibberRT,
 ) -> None:
-    """set_access_token must update the token and reconnect so the new token is used."""
+    """After updating the token in the manager, reconnect must build a transport using it.
+
+    The token is injected into init_payload by _initialize at connect time.  Since
+    mock_client.connect_async does not run the real gql machinery, we verify the manager
+    holds the new token and that a fresh transport was created (old and new are distinct
+    objects).
+    """
+    token_manager = TokenManager("old_token")
+    tibber_rt = TibberRT(
+        token_manager=token_manager,
+        timeout=30,
+        user_agent="test_agent",
+        ssl=True,
+    )
+    await tibber_rt.set_subscription_endpoint("wss://test.endpoint")
+
     await tibber_rt.connect()
+    first_transport = mock_client.transport
     mock_client.connect_async.reset_mock()
     mock_client.close_async.reset_mock()
 
-    await tibber_rt.set_access_token("new_token")
+    token_manager.set_access_token("new_token")
+    await tibber_rt.reconnect()
 
     mock_client.close_async.assert_awaited_once()
     mock_client.connect_async.assert_awaited_once()
-    assert mock_client.transport.init_payload["token"] == "new_token"
+    assert mock_client.transport is not first_transport
+    assert token_manager.access_token == "new_token"
 
 
 @pytest.mark.parametrize("timeout", [0])
@@ -383,6 +486,128 @@ async def test_connect_timeout_leaves_with_session_and_subscription_not_running(
     await tibber_rt.disconnect()
 
     mock_client.close_async.assert_awaited_once()
+    assert tibber_rt.subscription_running is False
+
+
+@pytest.mark.parametrize("timeout", [0])
+async def test_connect_timeout_recovers_after_late_success(
+    mock_client: MagicMock,
+    tibber_rt: TibberRT,
+) -> None:
+    """A successful background connection must restore subscription availability."""
+    connected = asyncio.Event()
+    completed = asyncio.Event()
+
+    async def delayed_connect(**kwargs: Any) -> MagicMock:  # noqa: ANN401, ARG001
+        session = mock_client.session = MagicMock(spec=AsyncClientSession)
+        await connected.wait()
+        completed.set()
+        return session
+
+    mock_client.connect_async = AsyncMock(side_effect=delayed_connect)
+    await tibber_rt.connect()
+    assert tibber_rt.subscription_running is False
+
+    connected.set()
+    await completed.wait()
+    await asyncio.sleep(0)  # Let connection completion callbacks run.
+
+    assert tibber_rt.subscription_running is True
+    await tibber_rt.disconnect()
+    assert tibber_rt.subscription_running is False
+
+
+@pytest.mark.parametrize("timeout", [0])
+@pytest.mark.parametrize("error_type", [RuntimeError, asyncio.CancelledError])
+async def test_connect_timeout_unsuccessful_completion(
+    mock_client: MagicMock,
+    tibber_rt: TibberRT,
+    error_type: type[BaseException],
+) -> None:
+    """Failed and cancelled background connections must remain unavailable."""
+    finished = asyncio.Event()
+    completed = asyncio.Event()
+
+    async def failed_connect(**kwargs: Any) -> None:  # noqa: ANN401, ARG001
+        mock_client.session = MagicMock(spec=AsyncClientSession)
+        await finished.wait()
+        completed.set()
+        raise error_type
+
+    mock_client.connect_async = AsyncMock(side_effect=failed_connect)
+    await tibber_rt.connect()
+    finished.set()
+    await completed.wait()
+    await asyncio.sleep(0)  # Let connection completion callbacks run.
+
+    assert tibber_rt.subscription_running is False
+    await tibber_rt.disconnect()
+
+
+async def test_connect_caller_cancelled_before_late_success(
+    mock_client: MagicMock,
+    tibber_rt: TibberRT,
+) -> None:
+    """Caller cancellation must not leave a successful connection without a session."""
+    started = asyncio.Event()
+    connected = asyncio.Event()
+    completed = asyncio.Event()
+    original_connect = mock_client.connect_async
+
+    async def delayed_connect(**kwargs: Any) -> MagicMock:  # noqa: ANN401
+        session = await original_connect(**kwargs)
+        started.set()
+        await connected.wait()
+        completed.set()
+        return session
+
+    async def measurements(request: Any) -> AsyncGenerator[dict[str, int]]:  # noqa: ANN401, ARG001
+        yield {"power": 123}
+
+    mock_client.connect_async = AsyncMock(side_effect=delayed_connect)
+    caller = asyncio.create_task(tibber_rt.connect())
+    await started.wait()
+    caller.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await caller
+
+    connected.set()
+    await completed.wait()
+    await asyncio.sleep(0)  # Let connection completion callbacks run.
+    assert tibber_rt.subscription_running is True
+    await tibber_rt.connect()
+    mock_client.session.subscribe = measurements
+    assert [data async for data in tibber_rt.subscribe(MagicMock())] == [{"power": 123}]
+
+    await tibber_rt.disconnect()
+    mock_client.close_async.assert_awaited_once()
+    assert tibber_rt.subscription_running is False
+
+
+@pytest.mark.parametrize("timeout", [0])
+async def test_disconnect_ignores_late_connection_success(
+    mock_client: MagicMock,
+    tibber_rt: TibberRT,
+) -> None:
+    """A connection completing during disconnect must not restore availability."""
+    started = asyncio.Event()
+    completed = asyncio.Event()
+
+    async def delayed_connect(**kwargs: Any) -> MagicMock:  # noqa: ANN401, ARG001
+        session = mock_client.session = MagicMock(spec=AsyncClientSession)
+        started.set()
+        with suppress(asyncio.CancelledError):
+            await asyncio.Event().wait()
+        completed.set()
+        return session
+
+    mock_client.connect_async = AsyncMock(side_effect=delayed_connect)
+    await tibber_rt.connect()
+    await started.wait()
+    await tibber_rt.disconnect()
+    await completed.wait()
+    await asyncio.sleep(0)  # Let connection completion callbacks run.
+
     assert tibber_rt.subscription_running is False
 
 
@@ -457,3 +682,45 @@ async def test_subscribe_transport_connection_failed_without_on_error_raises_rec
     await unblock_task
 
     assert tibber_rt.subscription_running is True
+
+
+async def test_subscribe_blocks_until_handshake_completes(
+    mock_client: MagicMock,
+    tibber_rt: TibberRT,
+) -> None:
+    """subscribe must wait for _tibber_connected before calling session.subscribe.
+
+    Since the connection may not be finished when connect_async returns,
+    wait for the connected event before subscribing.
+    """
+    await tibber_rt.connect()
+
+    # Simulate the watchdog outage path: reconnect() → _create_client() clears the
+    # event. If the new transport's connect times out, _tibber_connected stays clear.
+    tibber_rt._tibber_connected.clear()  # noqa: SLF001
+
+    subscribe_called = asyncio.Event()
+
+    async def mock_subscribe(*args: Any, **kwargs: Any) -> Any:  # noqa: ANN401, ARG001
+        subscribe_called.set()
+        yield {"key": "value"}
+
+    mock_client.session.subscribe = mock_subscribe
+
+    # subscribe() must block on _tibber_connected.wait() — not call session.subscribe,
+    # which would trigger _send_query on a transport with no subprotocol attribute.
+    results: list[Any] = []
+
+    async def consume() -> None:
+        results.extend([item async for item in tibber_rt.subscribe(MagicMock())])
+
+    task = asyncio.create_task(consume())
+    # Yield once so the task can start and reach _tibber_connected.wait().
+    await asyncio.sleep(0)
+
+    assert not subscribe_called.is_set(), "session.subscribe must not be called before handshake"
+
+    # Simulate the handshake completing (as _after_connect does after reconnect succeeds).
+    tibber_rt._tibber_connected.set()  # noqa: SLF001
+    await task
+    assert results == [{"key": "value"}]
