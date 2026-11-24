@@ -245,16 +245,15 @@ class TibberHome:
         since: dt.datetime | str | None = None,
         until: dt.datetime | str | None = None,
     ) -> None:
-        """Update price info from the Data API asynchronously."""
-        try:
-            data = await self._tibber_control.data_api.get_prices(
-                self._home_id,
-                since=since,
-                until=until,
-            )
-        except (HttpExceptionError, aiohttp.ClientError) as err:
-            _LOGGER.error("Could not get price data for home %s: %s", self._home_id, err)
-            return
+        """Update price info from the Data API asynchronously.
+
+        Errors are raised to the caller, so it can retry. Known prices are kept on error.
+        """
+        data = await self._tibber_control.data_api.get_prices(
+            self._home_id,
+            since=since,
+            until=until,
+        )
 
         if not data:
             _LOGGER.error("No price data returned for home %s", self._home_id)

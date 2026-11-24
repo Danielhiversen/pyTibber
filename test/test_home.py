@@ -14,6 +14,7 @@ import pytest
 import tibber
 from tibber.exceptions import (
     InvalidLoginError,
+    RateLimitExceededError,
     RealTimeConsumptionDisabledError,
     SubscriptionFailedError,
     WebsocketReconnectedError,
@@ -1343,6 +1344,30 @@ async def test_home_update_price_info_populates_price_total(
         "2026-11-24T06:00:00+01:00": 0.45,
         "2026-11-24T06:15:00+01:00": 0.50,
     }
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        aiohttp.ClientError("Network error"),
+        InvalidLoginError(401, "Invalid token"),
+        RateLimitExceededError(429, "Rate limited", "RATE_LIMITED", 1.0),
+    ],
+)
+async def test_home_update_price_info_raises_and_keeps_prices(
+    home: tibber.TibberHome,
+    tibber_connection: tibber.Tibber,
+    monkeypatch: pytest.MonkeyPatch,
+    error: Exception,
+) -> None:
+    """A failed price fetch must reach the caller, so it can retry, and keep the known prices."""
+    home.price_total = {"2026-11-24T00:00:00+01:00": 0.25}
+    monkeypatch.setattr(tibber_connection.data_api, "get_prices", AsyncMock(side_effect=error))
+
+    with pytest.raises(type(error)):
+        await home.update_price_info()
+
+    assert home.price_total == {"2026-11-24T00:00:00+01:00": 0.25}
 
 
 async def test_current_price_data_from_data_api_prices(
