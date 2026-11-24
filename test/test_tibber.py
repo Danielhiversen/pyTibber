@@ -198,25 +198,6 @@ async def test_tibber_notification():
 
 
 @pytest.mark.asyncio
-async def test_tibber_current_price_rank():
-    async with aiohttp.ClientSession() as session:
-        tibber_connection = tibber.Tibber(
-            websession=session,
-            user_agent="test",
-        )
-        await tibber_connection.update_info()
-
-        homes = tibber_connection.get_homes()
-        assert len(homes) == 1, "No homes found"
-
-        await homes[0].update_info_and_price_info()
-        _, _, price_rank = homes[0].current_price_data()
-
-        assert isinstance(price_rank, float), "Price rank was unset"
-        assert 0 <= price_rank <= 1, "Price rank is out of range"
-
-
-@pytest.mark.asyncio
 async def test_tibber_get_historic_data():
     async with aiohttp.ClientSession() as session:
         tibber_connection = tibber.Tibber(

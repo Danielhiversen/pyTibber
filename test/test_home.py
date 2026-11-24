@@ -1343,3 +1343,24 @@ async def test_home_update_price_info_populates_price_total(
         "2026-11-24T06:00:00+01:00": 0.45,
         "2026-11-24T06:15:00+01:00": 0.50,
     }
+
+
+async def test_current_price_data_from_data_api_prices(
+    home: tibber.TibberHome,
+    mock_websession: MagicMock,
+    frozen_clock: type[FixedDateTime],
+) -> None:
+    """The current price and its rank among today's prices come from the Data API prices."""
+    items = [
+        {"time": f"2026-05-06T{time}:00+00:00", "consumption": {"price": price}}
+        for time, price in {"02:00": 1.0, "02:15": 3.0, "02:30": 2.0, "02:45": 4.0}.items()
+    ]
+    mock_websession.request = AsyncMock(return_value=_json_response({"currency": "NOK", "items": items}))
+    await home.update_price_info()
+
+    with patch("tibber.home.dt.datetime", frozen_clock):
+        price, price_time, price_rank = home.current_price_data()
+
+    assert price == 2.0
+    assert price_time == dt.datetime(2026, 5, 6, 2, 30, tzinfo=dt.UTC)
+    assert price_rank == 0.5

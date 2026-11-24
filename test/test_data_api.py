@@ -185,7 +185,8 @@ def test_tibber_device_properties_match_payload() -> None:
 
 @pytest.mark.asyncio
 async def test_get_prices_builds_query_params(
-    data_api: TibberDataAPI, monkeypatch: pytest.MonkeyPatch,
+    data_api: TibberDataAPI,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify get_prices forwards datetime/string params to _make_request."""
     mocked_make_request = AsyncMock(return_value={"currency": "NOK", "items": []})
@@ -211,7 +212,8 @@ async def test_get_prices_builds_query_params(
 
 @pytest.mark.asyncio
 async def test_get_prices_defaults_to_no_params(
-    data_api: TibberDataAPI, monkeypatch: pytest.MonkeyPatch,
+    data_api: TibberDataAPI,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Verify get_prices without params requests the endpoint with no query params."""
     mocked_make_request = AsyncMock(return_value={})
