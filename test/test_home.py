@@ -772,3 +772,31 @@ async def test_rt_subscribe_recovers_from_repeated_errors(
     assert mock_realtime.connect.await_count == 3
 
     home.rt_unsubscribe()
+
+
+async def test_home_update_price_info_populates_price_total(
+    home: tibber.TibberHome,
+    mock_websession: MagicMock,
+) -> None:
+    """Verify that update_price_info populates price_total and currency from the Data API."""
+    price_payload = {
+        "currency": "EUR",
+        "items": [
+            {"time": "2026-11-24T06:00:00+01:00", "consumption": {"price": 0.45}},
+            {"time": "2026-11-24T06:15:00+01:00", "consumption": {"price": 0.50}},
+        ],
+    }
+    mock_response = MagicMock()
+    mock_response.status = 200
+    mock_response.content_type = "application/json"
+    mock_response.json = AsyncMock(return_value=price_payload)
+    mock_websession.request = AsyncMock(return_value=mock_response)
+
+    await home.update_price_info()
+
+    assert home.currency == "EUR"
+    assert home.price_unit == "EUR/kWh"
+    assert home.price_total == {
+        "2026-11-24T06:00:00+01:00": 0.45,
+        "2026-11-24T06:15:00+01:00": 0.50,
+    }

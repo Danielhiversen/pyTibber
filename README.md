@@ -44,7 +44,7 @@ async def start():
   print(home.address1)
 
   await home.update_price_info()
-  print(home.current_price_info)
+  print(home.price_total)
 
   # await tibber_connection.close_connection()
 

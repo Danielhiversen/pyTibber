@@ -167,3 +167,42 @@ def test_tibber_device_properties_match_payload() -> None:
     assert device.model == "Test Model"
     assert device.home_id == "home-1"
     assert [sensor.id for sensor in device.sensors] == ["sensor-1"]
+
+
+@pytest.mark.asyncio
+async def test_get_prices_builds_query_params(
+    data_api: TibberDataAPI, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify get_prices forwards datetime/string params to _make_request."""
+    mocked_make_request = AsyncMock(return_value={"currency": "NOK", "items": []})
+    monkeypatch.setattr(data_api, "_make_request", mocked_make_request)
+
+    await data_api.get_prices(
+        "home-1",
+        since="2026-01-01T00:00:00Z",
+        until="2026-01-02T00:00:00Z",
+        cursor="cursor-token-123",
+    )
+
+    mocked_make_request.assert_awaited_once_with(
+        "GET",
+        "/v1/homes/home-1/prices",
+        params={
+            "since": "2026-01-01T00:00:00Z",
+            "until": "2026-01-02T00:00:00Z",
+            "cursor": "cursor-token-123",
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_prices_defaults_to_no_params(
+    data_api: TibberDataAPI, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify get_prices without params requests the endpoint with no query params."""
+    mocked_make_request = AsyncMock(return_value={})
+    monkeypatch.setattr(data_api, "_make_request", mocked_make_request)
+
+    await data_api.get_prices("home-1")
+
+    mocked_make_request.assert_awaited_once_with("GET", "/v1/homes/home-1/prices", params=None)

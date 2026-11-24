@@ -143,32 +143,10 @@ UPDATE_CURRENT_PRICE = """
         }
         """
 
-UPDATE_INFO_PRICE = """
+UPDATE_INFO = """
         {
           viewer {
             home(id: "%s") {
-              currentSubscription {
-                priceInfo(resolution: QUARTER_HOURLY) {
-                  current {
-                    currency
-                    energy
-                    tax
-                    total
-                    startsAt
-                    level
-                  }
-                  today {
-                    total
-                    startsAt
-                    level
-                  }
-                  tomorrow {
-                    total
-                    startsAt
-                    level
-                  }
-                }
-              }
               appNickname
               features {
                 realTimeConsumptionEnabled
@@ -214,5 +192,4 @@ UPDATE_INFO_PRICE = """
             }
           }
         }
-
         """

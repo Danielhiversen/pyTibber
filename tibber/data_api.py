@@ -252,6 +252,49 @@ class TibberDataAPI:
         response = await self._make_request("GET", "/v1/homes")
         return response.get("homes", [])
 
+    async def get_prices(
+        self,
+        home_id: str,
+        since: dt.datetime | str | None = None,
+        until: dt.datetime | str | None = None,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        """Get energy prices for a home from the Data API.
+
+        Returns 15-minute energy prices for a home, per kWh in the home's currency,
+        VAT included where applicable. Requires the data-api-prices-read scope.
+
+        Without parameters, returns the newest published prices, up to one page (up to 48 hours / 192 intervals).
+        Use `since` to page forward from a time, or `until` to page backward, then follow `next` and `prev` links.
+
+        :param home_id: The ID of the home.
+        :param since: Start time to page forward from (needs offset, e.g. ISO 8601 string or aware datetime).
+        :param until: End time to page backward from (needs offset, e.g. ISO 8601 string or aware datetime).
+        :param cursor: Optional cursor for pagination.
+        :return: Dict containing 'currency', 'query', 'items', 'prev', 'next'.
+        """
+        params: dict[str, Any] = {}
+        if since is not None:
+            if isinstance(since, dt.datetime):
+                if since.tzinfo is None:
+                    since = since.replace(tzinfo=dt.UTC)
+                params["since"] = since.isoformat()
+            else:
+                params["since"] = str(since)
+
+        if until is not None:
+            if isinstance(until, dt.datetime):
+                if until.tzinfo is None:
+                    until = until.replace(tzinfo=dt.UTC)
+                params["until"] = until.isoformat()
+            else:
+                params["until"] = str(until)
+
+        if cursor is not None:
+            params["cursor"] = str(cursor)
+
+        return await self._make_request("GET", f"/v1/homes/{home_id}/prices", params=params or None)
+
     async def get_devices_for_home(self, home_id: str) -> list[dict[str, Any]]:
         """Get all devices for a specific home."""
         response = await self._make_request("GET", f"/v1/homes/{home_id}/devices")

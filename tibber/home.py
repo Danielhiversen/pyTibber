@@ -15,14 +15,19 @@ import aiohttp
 from gql import gql
 
 from .const import RESOLUTION_DAILY, RESOLUTION_HOURLY, RESOLUTION_MONTHLY, RESOLUTION_WEEKLY
-from .exceptions import SubscriptionFailedError, WebsocketReconnectedError, WebsocketTransportError
+from .exceptions import (
+    HttpExceptionError,
+    SubscriptionFailedError,
+    WebsocketReconnectedError,
+    WebsocketTransportError,
+)
 from .gql_queries import (
     HISTORIC_DATA,
     HISTORIC_DATA_DATE,
     HISTORIC_PRICE,
     LIVE_SUBSCRIBE,
     REAL_TIME_CONSUMPTION_ENABLED,
-    UPDATE_INFO_PRICE,
+    UPDATE_INFO,
 )
 
 if TYPE_CHECKING:
@@ -81,6 +86,7 @@ class TibberHome:
         """
         self._tibber_control = tibber_control
         self._home_id: str = home_id
+        self._currency: str = ""
         self.price_total: dict[str, float] = {}
         self._rt_power: list[tuple[dt.datetime, float]] = []
         self.info: dict[str, dict[Any, Any]] = {}
@@ -93,7 +99,7 @@ class TibberHome:
         self._rt_callback: Callable[..., Any] | None = None
         self._rt_on_error: Callable[[Exception], None] | None = None
         self._rt_subscription_timeout_task: asyncio.Task[None] | None = None
-        self._has_real_time_consumption: None | bool = None
+        self._has_real_time_consumption: bool | None = None
         self._real_time_consumption_suggested_disabled: dt.datetime | None = None
         self._resubscribe_task: asyncio.Task[None] | None = None
 
@@ -224,51 +230,64 @@ class TibberHome:
         return self._hourly_production_data.data
 
     async def update_info(self) -> None:
-        """Update home info and the current price info asynchronously."""
-        await self.update_info_and_price_info()
-
-    async def update_info_and_price_info(self) -> None:
-        """Update home info and all price info asynchronously."""
-        if not (data := await self._tibber_control.execute(UPDATE_INFO_PRICE % self._home_id)):
+        """Update home info asynchronously."""
+        if not (data := await self._tibber_control.execute(UPDATE_INFO % self._home_id)):
             _LOGGER.error("Could not get the data.")
             return
         self.info = data
 
         self._update_has_real_time_consumption(self._extract_real_time_consumption_enabled(data))
 
-        # Handle inactive homes where currentSubscription might be None
-        # Access currentSubscription, handle missing keys
+    async def update_price_info(
+        self,
+        since: dt.datetime | str | None = None,
+        until: dt.datetime | str | None = None,
+    ) -> None:
+        """Update price info from the Data API asynchronously."""
         try:
-            viewer = self.info["viewer"]
-        except KeyError as err:
-            _LOGGER.error("Missing 'viewer' key in info for home %s: %s", self._home_id, err)
-            self.price_total = {}
-            return
-        try:
-            home = viewer["home"]
-        except KeyError as err:
-            _LOGGER.error("Missing 'home' key in viewer for home %s: %s", self._home_id, err)
-            self.price_total = {}
-            return
-        current_subscription = home.get("currentSubscription")
-        if current_subscription is None:
-            _LOGGER.debug("No active subscription for home %s", self._home_id)
-            self.price_total = {}
+            data = await self._tibber_control.data_api.get_prices(
+                self._home_id,
+                since=since,
+                until=until,
+            )
+        except (HttpExceptionError, aiohttp.ClientError) as err:
+            _LOGGER.error("Could not get price data for home %s: %s", self._home_id, err)
             return
 
-        price_info = current_subscription.get("priceInfo")
-        if price_info is None:
-            _LOGGER.debug("No price info available for home %s", self._home_id)
-            self.price_total = {}
+        if not data:
+            _LOGGER.error("No price data returned for home %s", self._home_id)
             return
 
-        today = price_info.get("today", [])
-        tomorrow = price_info.get("tomorrow", [])
-        try:
-            self.price_total = {item["startsAt"]: item["total"] for item in today + tomorrow}
-        except (KeyError, TypeError) as err:
-            _LOGGER.error("Malformed price info data for home %s: %s", self._home_id, err)
-            self.price_total = {}
+        if currency := data.get("currency"):
+            self._currency = currency
+
+        items = data.get("items", [])
+        if not items:
+            _LOGGER.debug("No price items returned for home %s", self._home_id)
+            return
+
+        price_total: dict[str, float] = {}
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            time_str = item.get("time")
+            if not time_str:
+                continue
+            consumption = item.get("consumption")
+            if isinstance(consumption, dict):
+                price = consumption.get("price")
+                if price is not None:
+                    try:
+                        price_total[time_str] = float(price)
+                    except (ValueError, TypeError):
+                        continue
+
+        self.price_total = price_total
+
+    async def update_info_and_price_info(self) -> None:
+        """Update home info and all price info asynchronously."""
+        await self.update_info()
+        await self.update_price_info()
 
     async def update_real_time_consumption_enabled(self) -> None:
         """Update the real time consumption enabled status."""
@@ -327,7 +346,7 @@ class TibberHome:
         ]
 
     @property
-    def has_real_time_consumption(self) -> None | bool:
+    def has_real_time_consumption(self) -> bool | None:
         """Return home id."""
         return self._has_real_time_consumption
 
@@ -356,11 +375,7 @@ class TibberHome:
     @property
     def currency(self) -> str:
         """Return the currency."""
-        try:
-            return self.info["viewer"]["home"]["currentSubscription"]["priceInfo"]["current"]["currency"]
-        except (KeyError, TypeError, IndexError):
-            _LOGGER.error("Could not find currency.")
-        return ""
+        return self._currency
 
     @property
     def country(self) -> str:
@@ -591,7 +606,10 @@ class TibberHome:
         except (TimeoutError, aiohttp.ClientError):
             # Transport errors are already logged at debug level inside execute.
             _LOGGER.warning("Home %s: %s", self.home_id, failure_message)
-        except Exception:  # noqa: BLE001
+        except HttpExceptionError as err:
+            # Known API errors (e.g. an expired token) are expected here and don't warrant a traceback.
+            _LOGGER.warning("Home %s: %s: %s", self.home_id, failure_message, err)
+        except Exception:
             _LOGGER.warning("Home %s: %s", self.home_id, failure_message, exc_info=True)
 
     def rt_unsubscribe(self) -> None:
