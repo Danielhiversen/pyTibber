@@ -105,7 +105,7 @@ class TibberHome:
         self._rt_callback: Callable[..., Any] | None = None
         self._rt_on_error: Callable[[Exception], None] | None = None
         self._rt_subscription_timeout_task: asyncio.Task[None] | None = None
-        self._has_real_time_consumption: bool | None = None
+        self._has_real_time_consumption: None | bool = None
         self._real_time_consumption_suggested_disabled: dt.datetime | None = None
         self._resubscribe_task: asyncio.Task[None] | None = None
 
@@ -398,7 +398,7 @@ class TibberHome:
         ]
 
     @property
-    def has_real_time_consumption(self) -> bool | None:
+    def has_real_time_consumption(self) -> None | bool:
         """Return home id."""
         return self._has_real_time_consumption
 
@@ -426,7 +426,7 @@ class TibberHome:
 
     @property
     def currency(self) -> str:
-        """Return the currency."""
+        """Return the currency of the prices, empty until prices have been fetched."""
         return self._currency
 
     @property
@@ -704,7 +704,7 @@ class TibberHome:
         except HttpExceptionError as err:
             # Known API errors (e.g. an expired token) are expected here and don't warrant a traceback.
             _LOGGER.warning("Home %s: %s: %s", self.home_id, failure_message, err)
-        except Exception:
+        except Exception:  # noqa: BLE001
             _LOGGER.warning("Home %s: %s", self.home_id, failure_message, exc_info=True)
 
     def rt_unsubscribe(self) -> None:

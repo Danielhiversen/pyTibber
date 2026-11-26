@@ -1,5 +1,6 @@
 """Tests for Tibber Data API."""
 
+import datetime as dt
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -150,7 +151,7 @@ async def test_get_all_devices_flattens_device_lists(
         if endpoint.endswith("/devices"):
             home_id = endpoint.split("/")[3]
             return devices_payload[home_id]
-        device_id = endpoint.rsplit("/", maxsplit=1)[-1]
+        device_id = endpoint.split("/")[-1]
         return device_detail_payload[device_id]
 
     monkeypatch.setattr(data_api, "_make_request", AsyncMock(side_effect=fake_make_request))
@@ -223,6 +224,27 @@ async def test_get_prices_defaults_to_no_params(
     await data_api.get_prices("home-1")
 
     mocked_make_request.assert_awaited_once_with("GET", "/v1/homes/home-1/prices", params=None)
+
+
+@pytest.mark.asyncio
+async def test_get_prices_with_since_until_datetime(data_api: TibberDataAPI, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ensure get_prices formats datetime objects into ISO 8601 strings."""
+    mocked_make_request = AsyncMock(return_value={})
+    monkeypatch.setattr(data_api, "_make_request", mocked_make_request)
+
+    since = dt.datetime(2026, 10, 28, 0, 0, 0, tzinfo=dt.UTC)
+    until = dt.datetime(2026, 10, 30, 0, 0, 0, tzinfo=dt.timezone(dt.timedelta(hours=2)))
+
+    await data_api.get_prices("home-1", since=since, until=until)
+
+    mocked_make_request.assert_awaited_once_with(
+        "GET",
+        "/v1/homes/home-1/prices",
+        params={
+            "since": "2026-10-28T00:00:00+00:00",
+            "until": "2026-10-30T00:00:00+02:00",
+        },
+    )
 
 
 @pytest.mark.asyncio

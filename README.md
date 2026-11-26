@@ -44,9 +44,9 @@ async def start():
   print(home.address1)
 
   # Prices come from the Tibber Data API, which needs an OAuth access token with the
-  # data-api-prices-read scope, not the demo token.
+  # data-api-prices-read scope (https://data-api.tibber.com/docs/prices/), not the demo token.
   # await home.update_price_info()
-  # print(home.price_total)
+  # print(home.current_price_data())
 
   # await tibber_connection.close_connection()
 

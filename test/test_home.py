@@ -1045,16 +1045,10 @@ async def test_rt_resubscribe_recovers_from_degraded_status_payload(
 
 
 def _info_price_payload(rt_enabled: bool | None, *, with_features: bool = True) -> dict[str, Any]:
-    """Return an UPDATE_INFO_PRICE payload reporting the given real time consumption status."""
+    """Return an UPDATE_INFO payload reporting the given real time consumption status."""
     home_payload: dict[str, Any] = {
         "id": HOME_ID,
-        "currentSubscription": {
-            "status": "running",
-            "priceInfo": {
-                "today": [{"startsAt": "2026-05-06T00:00:00+02:00", "total": 1.0}],
-                "tomorrow": [],
-            },
-        },
+        "currentSubscription": {"status": "running"},
     }
     if with_features:
         home_payload["features"] = {"realTimeConsumptionEnabled": rt_enabled}

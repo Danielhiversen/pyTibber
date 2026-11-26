@@ -29,6 +29,7 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 MAX_RATE_LIMIT_ATTEMPTS = 2
+PRICES_NOT_AVAILABLE_ERROR_TYPE = "https://developer.tibber.com/errors/prices-not-available"
 
 SensorValue: TypeAlias = bool | int | float | str | None
 
@@ -221,10 +222,7 @@ class TibberDataAPI:
         detail, extension_code = await self._read_error_response(response)
         response.close()
 
-        if (
-            status == HTTPStatus.FORBIDDEN
-            and extension_code == "https://developer.tibber.com/errors/prices-not-available"
-        ):
+        if status == HTTPStatus.FORBIDDEN and extension_code == PRICES_NOT_AVAILABLE_ERROR_TYPE:
             raise PricesNotAvailableError(status, detail, extension_code)
 
         fatal_codes: dict[int, str] = {
