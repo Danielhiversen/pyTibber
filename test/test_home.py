@@ -12,8 +12,10 @@ import aiohttp
 import pytest
 
 import tibber
+from tibber.data_api import PriceDetails, PriceInterval
 from tibber.exceptions import (
     InvalidLoginError,
+    PricesNotAvailableError,
     RateLimitExceededError,
     RealTimeConsumptionDisabledError,
     SubscriptionFailedError,
@@ -1044,7 +1046,7 @@ async def test_rt_resubscribe_recovers_from_degraded_status_payload(
     home.rt_unsubscribe()
 
 
-def _info_price_payload(rt_enabled: bool | None, *, with_features: bool = True) -> dict[str, Any]:
+def _info_payload(rt_enabled: bool | None, *, with_features: bool = True) -> dict[str, Any]:
     """Return an UPDATE_INFO payload reporting the given real time consumption status."""
     home_payload: dict[str, Any] = {
         "id": HOME_ID,
@@ -1165,40 +1167,38 @@ async def test_update_info_false_status_keeps_true_within_grace(
     home: tibber.TibberHome,
     mock_websession: MagicMock,
 ) -> None:
-    """A False status from the info and price query must only arm the timer, and not lose prices."""
-    mock_websession.post = AsyncMock(return_value=_json_response(_info_price_payload(rt_enabled=False)))
+    """A False status from the info query must only arm the timer."""
+    mock_websession.post = AsyncMock(return_value=_json_response(_info_payload(rt_enabled=False)))
 
-    await home.update_info_and_price_info()
+    await home.update_info()
 
     assert home.has_real_time_consumption is True
-    assert home.price_total == {"2026-05-06T00:00:00+02:00": 1.0}
 
 
 async def test_update_info_malformed_status_is_a_no_op(
     home: tibber.TibberHome,
     mock_websession: MagicMock,
 ) -> None:
-    """An info and price payload without a usable status must not change the last known status."""
+    """An info payload without a usable status must not change the last known status."""
     mock_websession.post = AsyncMock(
-        return_value=_json_response(_info_price_payload(None, with_features=False)),
+        return_value=_json_response(_info_payload(None, with_features=False)),
     )
 
-    await home.update_info_and_price_info()
+    await home.update_info()
 
     assert home.has_real_time_consumption is True
-    assert home.price_total == {"2026-05-06T00:00:00+02:00": 1.0}
 
 
 @patch("tibber.home.RESUBSCRIBE_WAIT_TIME", 0)
-async def test_live_data_restarts_grace_period_armed_by_price_poll(
+async def test_live_data_restarts_grace_period_armed_by_info_poll(
     home: tibber.TibberHome,
     mock_realtime: MagicMock,
     mock_websession: MagicMock,
     frozen_clock: type[FixedDateTime],
 ) -> None:
-    """A timer armed by a periodic info and price poll must also be cleared by live data.
+    """A timer armed by a periodic info poll must also be cleared by live data.
 
-    This is the shape a consumer normally hits in production: it polls prices on a
+    This is the shape a consumer normally hits in production: it polls home info on a
     timer while the real time subscription runs, so a transient False can arm the grace-period
     timer without any resubscribe happening at all.
     """
@@ -1221,9 +1221,9 @@ async def test_live_data_restarts_grace_period_armed_by_price_poll(
         await home.rt_subscribe(measurements.put_nowait)
         await asyncio.wait_for(measurements.get(), timeout=1.0)
 
-        # A price poll reports real time consumption disabled, arming the grace-period timer.
-        mock_websession.post = AsyncMock(return_value=_json_response(_info_price_payload(rt_enabled=False)))
-        await home.update_info_and_price_info()
+        # An info poll reports real time consumption disabled, arming the grace-period timer.
+        mock_websession.post = AsyncMock(return_value=_json_response(_info_payload(rt_enabled=False)))
+        await home.update_info()
         assert home.has_real_time_consumption is True
 
         # The subscription is still healthy and delivers another measurement, clearing the timer.
@@ -1232,7 +1232,7 @@ async def test_live_data_restarts_grace_period_armed_by_price_poll(
 
         # Hours later another transient False must start a fresh grace period, not flip.
         frozen_clock.current = armed + dt.timedelta(hours=2)
-        await home.update_info_and_price_info()
+        await home.update_info()
 
     assert home.has_real_time_consumption is True
 
@@ -1250,7 +1250,7 @@ async def test_live_data_recovers_confirmed_false_status(
 
     A live measurement is proof that real time consumption works right now, so it counts as a
     successful True status reading, not merely a timer clear. Once a sustained False from periodic
-    info and price polls has confirmed a disable while a listener is still attached, resumed live
+    info polls has confirmed a disable while a listener is still attached, resumed live
     data must restore the believed status to True so the next resubscribe does not stop.
     """
     armed = dt.datetime(2026, 5, 6, 0, 0, 0, tzinfo=dt.UTC)
@@ -1273,14 +1273,14 @@ async def test_live_data_recovers_confirmed_false_status(
         await asyncio.wait_for(measurements.get(), timeout=1.0)
         assert home.has_real_time_consumption is True
 
-        # A price poll reports disabled, arming the grace-period timer without flipping the status.
-        mock_websession.post = AsyncMock(return_value=_json_response(_info_price_payload(rt_enabled=False)))
-        await home.update_info_and_price_info()
+        # An info poll reports disabled, arming the grace-period timer without flipping the status.
+        mock_websession.post = AsyncMock(return_value=_json_response(_info_payload(rt_enabled=False)))
+        await home.update_info()
         assert home.has_real_time_consumption is True
 
         # A second False poll past the grace window, with no live data in between, confirms the disable.
         frozen_clock.current = armed + REAL_TIME_CONSUMPTION_DISABLED_GRACE + dt.timedelta(seconds=1)
-        await home.update_info_and_price_info()
+        await home.update_info()
         assert home.has_real_time_consumption is False
 
         # Live data resumes and proves real time consumption is working, restoring the status.
@@ -1312,41 +1312,55 @@ async def test_rt_resubscribe_confirmed_disable_without_on_error_logs_and_stops(
     assert f"Home {HOME_ID} does not have real time consumption enabled" in caplog.text
 
 
-async def test_home_update_price_info_populates_price_total(
+def _price_item(time: str, price: float | None, **details: Any) -> dict[str, Any]:  # noqa: ANN401
+    """Return a Data API price item."""
+    return {"time": time, "consumption": {"price": price, **details}}
+
+
+def _interval(time: str, price: float) -> PriceInterval:
+    return PriceInterval(start=dt.datetime.fromisoformat(time), consumption=PriceDetails(price=price))
+
+
+async def test_update_prices_fetches_today_and_tomorrow(
     home: tibber.TibberHome,
+    tibber_connection: tibber.Tibber,
     mock_websession: MagicMock,
+    frozen_clock: type[FixedDateTime],
 ) -> None:
-    """Verify that update_price_info populates price_total and currency from the Data API."""
-    price_payload = {
-        "currency": "EUR",
-        "items": [
+    """Prices are fetched from the start of today, in the home's time zone, and parsed."""
+    tibber_connection.time_zone = dt.timezone(dt.timedelta(hours=2))
+    mock_websession.request = AsyncMock(
+        return_value=_json_response(
             {
-                "time": "2026-11-24T06:00:00+01:00",
-                "consumption": {"price": 0.45, "subsidizedPrice": 0.0, "vatPercent": 25},
-                "production": {"price": -0.1, "thirdPartyPrice": 0.02},
+                "currency": "EUR",
+                "items": [
+                    {
+                        "time": "2026-05-06T00:00:00+02:00",
+                        "consumption": {"price": 0.45, "subsidizedPrice": 0.0, "vatPercent": 25},
+                        "production": {"price": -0.1, "thirdPartyPrice": 0.02},
+                    },
+                    _price_item("2026-05-06T00:15:00+02:00", 0.5),
+                    _price_item("2026-05-08T00:00:00+02:00", 9.0),
+                ],
+                "next": None,
             },
-            {"time": "2026-11-24T06:15:00+01:00", "consumption": {"price": 0.50}},
-        ],
-        "next": "https://data-api.tibber.com/v1/homes/home-1/prices?cursor=next",
-    }
-    mock_response = MagicMock()
-    mock_response.status = 200
-    mock_response.content_type = "application/json"
-    mock_response.json = AsyncMock(return_value=price_payload)
-    mock_websession.request = AsyncMock(return_value=mock_response)
+        ),
+    )
 
-    assert await home.get_prices() == price_payload
-    await home.update_price_info()
+    with patch("tibber.home.dt.datetime", frozen_clock):
+        await home.update_prices()
 
+    assert mock_websession.request.await_args.kwargs["params"] == {"since": "2026-05-05T22:00:00Z"}
+    assert home.prices == [
+        PriceInterval(
+            start=dt.datetime.fromisoformat("2026-05-06T00:00:00+02:00"),
+            consumption=PriceDetails(price=0.45, subsidized_price=0.0, vat_percent=25.0),
+            production=PriceDetails(price=-0.1, third_party_price=0.02),
+        ),
+        _interval("2026-05-06T00:15:00+02:00", 0.5),
+    ]
     assert home.currency == "EUR"
     assert home.price_unit == "EUR/kWh"
-    assert home.price_total == {
-        "2026-11-24T06:00:00+01:00": 0.45,
-        "2026-11-24T06:15:00+01:00": 0.50,
-    }
-    assert home.subsidized_price_total == {"2026-11-24T06:00:00+01:00": 0.0}
-    assert home.production_price_total == {"2026-11-24T06:00:00+01:00": -0.1}
-    assert list(home.price_items.values()) == price_payload["items"]
 
 
 @pytest.mark.parametrize(
@@ -1357,47 +1371,129 @@ async def test_home_update_price_info_populates_price_total(
         RateLimitExceededError(429, "Rate limited", "RATE_LIMITED", 1.0),
     ],
 )
-async def test_home_update_price_info_raises_and_keeps_prices(
+async def test_update_prices_raises_and_keeps_prices(
     home: tibber.TibberHome,
     tibber_connection: tibber.Tibber,
     monkeypatch: pytest.MonkeyPatch,
     error: Exception,
 ) -> None:
     """A failed price fetch must reach the caller, so it can retry, and keep the known prices."""
-    home.price_total = {"2026-11-24T00:00:00+01:00": 0.25}
+    known_prices = [_interval("2026-11-24T00:00:00+01:00", 0.25)]
+    home.prices = known_prices
     monkeypatch.setattr(tibber_connection.data_api, "get_prices", AsyncMock(side_effect=error))
 
     with pytest.raises(type(error)):
-        await home.update_price_info()
+        await home.update_prices()
 
-    assert home.price_total == {"2026-11-24T00:00:00+01:00": 0.25}
+    assert home.prices == known_prices
 
 
-async def test_current_price_data_from_data_api_prices(
+async def test_update_prices_clears_prices_when_not_available(
+    home: tibber.TibberHome,
+    tibber_connection: tibber.Tibber,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A home without prices gets no prices instead of an error."""
+    home.prices = [_interval("2026-11-24T00:00:00+01:00", 0.25)]
+    error = PricesNotAvailableError(403, "No prices", "prices-not-available")
+    monkeypatch.setattr(tibber_connection.data_api, "get_prices", AsyncMock(side_effect=error))
+
+    await home.update_prices()
+
+    assert home.prices == []
+
+
+async def test_get_prices_does_not_change_prices(
     home: tibber.TibberHome,
     mock_websession: MagicMock,
+) -> None:
+    """Fetching a range of prices returns them without replacing the cached prices."""
+    mock_websession.request = AsyncMock(
+        return_value=_json_response({"items": [_price_item("2026-01-01T00:00:00+00:00", 1.0)], "next": None}),
+    )
+    start = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
+
+    assert await home.get_prices(start, start + dt.timedelta(days=1)) == [
+        _interval("2026-01-01T00:00:00+00:00", 1.0),
+    ]
+    assert home.prices == []
+
+
+async def test_current_price_data(
+    home: tibber.TibberHome,
     frozen_clock: type[FixedDateTime],
 ) -> None:
-    """The current price and its rank among today's prices come from the Data API prices."""
-    items = [
-        {"time": f"2026-05-06T{time}:00+00:00", "consumption": {"price": price}}
-        for time, price in {"02:00": 1.0, "02:15": 3.0, "02:30": 2.0, "02:45": 4.0}.items()
-    ]
-    mock_websession.request = AsyncMock(return_value=_json_response({"currency": "NOK", "items": items}))
-    assert home.current_price_total is None
-    assert home.current_price_info == {}
-    await home.update_current_price_info()
+    """The current price and its rank among today's prices, where equal prices share a rank."""
+    home.prices = [
+        _interval(f"2026-05-06T{time}:00+00:00", price)
+        for time, price in {
+            "00:00": 0.0,
+            "02:00": 1.0,
+            "02:15": 3.0,
+            "02:30": 2.0,
+            "02:45": 2.0,
+            "03:00": 4.0,
+        }.items()
+    ] + [_interval("2026-05-07T02:30:00+00:00", 0.1)]
 
     with patch("tibber.home.dt.datetime", frozen_clock):
         price, price_time, price_rank = home.current_price_data()
-        assert home.current_price_total == 2.0
-        assert home.current_price_info == {
-            **items[2],
-            "startsAt": "2026-05-06T02:30:00+00:00",
-            "currency": "NOK",
-            "total": 2.0,
-        }
+        current = home.current_price_interval
 
+    assert current == home.prices[3]
     assert price == 2.0
     assert price_time == dt.datetime(2026, 5, 6, 2, 30, tzinfo=dt.UTC)
-    assert price_rank == 0.5
+    assert price_rank == 3 / 6
+
+
+async def test_current_price_data_without_current_interval(home: tibber.TibberHome) -> None:
+    """No current interval gives no price."""
+    home.prices = [_interval("2020-01-01T00:00:00+00:00", 1.0)]
+
+    assert home.current_price_interval is None
+    assert home.current_price_data() == (None, None, None)
+
+
+async def test_current_attributes(
+    home: tibber.TibberHome,
+    frozen_clock: type[FixedDateTime],
+) -> None:
+    """Today's statistics, also for negative prices, and only for today."""
+    home.prices = [
+        _interval("2026-05-06T01:00:00+00:00", -2.0),
+        _interval("2026-05-06T09:00:00+00:00", -1.0),
+        _interval("2026-05-06T21:00:00+00:00", -0.5),
+        _interval("2026-05-07T09:00:00+00:00", 5.0),
+    ]
+
+    with patch("tibber.home.dt.datetime", frozen_clock):
+        attributes = home.current_attributes()
+
+    assert attributes == {
+        "max_price": -0.5,
+        "avg_price": round(-3.5 / 3, 4),
+        "min_price": -2.0,
+        "off_peak_1": -2.0,
+        "peak": -1.0,
+        "off_peak_2": -0.5,
+    }
+
+
+async def test_current_attributes_without_prices(home: tibber.TibberHome) -> None:
+    """No prices today gives zeros."""
+    assert home.current_attributes() == {
+        "max_price": 0.0,
+        "avg_price": 0.0,
+        "min_price": 0.0,
+        "off_peak_1": 0.0,
+        "peak": 0.0,
+        "off_peak_2": 0.0,
+    }
+
+
+@pytest.mark.parametrize(("country", "currency"), [("SE", "SEK"), ("NO", "NOK"), ("DE", "EUR"), ("XX", "")])
+async def test_currency_falls_back_to_country(home: tibber.TibberHome, country: str, currency: str) -> None:
+    """The currency is known from the home's country before any prices are fetched."""
+    home.info = {"viewer": {"home": {"address": {"country": country}}}}
+
+    assert home.currency == currency

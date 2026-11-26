@@ -5,9 +5,12 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
+import math
 import random
+from dataclasses import dataclass
+from email.utils import parsedate_to_datetime
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, NoReturn, NotRequired, TypeAlias, TypedDict
+from typing import TYPE_CHECKING, Any, Final, NoReturn, TypeAlias
 from urllib.parse import urljoin, urlsplit
 
 import aiohttp
@@ -15,6 +18,7 @@ import aiohttp
 from .const import DATA_API_ENDPOINT, DEFAULT_TIMEOUT, USERINFO_ENDPOINT, __version__
 from .exceptions import (
     FatalHttpExceptionError,
+    InsufficientScopeError,
     InvalidLoginError,
     PricesNotAvailableError,
     RateLimitExceededError,
@@ -30,25 +34,78 @@ _LOGGER = logging.getLogger(__name__)
 
 MAX_RATE_LIMIT_ATTEMPTS = 2
 PRICES_NOT_AVAILABLE_ERROR_TYPE = "https://developer.tibber.com/errors/prices-not-available"
+PRICE_INTERVAL: Final = dt.timedelta(minutes=15)
+PRICE_PAGE_SPAN: Final = dt.timedelta(hours=48)
 
 SensorValue: TypeAlias = bool | int | float | str | None
 
 
-class PriceDetails(TypedDict, total=False):
-    """Prices and applicable VAT for consumption or production."""
+@dataclass(frozen=True, slots=True)
+class PriceDetails:
+    """Prices per kWh, VAT included, for consumption or production in one interval."""
 
-    price: float | None
-    subsidizedPrice: float | None
-    thirdPartyPrice: float | None
-    vatPercent: float | None
+    price: float | None = None
+    """What Tibber bills, including markup and fees."""
+    subsidized_price: float | None = None
+    """`price` after government subsidy, e.g. Norgespris or strømstøtte. None when no subsidy applies."""
+    third_party_price: float | None = None
+    """What other parties bill, usually the grid company. None when Tibber bills these as part of `price`."""
+    vat_percent: float | None = None
 
 
-class PriceItem(TypedDict):
+@dataclass(frozen=True, slots=True)
+class PriceInterval:
     """Prices for one 15-minute interval."""
 
-    time: str
-    consumption: NotRequired[PriceDetails | None]
-    production: NotRequired[PriceDetails | None]
+    start: dt.datetime
+    consumption: PriceDetails | None = None
+    production: PriceDetails | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Prices:
+    """Price intervals for a home, sorted by start time."""
+
+    currency: str | None
+    intervals: list[PriceInterval]
+
+
+def _format_price_time(value: dt.datetime) -> str:
+    """Format an aware time for the Data API, which needs an offset."""
+    return value.astimezone(dt.UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _parse_float(value: object) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value)
+
+
+def _parse_price_details(data: object) -> PriceDetails | None:
+    if not isinstance(data, dict):
+        return None
+    return PriceDetails(
+        price=_parse_float(data.get("price")),
+        subsidized_price=_parse_float(data.get("subsidizedPrice")),
+        third_party_price=_parse_float(data.get("thirdPartyPrice")),
+        vat_percent=_parse_float(data.get("vatPercent")),
+    )
+
+
+def _parse_price_interval(item: object) -> PriceInterval | None:
+    if not isinstance(item, dict) or not isinstance(time := item.get("time"), str):
+        return None
+    try:
+        start = dt.datetime.fromisoformat(time)
+    except ValueError:
+        return None
+    if start.utcoffset() is None:
+        return None
+    return PriceInterval(
+        start=start,
+        consumption=_parse_price_details(item.get("consumption")),
+        production=_parse_price_details(item.get("production")),
+    )
 
 
 class TibberDataAPI:
@@ -86,7 +143,6 @@ class TibberDataAPI:
         self._token_manager = token_manager
         self._user_agent = f"{user_agent} pyTibber/{__version__} "
         self._devices: dict[str, TibberDevice] = {}
-        self._rate_limit_attempt = 0
 
     def set_access_token(self, access_token: str) -> None:
         """Set the access token.
@@ -111,6 +167,7 @@ class TibberDataAPI:
         endpoint: str,
         params: dict[str, Any] | None = None,
         retry: int = 3,
+        rate_limit_attempt: int = 0,
     ) -> dict[str, Any]:
         """Make a request to the Data API.
 
@@ -118,6 +175,7 @@ class TibberDataAPI:
         :param endpoint: API endpoint path or absolute Data API URL.
         :param params: Query parameters.
         :param retry: Number of retries on failure.
+        :param rate_limit_attempt: Number of 429 responses already retried for this request.
         """
         url = urljoin(DATA_API_ENDPOINT, endpoint)
         if urlsplit(url)[:2] != urlsplit(DATA_API_ENDPOINT)[:2]:
@@ -144,63 +202,67 @@ class TibberDataAPI:
             )
             status = response.status
             if status == HTTPStatus.OK:
-                self._rate_limit_attempt = 0
                 data = await extract_response_data(response)
                 response.close()
                 return data
 
             if status == HTTPStatus.TOO_MANY_REQUESTS:
-                if self._rate_limit_attempt >= MAX_RATE_LIMIT_ATTEMPTS:
+                if rate_limit_attempt >= MAX_RATE_LIMIT_ATTEMPTS:
                     _LOGGER.error("Rate limit exceeded: max attempts (%d) reached", MAX_RATE_LIMIT_ATTEMPTS)
-                    await self._handle_error_response(response)
+                    await self._handle_error_response(response, rate_limit_attempt)
                 retry_after = response.headers.get("Retry-After")
-                wait_time = self._calculate_429_wait_time(retry_after)
+                wait_time = self._calculate_429_wait_time(retry_after, rate_limit_attempt)
                 wait_time = min(wait_time, 10)
 
                 _LOGGER.warning(
                     "Rate limited (429), waiting %.2f seconds before retry (attempt %d/%d)",
                     wait_time,
-                    self._rate_limit_attempt + 1,
+                    rate_limit_attempt + 1,
                     MAX_RATE_LIMIT_ATTEMPTS,
                 )
                 await asyncio.sleep(wait_time)
 
-                self._rate_limit_attempt += 1
-                return await self._make_request(method, endpoint, params, retry)
+                return await self._make_request(method, endpoint, params, retry, rate_limit_attempt + 1)
 
-            await self._handle_error_response(response)
+            await self._handle_error_response(response, rate_limit_attempt)
 
         except (aiohttp.ClientError, TimeoutError):
             if retry > 0:
                 _LOGGER.debug("Request failed, retrying... (%d attempts left)", retry, exc_info=True)
-                return await self._make_request(method, endpoint, params, retry - 1)
+                return await self._make_request(method, endpoint, params, retry - 1, rate_limit_attempt)
             _LOGGER.debug("Error connecting to Tibber Data API", exc_info=True)
             raise
         finally:
             if response is not None and not response.closed:
                 response.close()
 
-    def _calculate_429_wait_time(self, retry_after: str | None) -> float:
+    @staticmethod
+    def _parse_retry_after(retry_after: str) -> float | None:
+        """Parse a Retry-After header value (seconds or HTTP-date) into seconds from now."""
+        try:
+            return float(int(float(retry_after)))
+        except ValueError:
+            pass
+        try:
+            retry_time = parsedate_to_datetime(retry_after)
+        except (TypeError, ValueError):
+            try:
+                retry_time = dt.datetime.fromisoformat(retry_after)
+            except ValueError:
+                return None
+        if retry_time.tzinfo is None:
+            retry_time = retry_time.replace(tzinfo=dt.UTC)
+        return max(0.0, (retry_time - dt.datetime.now(dt.UTC)).total_seconds())
+
+    def _calculate_429_wait_time(self, retry_after: str | None, rate_limit_attempt: int = 0) -> float:
         """Calculate wait time for 429 rate limiting.
 
         :param retry_after: Retry-After header value (seconds or HTTP-date).
+        :param rate_limit_attempt: Number of 429 responses already retried for this request.
         :return: Wait time in seconds.
         """
         if retry_after:
-            wait_seconds: int | float | None
-            try:
-                wait_seconds = int(float(retry_after))
-            except ValueError:
-                try:
-                    retry_time = dt.datetime.fromisoformat(retry_after)
-                    if retry_time.tzinfo is None:
-                        retry_time = retry_time.replace(tzinfo=dt.UTC)
-                    else:
-                        retry_time = retry_time.astimezone(dt.UTC)
-                    now = dt.datetime.now(dt.UTC)
-                    wait_seconds = max(0, (retry_time - now).total_seconds())
-                except ValueError:
-                    wait_seconds = None
+            wait_seconds = self._parse_retry_after(retry_after)
 
             if wait_seconds is not None:
                 wait_seconds = min(wait_seconds, 10 * 60)
@@ -208,11 +270,11 @@ class TibberDataAPI:
                 return wait_seconds + jitter
 
         base = 1.0
-        max_wait = base * (2**self._rate_limit_attempt)
+        max_wait = base * (2**rate_limit_attempt)
         max_wait = min(max_wait, 10 * 60)
         return random.uniform(0, 30) + max_wait  # noqa: S311
 
-    async def _handle_error_response(self, response: aiohttp.ClientResponse) -> NoReturn:
+    async def _handle_error_response(self, response: aiohttp.ClientResponse, rate_limit_attempt: int = 0) -> NoReturn:
         """Handle non-OK HTTP responses from the Data API."""
         status = response.status
         if status == HTTPStatus.UNAUTHORIZED:
@@ -222,8 +284,10 @@ class TibberDataAPI:
         detail, extension_code = await self._read_error_response(response)
         response.close()
 
-        if status == HTTPStatus.FORBIDDEN and extension_code == PRICES_NOT_AVAILABLE_ERROR_TYPE:
-            raise PricesNotAvailableError(status, detail, extension_code)
+        if status == HTTPStatus.FORBIDDEN:
+            if extension_code == PRICES_NOT_AVAILABLE_ERROR_TYPE:
+                raise PricesNotAvailableError(status, detail, extension_code)
+            raise InsufficientScopeError(status, detail, extension_code)
 
         fatal_codes: dict[int, str] = {
             HTTPStatus.BAD_REQUEST.value: "BAD_REQUEST",
@@ -237,7 +301,7 @@ class TibberDataAPI:
             )
         if status == HTTPStatus.TOO_MANY_REQUESTS:
             retry_after = response.headers.get("Retry-After")
-            wait_time = self._calculate_429_wait_time(retry_after)
+            wait_time = self._calculate_429_wait_time(retry_after, rate_limit_attempt)
             raise RateLimitExceededError(
                 status,
                 detail or "Rate limited",
@@ -290,59 +354,48 @@ class TibberDataAPI:
         response = await self._make_request("GET", "/v1/homes")
         return response.get("homes", [])
 
-    async def get_prices(
-        self,
-        home_id: str,
-        since: dt.datetime | str | None = None,
-        until: dt.datetime | str | None = None,
-        cursor: str | None = None,
-        *,
-        url: str | None = None,
-    ) -> dict[str, Any]:
-        """Get energy prices for a home from the Data API.
+    async def get_prices(self, home_id: str, start: dt.datetime, end: dt.datetime) -> Prices:
+        """Get the 15-minute energy prices for a home from `start` up to `end`.
 
-        Returns 15-minute energy prices for a home, per kWh in the home's currency,
-        VAT included where applicable. Requires the data-api-prices-read scope.
-
-        Without parameters, returns the newest published prices, up to one page (up to 48 hours / 192 intervals).
-        Use `since` to page forward from a time, or `until` to page backward, then follow `next` and `prev` links.
+        Requires the data-api-prices-read scope. Pages forward from `start` and follows `next` links
+        until `end` or the newest published prices. Published prices never change, so callers should
+        store them: tomorrow's prices are published from about 13:00 CET.
 
         :param home_id: The ID of the home.
-        :param since: Start time to page forward from (needs offset, e.g. ISO 8601 string or aware datetime).
-        :param until: End time to page backward from (needs offset, e.g. ISO 8601 string or aware datetime).
-        :param cursor: Optional opaque cursor or pagination link.
-        :param url: A next or previous link, which takes precedence over query parameters.
-        :return: Dict containing 'currency', 'query', 'items', 'prev', 'next'.
+        :param start: Timezone aware start, rounded down to 15 minutes by the API.
+        :param end: Timezone aware end (exclusive).
+        :raises PricesNotAvailableError: The account has no access to prices, the home has no prices,
+            or `start` is before the start of the home's price history.
+        :raises InsufficientScopeError: The access token lacks the data-api-prices-read scope.
         """
-        endpoint = f"/v1/homes/{home_id}/prices"
-        if url is None and cursor is not None and ("://" in cursor or cursor.startswith(("/v1/", "//", "?"))):
-            url = cursor
-        if url is not None:
-            return await self._make_request("GET", urljoin(f"{DATA_API_ENDPOINT}{endpoint}", url))
+        endpoint = f"{DATA_API_ENDPOINT}/v1/homes/{home_id}/prices"
+        url = endpoint
+        if start.utcoffset() is None or end.utcoffset() is None:
+            raise ValueError("Price times must be timezone aware")
+        params: dict[str, Any] | None = {"since": _format_price_time(start)}
+        # Each page holds up to 48 hours. The margin covers price history gaps.
+        max_pages = max(math.ceil((end - start) / PRICE_PAGE_SPAN), 1) + 5
+        currency: str | None = None
+        intervals: dict[dt.datetime, PriceInterval] = {}
+        cursor = start
+        for _ in range(max_pages):
+            page = await self._make_request("GET", url, params=params)
+            currency = page.get("currency") or currency
+            page_intervals = [
+                interval for item in page.get("items") or [] if (interval := _parse_price_interval(item)) is not None
+            ]
+            intervals.update((interval.start, interval) for interval in page_intervals if start <= interval.start < end)
+            if page_intervals:
+                cursor = max(interval.start for interval in page_intervals) + PRICE_INTERVAL
+            elif cursor >= dt.datetime.now(dt.UTC):
+                # An empty page at the present means newer prices aren't published yet.
+                break
+            # An empty page in the past is a gap in the price history, and `next` skips it.
+            if cursor >= end or not (next_link := page.get("next")):
+                break
+            url, params = urljoin(endpoint, next_link), None
 
-        params: dict[str, Any] = {}
-        if since is not None:
-            if isinstance(since, dt.datetime):
-                if since.tzinfo is None:
-                    since = since.replace(tzinfo=dt.UTC)
-                params["since"] = since.isoformat()
-            else:
-                params["since"] = str(since)
-
-        if until is not None:
-            if isinstance(until, dt.datetime):
-                if until.tzinfo is None:
-                    until = until.replace(tzinfo=dt.UTC)
-                params["until"] = until.isoformat()
-            else:
-                params["until"] = str(until)
-
-        if cursor is not None:
-            params["cursor"] = str(cursor)
-
-        return await self._make_request("GET", endpoint, params=params or None)
-
-    get_prices_for_home = get_prices
+        return Prices(currency=currency, intervals=sorted(intervals.values(), key=lambda interval: interval.start))
 
     async def get_devices_for_home(self, home_id: str) -> list[dict[str, Any]]:
         """Get all devices for a specific home."""

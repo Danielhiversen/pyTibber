@@ -1,13 +1,14 @@
 """Tests for Tibber Data API."""
 
 import datetime as dt
+from email.utils import format_datetime
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from tibber.data_api import TibberDataAPI, TibberDevice
-from tibber.exceptions import PricesNotAvailableError
+from tibber.data_api import PriceDetails, PriceInterval, TibberDataAPI, TibberDevice
+from tibber.exceptions import InsufficientScopeError, PricesNotAvailableError, RateLimitExceededError
 from tibber.token_manager import TokenManager
 
 
@@ -185,83 +186,100 @@ def test_tibber_device_properties_match_payload() -> None:
     assert [sensor.id for sensor in device.sensors] == ["sensor-1"]
 
 
-@pytest.mark.asyncio
-async def test_get_prices_builds_query_params(
-    data_api: TibberDataAPI,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Verify get_prices forwards datetime/string params to _make_request."""
-    mocked_make_request = AsyncMock(return_value={"currency": "NOK", "items": []})
-    monkeypatch.setattr(data_api, "_make_request", mocked_make_request)
+PRICES_URL = "https://data-api.tibber.com/v1/homes/home-1/prices"
 
-    await data_api.get_prices(
-        "home-1",
-        since="2026-01-01T00:00:00Z",
-        until="2026-01-02T00:00:00Z",
-        cursor="cursor-token-123",
-    )
 
-    mocked_make_request.assert_awaited_once_with(
-        "GET",
-        "/v1/homes/home-1/prices",
-        params={
-            "since": "2026-01-01T00:00:00Z",
-            "until": "2026-01-02T00:00:00Z",
-            "cursor": "cursor-token-123",
+def _response(payload: dict[str, Any], status: int = 200, headers: dict[str, str] | None = None) -> MagicMock:
+    response = MagicMock(status=status, content_type="application/json", headers=headers or {})
+    response.json = AsyncMock(return_value=payload)
+    return response
+
+
+def _page(times: list[str], next_link: str | None = None) -> MagicMock:
+    return _response(
+        {
+            "currency": "NOK",
+            "items": [{"time": time, "consumption": {"price": 1.0}} for time in times],
+            "next": next_link,
         },
     )
 
 
-@pytest.mark.asyncio
-async def test_get_prices_defaults_to_no_params(
-    data_api: TibberDataAPI,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Verify get_prices without params requests the endpoint with no query params."""
-    mocked_make_request = AsyncMock(return_value={})
-    monkeypatch.setattr(data_api, "_make_request", mocked_make_request)
-
-    await data_api.get_prices("home-1")
-
-    mocked_make_request.assert_awaited_once_with("GET", "/v1/homes/home-1/prices", params=None)
+def _quarters(start: str, count: int) -> list[str]:
+    first = dt.datetime.fromisoformat(start)
+    return [(first + dt.timedelta(minutes=15 * index)).isoformat() for index in range(count)]
 
 
 @pytest.mark.asyncio
-async def test_get_prices_with_since_until_datetime(data_api: TibberDataAPI, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Ensure get_prices formats datetime objects into ISO 8601 strings."""
-    mocked_make_request = AsyncMock(return_value={})
-    monkeypatch.setattr(data_api, "_make_request", mocked_make_request)
-
-    since = dt.datetime(2026, 10, 28, 0, 0, 0, tzinfo=dt.UTC)
-    until = dt.datetime(2026, 10, 30, 0, 0, 0, tzinfo=dt.timezone(dt.timedelta(hours=2)))
-
-    await data_api.get_prices("home-1", since=since, until=until)
-
-    mocked_make_request.assert_awaited_once_with(
-        "GET",
-        "/v1/homes/home-1/prices",
-        params={
-            "since": "2026-10-28T00:00:00+00:00",
-            "until": "2026-10-30T00:00:00+02:00",
-        },
+async def test_get_prices_pages_forward_until_end(data_api: TibberDataAPI, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Request from `start` in UTC, follow relative `next` links and stop at `end`."""
+    start = dt.datetime(2026, 10, 25, 0, 0, tzinfo=dt.timezone(dt.timedelta(hours=2)))
+    end = start + dt.timedelta(hours=49)
+    request = AsyncMock(
+        side_effect=[
+            _page(_quarters("2026-10-24T22:00:00+00:00", 192), "/v1/homes/home-1/prices?since=2026-10-26T22%3A00Z"),
+            _page(_quarters("2026-10-26T22:00:00+00:00", 96), "/v1/homes/home-1/prices?since=later"),
+        ],
     )
-
-
-@pytest.mark.asyncio
-async def test_get_prices_follows_next_link(data_api: TibberDataAPI, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Follow a returned link directly and keep its query intact."""
-    next_url = "https://data-api.tibber.com/v1/homes/home-1/prices?cursor=abc%2B123"
-    first_page = MagicMock(status=200, content_type="application/json")
-    first_page.json = AsyncMock(return_value={"next": next_url, "items": []})
-    second_page = MagicMock(status=200, content_type="application/json")
-    second_page.json = AsyncMock(return_value={"next": None, "items": []})
-    request = AsyncMock(side_effect=[first_page, second_page])
     monkeypatch.setattr(data_api.websession, "request", request)
 
-    page = await data_api.get_prices_for_home("home-1")
-    assert await data_api.get_prices("home-1", cursor=page["next"]) == {"next": None, "items": []}
-    assert request.await_args.args == ("GET", next_url)
-    assert request.await_args.kwargs.get("params") is None
+    prices = await data_api.get_prices("home-1", start, end)
+
+    assert prices.currency == "NOK"
+    assert len(prices.intervals) == 196
+    assert prices.intervals[0] == PriceInterval(
+        start=dt.datetime(2026, 10, 24, 22, 0, tzinfo=dt.UTC),
+        consumption=PriceDetails(price=1.0),
+    )
+    assert prices.intervals[-1].start == dt.datetime(2026, 10, 26, 22, 45, tzinfo=dt.UTC)
+    assert [(c.args, c.kwargs["params"]) for c in request.await_args_list] == [
+        (("GET", PRICES_URL), {"since": "2026-10-24T22:00:00Z"}),
+        (("GET", f"{PRICES_URL}?since=2026-10-26T22%3A00Z"), None),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_prices_stops_at_unpublished_prices(
+    data_api: TibberDataAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty page at the present means newer prices aren't published, so stop."""
+    start = dt.datetime.now(dt.UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    link = f"{PRICES_URL}?since=tomorrow"
+    request = AsyncMock(
+        side_effect=[_page(_quarters(start.isoformat(), 96), link), _page([], link), _page([], link)],
+    )
+    monkeypatch.setattr(data_api.websession, "request", request)
+
+    prices = await data_api.get_prices("home-1", start, start + dt.timedelta(days=2))
+
+    assert len(prices.intervals) == 96
+    assert request.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_get_prices_skips_gaps_in_history(data_api: TibberDataAPI, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An empty page in the past is a gap, and its `next` link skips ahead."""
+    start = dt.datetime(2020, 1, 1, tzinfo=dt.UTC)
+    request = AsyncMock(
+        side_effect=[
+            _page([], f"{PRICES_URL}?since=2020-01-05T00%3A00Z"),
+            _page(_quarters("2020-01-05T00:00:00+00:00", 4)),
+        ],
+    )
+    monkeypatch.setattr(data_api.websession, "request", request)
+
+    prices = await data_api.get_prices("home-1", start, start + dt.timedelta(days=7))
+
+    assert [interval.start.day for interval in prices.intervals] == [5, 5, 5, 5]
+    assert request.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_get_prices_rejects_naive_times(data_api: TibberDataAPI) -> None:
+    """Naive times are ambiguous, the Data API needs an offset."""
+    with pytest.raises(ValueError, match="timezone aware"):
+        await data_api.get_prices("home-1", dt.datetime(2026, 1, 1), dt.datetime(2026, 1, 2))  # noqa: DTZ001
 
 
 @pytest.mark.asyncio
@@ -270,26 +288,72 @@ async def test_get_prices_rejects_links_to_other_origins(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Keep authenticated pagination requests on the Data API origin."""
-    request = AsyncMock()
+    start = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
+    request = AsyncMock(return_value=_page(_quarters(start.isoformat(), 1), "https://example.com/prices"))
     monkeypatch.setattr(data_api.websession, "request", request)
 
     with pytest.raises(ValueError, match="Data API origin"):
-        await data_api.get_prices("home-1", url="https://example.com/prices")
+        await data_api.get_prices("home-1", start, start + dt.timedelta(days=1))
 
-    request.assert_not_awaited()
+    assert request.await_count == 1
 
 
 @pytest.mark.asyncio
-async def test_get_prices_maps_unavailable_error(data_api: TibberDataAPI, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Expose the Tibber problem type as a dedicated exception."""
-    response = MagicMock(status=403, content_type="application/problem+json")
-    response.json = AsyncMock(
-        return_value={
-            "type": "https://developer.tibber.com/errors/prices-not-available",
-            "detail": "Prices unavailable",
-        },
-    )
+@pytest.mark.parametrize(
+    ("payload", "error"),
+    [
+        ({"type": "https://developer.tibber.com/errors/prices-not-available", "detail": "No"}, PricesNotAvailableError),
+        ({"detail": "Missing scope"}, InsufficientScopeError),
+    ],
+)
+async def test_get_prices_maps_forbidden_errors(
+    data_api: TibberDataAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    payload: dict[str, Any],
+    error: type[Exception],
+) -> None:
+    """A 403 is either no prices for the home, or a missing scope."""
+    response = _response(payload, status=403)
+    response.content_type = "application/problem+json"
     monkeypatch.setattr(data_api.websession, "request", AsyncMock(return_value=response))
+    start = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
 
-    with pytest.raises(PricesNotAvailableError, match="Prices unavailable"):
-        await data_api.get_prices("home-1")
+    with pytest.raises(error, match=payload["detail"]):
+        await data_api.get_prices("home-1", start, start + dt.timedelta(days=1))
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_attempts_are_per_request(data_api: TibberDataAPI, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An exhausted rate limit budget must not leak into the next request."""
+    request = AsyncMock(
+        side_effect=[
+            *[_response({}, status=429, headers={"Retry-After": "0"}) for _ in range(4)],
+            _response({"homes": []}),
+        ],
+    )
+    monkeypatch.setattr(data_api.websession, "request", request)
+
+    with patch("tibber.data_api.asyncio.sleep", AsyncMock()):
+        with pytest.raises(RateLimitExceededError):
+            await data_api.get_homes()
+        assert await data_api.get_homes() == []
+
+    assert request.await_count == 5
+
+
+@pytest.mark.parametrize(
+    ("retry_after", "expected"),
+    [
+        ("5", 5.0),
+        (format_datetime(dt.datetime.now(dt.UTC) + dt.timedelta(seconds=30), usegmt=True), 30.0),
+        ("not a date", None),
+    ],
+)
+def test_parse_retry_after(retry_after: str, expected: float | None) -> None:
+    """Retry-After is either seconds or an HTTP-date."""
+    seconds = TibberDataAPI._parse_retry_after(retry_after)  # noqa: SLF001
+
+    if expected is None:
+        assert seconds is None
+    else:
+        assert seconds == pytest.approx(expected, abs=1.5)

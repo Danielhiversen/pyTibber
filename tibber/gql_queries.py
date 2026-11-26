@@ -124,25 +124,6 @@ REAL_TIME_CONSUMPTION_ENABLED = """
           }
         }
         """
-UPDATE_CURRENT_PRICE = """
-        {
-          viewer {
-            home(id: "%s") {
-              currentSubscription {
-                priceInfo {
-                  current {
-                    energy
-                    tax
-                    total
-                    startsAt
-                  }
-                }
-              }
-            }
-          }
-        }
-        """
-
 UPDATE_INFO = """
         {
           viewer {

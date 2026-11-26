@@ -45,8 +45,9 @@ async def start():
 
   # Prices come from the Tibber Data API, which needs an OAuth access token with the
   # data-api-prices-read scope (https://data-api.tibber.com/docs/prices/), not the demo token.
-  # await home.update_price_info()
-  # print(home.current_price_data())
+  # await home.update_prices()  # today and, from about 13:00 CET, tomorrow
+  # print(home.current_price_data())  # (price, start time, rank among today's prices)
+  # print(home.current_price_interval)  # consumption and production prices, incl. subsidized price
 
   # await tibber_connection.close_connection()
 

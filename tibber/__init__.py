@@ -11,10 +11,12 @@ from typing import Any
 import aiohttp
 
 from .const import API_ENDPOINT, DEFAULT_TIMEOUT, DEMO_TOKEN, __version__
-from .data_api import TibberDataAPI
+from .data_api import PriceDetails, PriceInterval, Prices, TibberDataAPI
 from .exceptions import (
     FatalHttpExceptionError,
+    InsufficientScopeError,
     InvalidLoginError,
+    PricesNotAvailableError,
     RealTimeConsumptionDisabledError,
     RetryableHttpExceptionError,
     UserAgentMissingError,
@@ -29,7 +31,12 @@ _LOGGER = logging.getLogger(__name__)
 
 __all__ = [
     "FatalHttpExceptionError",
+    "InsufficientScopeError",
     "InvalidLoginError",
+    "PriceDetails",
+    "PriceInterval",
+    "Prices",
+    "PricesNotAvailableError",
     "RealTimeConsumptionDisabledError",
     "RetryableHttpExceptionError",
     "Tibber",

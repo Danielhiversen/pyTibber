@@ -53,7 +53,15 @@ class FatalHttpExceptionError(HttpExceptionError):
 
 
 class PricesNotAvailableError(FatalHttpExceptionError):
-    """The Data API does not make prices available for this request."""
+    """The Data API has no prices for this request.
+
+    The account has no access to prices, the home has no prices, or the request is before the
+    start of the home's price history.
+    """
+
+
+class InsufficientScopeError(FatalHttpExceptionError):
+    """The Data API denied the request, usually because the access token lacks a required scope."""
 
 
 class RetryableHttpExceptionError(HttpExceptionError):
