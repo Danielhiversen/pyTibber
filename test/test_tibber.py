@@ -2,7 +2,7 @@
 
 import asyncio
 import datetime as dt
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
@@ -342,3 +342,28 @@ async def test_rt_disconnect_cancels_home_tasks(monkeypatch: pytest.MonkeyPatch)
     await tibber_connection.rt_disconnect()
 
     assert all(task.cancelled() for task in tasks)
+
+
+@pytest.mark.asyncio
+async def test_close_connection_stops_live_tasks_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    """close_connection ends the live tasks before it closes the websession, so they can't reconnect on it."""
+    websession = MagicMock()
+    tibber_connection = tibber.Tibber(access_token="existing-token", websession=websession, user_agent="test")
+    tibber_connection._all_home_ids = ["a"]  # noqa: SLF001
+
+    async def discover_forever(_home_id: str) -> list[LiveEventDevice]:
+        await asyncio.Event().wait()
+        return []
+
+    monkeypatch.setattr(tibber_connection.data_api, "get_live_event_devices", discover_forever)
+    home = tibber_connection.get_home("a")
+    await home.rt_subscribe(MagicMock())
+    task = home._rt_task  # noqa: SLF001
+    await asyncio.sleep(0)
+    task_done_at_close: list[bool] = []
+    websession.close = AsyncMock(side_effect=lambda: task_done_at_close.append(task.done()))
+
+    await tibber_connection.close_connection()
+
+    assert task_done_at_close == [True]
+    assert task.cancelled()

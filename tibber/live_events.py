@@ -68,7 +68,7 @@ def _parse_number(value: object) -> float | None:
         return None
     try:
         number = float(value)
-    except ValueError:
+    except (ValueError, OverflowError):
         return None
     return number if math.isfinite(number) else None
 

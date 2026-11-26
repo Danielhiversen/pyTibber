@@ -491,6 +491,27 @@ async def test_get_live_event_devices(data_api: TibberDataAPI, monkeypatch: pyte
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        ({"devices": None}, []),
+        ({"devices": [None, "x", {"id": "p1", "type": "tibber pulse"}]}, [LiveEventDevice("p1", "tibber pulse")]),
+    ],
+    ids=["null_devices", "non_dict_items"],
+)
+async def test_get_live_event_devices_skips_malformed(
+    data_api: TibberDataAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    payload: dict[str, Any],
+    expected: list[LiveEventDevice],
+) -> None:
+    """A null device list, or items that aren't objects, don't break discovery."""
+    monkeypatch.setattr(data_api, "_make_request", AsyncMock(return_value=payload))
+
+    assert await data_api.get_live_event_devices("h1") == expected
+
+
+@pytest.mark.asyncio
 async def test_stream_live_events_request_shape(data_api: TibberDataAPI) -> None:
     """The stream request carries auth, SSE accept header, device ids and is released."""
     response = _fake_stream_response([b"event: ping\ndata:\n\n"])

@@ -478,8 +478,9 @@ class TibberDataAPI:
         response = await self._make_request("GET", f"/v1/homes/{home_id}/live-events/devices")
         return [
             LiveEventDevice(id=device["id"], type=device["type"])
-            for device in response.get("devices", [])
-            if isinstance(device.get("id"), str)
+            for device in response.get("devices") or []
+            if isinstance(device, dict)
+            and isinstance(device.get("id"), str)
             and device["id"]
             and isinstance(device.get("type"), str)
             and device["type"]

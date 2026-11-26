@@ -102,8 +102,11 @@ class Tibber:
 
     async def close_connection(self) -> None:
         """Close the Tibber connection.
-        This method simply closes the websession used by the object.
+
+        Stops the live data of every home, so it can't reconnect on a closed websession, then closes
+        the websession used by the object.
         """
+        await self.rt_disconnect()
         await self.websession.close()
 
     async def execute(

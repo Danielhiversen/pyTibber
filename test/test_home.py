@@ -496,23 +496,28 @@ class _ScriptedStream:
 
     A connection yields the measurements of its script and raises its exceptions. It ends normally
     after its last item, unless that item is `STAY_OPEN`. Connections beyond the scripts stay open.
+    `closed` counts the connections that have been closed.
     """
 
     def __init__(self) -> None:
         self.scripts: list[list[LiveMeasurement | Exception | None]] = []
         self.device_ids: list[list[str]] = []
+        self.closed = 0
 
     async def __call__(self, home_id: str, device_ids: Sequence[str]) -> AsyncIterator[LiveMeasurement]:
         assert home_id == HOME_ID
         self.device_ids.append(list(device_ids))
         connection = len(self.device_ids) - 1
-        for item in self.scripts[connection] if connection < len(self.scripts) else [STAY_OPEN]:
-            if item is STAY_OPEN:
-                await asyncio.Event().wait()
-            elif isinstance(item, Exception):
-                raise item
-            else:
-                yield item
+        try:
+            for item in self.scripts[connection] if connection < len(self.scripts) else [STAY_OPEN]:
+                if item is STAY_OPEN:
+                    await asyncio.Event().wait()
+                elif isinstance(item, Exception):
+                    raise item
+                else:
+                    yield item
+        finally:
+            self.closed += 1
 
 
 @pytest.fixture
@@ -673,6 +678,42 @@ async def test_rt_loop_reconnects_after_timeout(
 
 
 @pytest.mark.usefixtures("discover")
+@pytest.mark.parametrize(
+    ("first_connection", "measurements"),
+    [([_measurement(), STAY_OPEN], 2), ([STAY_OPEN], 1)],
+    ids=["after_measurement", "before_first_measurement"],
+)
+async def test_rt_loop_reconnects_without_measurements(
+    home: tibber.TibberHome,
+    stream: _ScriptedStream,
+    first_connection: list[LiveMeasurement | Exception | None],
+    measurements: int,
+) -> None:
+    """A stream that stays open without measurements, such as one with only pings, times out and reconnects."""
+    stream.scripts = [first_connection, [_measurement()]]
+    callback = MagicMock()
+    errors: list[tuple[Exception, bool, int]] = []
+
+    def on_error(error: Exception) -> None:
+        errors.append((error, home.rt_subscription_running, stream.closed))
+
+    with patch("tibber.home.LIVE_NO_MEASUREMENT_TIMEOUT", 0.01), _sleeps(stop_at=2) as sleep:
+        task = await _run_live_loop(home, callback, on_error)
+
+    assert task.cancelled()
+    [(error, running, closed)] = errors
+    assert isinstance(error, TimeoutError)
+    assert str(error) == f"No live measurement for home {HOME_ID} in 0.01 s"
+    assert not running
+    assert closed == 1
+    assert len(stream.device_ids) == 2
+    assert stream.closed == 2
+    assert callback.call_count == measurements
+    # The timeout backs off like any transient error, and the second connection's measurement resets the backoff.
+    assert _delays(sleep) == [1 + 1, 1 + 1]
+
+
+@pytest.mark.usefixtures("discover")
 async def test_rt_loop_evicted_waits_long(home: tibber.TibberHome, stream: _ScriptedStream) -> None:
     """An evicted stream waits five minutes before it connects again."""
     evictions = [LiveStreamError("evicted", transient=False), LiveStreamError("evicted", transient=False)]
@@ -760,33 +801,34 @@ async def test_rt_loop_no_devices_reports_and_retries(
 
 
 @pytest.mark.usefixtures("discover")
-async def test_rt_loop_401_retries_once_then_stops(home: tibber.TibberHome, stream: _ScriptedStream) -> None:
-    """A 401 is retried at once with a fresh token, and a second 401 in a row stops the loop."""
-    rejections = [InvalidLoginError(401, "Invalid token"), InvalidLoginError(401, "Invalid token")]
-    stream.scripts = [[rejections[0]], [rejections[1]]]
+async def test_rt_loop_401_retries_once_then_backs_off(home: tibber.TibberHome, stream: _ScriptedStream) -> None:
+    """A 401 is retried at once with a fresh token, and every further 401 in a row waits 15 minutes."""
+    rejections = [InvalidLoginError(401, "Invalid token") for _ in range(3)]
+    stream.scripts = [[rejections[0]], [rejections[1]], [rejections[2]], [_measurement()]]
+    callback = MagicMock()
     errors: list[Exception] = []
+    connections_at_sleep: list[int] = []
 
-    with _sleeps(stop_at=1) as sleep:
-        task = await _run_live_loop(home, on_error=errors.append)
+    def record_connections(_delay: float) -> None:
+        connections_at_sleep.append(len(stream.device_ids))
+        if len(connections_at_sleep) == 3:
+            raise asyncio.CancelledError
 
-    assert not task.cancelled()
-    assert task.exception() is None
-    assert len(stream.device_ids) == 2
-    sleep.assert_not_awaited()
+    with _sleeps(stop_at=3) as sleep:
+        sleep.side_effect = record_connections
+        task = await _run_live_loop(home, callback, errors.append)
+
+    assert task.cancelled()
     assert errors == rejections
-    assert not home.rt_subscription_running
-
-    # The stopped loop doesn't count as subscribed, so a new one can start.
-    await home.rt_subscribe(MagicMock())
-    restarted = home._rt_task  # noqa: SLF001
-    home.rt_unsubscribe()
-    await asyncio.wait([restarted], timeout=1)
-    assert restarted.cancelled()
+    # Two connects without a sleep, then 15 minutes before each further connect after a 401.
+    assert connections_at_sleep == [2, 3, 4]
+    assert _delays(sleep) == [900, 900, 1 + 1]
+    callback.assert_called_once()
 
 
 @pytest.mark.usefixtures("discover")
 async def test_rt_loop_401_after_reconnect_retries_again(home: tibber.TibberHome, stream: _ScriptedStream) -> None:
-    """Only 401s in a row stop the loop, a connection in between starts the count again."""
+    """Only 401s in a row back off, a connection in between starts the count again."""
     stream.scripts = [
         [InvalidLoginError(401, "Invalid token")],
         [_measurement()],
@@ -820,6 +862,14 @@ async def test_rt_loop_403_stops(home: tibber.TibberHome, stream: _ScriptedStrea
     assert len(stream.device_ids) == 1
     sleep.assert_not_awaited()
     assert errors == [error]
+    assert not home.rt_subscription_running
+
+    # The stopped loop doesn't count as subscribed, so a new one can start.
+    await home.rt_subscribe(MagicMock())
+    restarted = home._rt_task  # noqa: SLF001
+    home.rt_unsubscribe()
+    await asyncio.wait([restarted], timeout=1)
+    assert restarted.cancelled()
 
 
 @pytest.mark.usefixtures("discover")

@@ -113,11 +113,13 @@ async def run():
         await home.rt_subscribe(_callback, on_error=_on_error)
         await asyncio.sleep(60)
 
-        home.rt_unsubscribe()
         await tibber_connection.rt_disconnect()
 
 asyncio.run(run())
 ```
+
+Without a `refresh_access_token` callback, the static access token expires after about an hour, and live data
+then stops reconnecting successfully.
 
 The library is used as part of Home Assistant.
 

@@ -97,6 +97,15 @@ def test_parse_rejects_bool_and_garbage() -> None:
     assert measurement.current_l1 is None
 
 
+@pytest.mark.parametrize("value", [10**400, "nan", "inf", float("inf")], ids=["overflow", "nan", "inf", "float_inf"])
+def test_parse_rejects_overflow_and_non_finite(value: object) -> None:
+    """Numbers too large for a float, NaN and infinity become None."""
+    measurement = parse_live_measurement({"deviceId": "d", "power": value, "signalStrength": value})
+    assert measurement is not None
+    assert measurement.power is None
+    assert measurement.signal_strength is None
+
+
 def test_parse_ignores_unknown_fields() -> None:
     """Unknown fields do not affect parsing."""
     assert parse_live_measurement({"deviceId": "d", "powerReactive": 5, "internalFoo": 1}) == LiveMeasurement(

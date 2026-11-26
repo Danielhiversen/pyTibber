@@ -56,6 +56,8 @@ LIVE_RECONNECT_MIN_DELAY: Final = 1
 LIVE_RECONNECT_MAX_DELAY: Final = 60
 EVICTED_RETRY_DELAY: Final = 300
 NO_LIVE_DEVICES_RETRY_DELAY: Final = 900
+# The server pings an idle stream, so a Pulse that has gone offline leaves the socket open without data.
+LIVE_NO_MEASUREMENT_TIMEOUT: Final = 120
 LIVE_POWER_WINDOW: Final = dt.timedelta(minutes=5)
 
 # Errors the live stream is expected to raise. Anything else is logged with its traceback.
@@ -78,8 +80,9 @@ def _reconnect_delay(attempt: int) -> float:
 def _live_retry_delay(error: Exception | None, attempt: int, consecutive_401: int) -> float | None:  # noqa: PLR0911
     """Return the seconds to wait before connecting again after a stream ended with `error`, or None to stop."""
     if isinstance(error, InvalidLoginError):
-        # Connecting again fetches a fresh token, so the first 401 in a row is retried at once.
-        return 0 if consecutive_401 == 1 else None
+        # Connecting again fetches a fresh token, so the first 401 in a row is retried at once. A token
+        # refresh that failed for a moment can cause more, so further 401s in a row wait instead of stopping.
+        return 0 if consecutive_401 == 1 else NO_LIVE_DEVICES_RETRY_DELAY
     if isinstance(error, FatalHttpExceptionError):
         return None
     if isinstance(error, RateLimitExceededError):
@@ -457,11 +460,12 @@ class TibberHome:
 
         :param callback: Called with every measurement. Exceptions it raises are logged.
         :param on_error: Called with every error instead of logging it, though unexpected errors are
-            logged with their traceback as well. The task stops after a second `InvalidLoginError` in
-            a row or any other `FatalHttpExceptionError`, such as an `InsufficientScopeError`, and
-            carries on after anything else. A home without live devices is reported as a
-            `RealTimeConsumptionDisabledError` every 15 minutes. Once the task has stopped,
-            `rt_subscribe` can start a new one.
+            logged with their traceback as well. The task stops after a `FatalHttpExceptionError` other
+            than `InvalidLoginError`, such as an `InsufficientScopeError`, and carries on after anything
+            else. A first `InvalidLoginError` is retried at once, and further ones in a row every 15
+            minutes. A home without live devices is reported as a `RealTimeConsumptionDisabledError`
+            every 15 minutes, and a stream without a measurement for 2 minutes as a `TimeoutError`.
+            Once the task has stopped, `rt_subscribe` can start a new one.
         """
         if self._rt_task is not None and not self._rt_task.done():
             raise RuntimeError("Already subscribed to real time data, call rt_unsubscribe first")
@@ -500,7 +504,7 @@ class TibberHome:
                 )
                 # aclosing releases the response at once when the loop body raises.
                 async with aclosing(stream):
-                    async for measurement in stream:
+                    while (measurement := await self._next_live_measurement(stream)) is not None:
                         enriched = self._enrich_measurement(measurement)
                         # Only a measurement that enriched cleanly resets the backoff.
                         attempt = 0
@@ -523,6 +527,23 @@ class TibberHome:
             if delay > 0:
                 await _sleep(delay)
             attempt += 1
+
+    async def _next_live_measurement(self, stream: AsyncGenerator[LiveMeasurement, None]) -> LiveMeasurement | None:
+        """Return the next measurement of the stream, or None when the stream has ended.
+
+        :raises TimeoutError: No measurement arrived within `LIVE_NO_MEASUREMENT_TIMEOUT` seconds.
+        """
+        watchdog = asyncio.timeout(LIVE_NO_MEASUREMENT_TIMEOUT)
+        try:
+            async with watchdog:
+                return await anext(stream, None)
+        except TimeoutError:
+            if not watchdog.expired():
+                # The stream's own timeout, such as the socket read timeout.
+                raise
+            raise TimeoutError(
+                f"No live measurement for home {self._home_id} in {LIVE_NO_MEASUREMENT_TIMEOUT} s",
+            ) from None
 
     async def _rt_device_ids(self) -> list[str]:
         """Discover the home's live devices and return the ids of the ones to stream."""
