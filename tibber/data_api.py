@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import json
 import logging
 import math
 import random
@@ -20,14 +21,25 @@ from .exceptions import (
     FatalHttpExceptionError,
     InsufficientScopeError,
     InvalidLoginError,
+    LiveStreamError,
     PricesNotAvailableError,
     RateLimitExceededError,
     RetryableHttpExceptionError,
     UserAgentMissingError,
 )
+from .live_events import (
+    LIVE_EVENTS_READ_TIMEOUT,
+    MAX_LIVE_EVENT_DEVICES,
+    LiveEventDevice,
+    LiveMeasurement,
+    iter_sse_events,
+    parse_live_measurement,
+)
 from .response_handler import extract_response_data
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Sequence
+
     from .token_manager import TokenManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -110,6 +122,26 @@ def _parse_price_interval(item: object) -> PriceInterval | None:
         start=start,
         consumption=_parse_price_details(item.get("consumption")),
         production=_parse_price_details(item.get("production")),
+    )
+
+
+def _parse_stream_error(data: str) -> LiveStreamError:
+    """Build a LiveStreamError from `stream_error` event data, tolerating malformed data."""
+    try:
+        payload = json.loads(data)
+    except ValueError:
+        payload = None
+    if not isinstance(payload, dict) or not isinstance(payload.get("code"), str):
+        return LiveStreamError("unknown", transient=True)
+    retry_after = payload.get("retryAfter")
+    if isinstance(retry_after, bool) or not isinstance(retry_after, int | float):
+        retry_after = None
+    device_id = payload.get("deviceId")
+    return LiveStreamError(
+        payload["code"],
+        transient=payload.get("transient") is True,
+        retry_after=None if retry_after is None else float(retry_after),
+        device_id=device_id if isinstance(device_id, str) else None,
     )
 
 
@@ -437,6 +469,67 @@ class TibberDataAPI:
         """Get all devices for a specific home."""
         response = await self._make_request("GET", f"/v1/homes/{home_id}/devices")
         return response.get("devices", [])
+
+    async def get_live_event_devices(self, home_id: str) -> list[LiveEventDevice]:
+        """Get the devices of a home that can stream live events.
+
+        Requires the data-api-meters-read scope; without it the API returns an empty list.
+        """
+        response = await self._make_request("GET", f"/v1/homes/{home_id}/live-events/devices")
+        return [
+            LiveEventDevice(id=device["id"], type=device["type"])
+            for device in response.get("devices", [])
+            if isinstance(device.get("id"), str)
+            and device["id"]
+            and isinstance(device.get("type"), str)
+            and device["type"]
+        ]
+
+    async def stream_live_events(self, home_id: str, device_ids: Sequence[str]) -> AsyncIterator[LiveMeasurement]:
+        """Stream live measurements for up to five devices of a home.
+
+        Yields measurements until the server closes the stream. Only one live events connection per
+        home is allowed, a new connection evicts the old one.
+
+        :raises ValueError: `device_ids` is empty or has more than five ids.
+        :raises LiveStreamError: The server sent a `stream_error` event.
+        :raises HttpExceptionError: The server answered with a non-200 status.
+        """
+        if not 1 <= len(device_ids) <= MAX_LIVE_EVENT_DEVICES:
+            raise ValueError(f"Live events need between 1 and {MAX_LIVE_EVENT_DEVICES} device ids")
+        access_token = await self._token_manager.async_get_access_token()
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "text/event-stream",
+            aiohttp.hdrs.USER_AGENT: self._user_agent,
+        }
+        response = await self.websession.request(
+            "GET",
+            f"{DATA_API_ENDPOINT}/v1/homes/{home_id}/live-events",
+            headers=headers,
+            params=[("deviceId", device_id) for device_id in device_ids],
+            timeout=aiohttp.ClientTimeout(total=None, sock_connect=self.timeout, sock_read=LIVE_EVENTS_READ_TIMEOUT),
+        )
+        try:
+            if response.status != HTTPStatus.OK:
+                await self._handle_error_response(response)
+            async for event in iter_sse_events(response.content):
+                if event.event == "stream_error":
+                    raise _parse_stream_error(event.data)
+                if event.event != "measurement":
+                    continue
+                try:
+                    payload = json.loads(event.data)
+                except ValueError:
+                    _LOGGER.debug("Skipping live event with invalid JSON")
+                    continue
+                measurement = parse_live_measurement(payload)
+                if measurement is None:
+                    _LOGGER.debug("Skipping unparsable live measurement")
+                    continue
+                yield measurement
+        finally:
+            response.release()
 
     async def get_device(self, home_id: str, device_id: str) -> TibberDevice | None:
         """Get detailed information about a specific device."""

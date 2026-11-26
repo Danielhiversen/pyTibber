@@ -94,3 +94,27 @@ class WebsocketReconnectedError(WebsocketError):
 
 class WebsocketTransportError(WebsocketError):
     """Exception raised when websocket transport fails."""
+
+
+class LiveStreamError(TibberError):
+    """The Data API live events stream reported an error and closed.
+
+    :param code: the error code, for example `upstream_unavailable`, `device_not_streamable` or `evicted`
+    :param transient: whether reconnecting can be expected to help
+    :param retry_after: seconds the server asked to wait before reconnecting, if any
+    :param device_id: the device the error concerns, if any
+    """
+
+    def __init__(
+        self,
+        code: str,
+        *,
+        transient: bool,
+        retry_after: float | None = None,
+        device_id: str | None = None,
+    ) -> None:
+        self.code = code
+        self.transient = transient
+        self.retry_after = retry_after
+        self.device_id = device_id
+        super().__init__(f"Live stream error: {code}")
