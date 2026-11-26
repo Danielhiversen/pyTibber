@@ -38,24 +38,6 @@ HISTORIC_DATA_DATE = """
                       }}
                     }}
                     """
-HISTORIC_PRICE = """
-                {{
-                  viewer {{
-                    home(id: "{0}") {{
-                      currentSubscription {{
-                        priceRating {{
-                            {1} {{
-                              entries {{
-                                  time
-                                  total
-                              }}
-                            }}
-                         }}
-                     }}
-                  }}
-                  }}
-                }}
-          """
 INFO = """
         {
           viewer {

@@ -75,6 +75,11 @@ def _format_price_time(value: dt.datetime) -> str:
     return value.astimezone(dt.UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
+def _is_data_api_url(url: str) -> bool:
+    """Return whether an absolute URL is on the Data API origin."""
+    return urlsplit(url)[:2] == urlsplit(DATA_API_ENDPOINT)[:2]
+
+
 def _parse_float(value: object) -> float | None:
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None
@@ -178,7 +183,7 @@ class TibberDataAPI:
         :param rate_limit_attempt: Number of 429 responses already retried for this request.
         """
         url = urljoin(DATA_API_ENDPOINT, endpoint)
-        if urlsplit(url)[:2] != urlsplit(DATA_API_ENDPOINT)[:2]:
+        if not _is_data_api_url(url):
             raise ValueError("Request URL must use the Tibber Data API origin")
         access_token = await self._token_manager.async_get_access_token()
 
@@ -238,11 +243,17 @@ class TibberDataAPI:
 
     @staticmethod
     def _parse_retry_after(retry_after: str) -> float | None:
-        """Parse a Retry-After header value (seconds or HTTP-date) into seconds from now."""
+        """Parse a Retry-After header value (seconds or HTTP-date) into seconds from now.
+
+        Returns None when the value isn't a usable wait, such as `inf`, `nan` or text that isn't a date.
+        A wait that is already over, like a negative number of seconds or a past date, is 0.
+        """
         try:
-            return float(int(float(retry_after)))
+            seconds = float(retry_after)
         except ValueError:
             pass
+        else:
+            return max(0.0, seconds) if math.isfinite(seconds) else None
         try:
             retry_time = parsedate_to_datetime(retry_after)
         except (TypeError, ValueError):
@@ -367,23 +378,34 @@ class TibberDataAPI:
         :raises PricesNotAvailableError: The account has no access to prices, the home has no prices,
             or `start` is before the start of the home's price history.
         :raises InsufficientScopeError: The access token lacks the data-api-prices-read scope.
+        :raises FatalHttpExceptionError: A page links to another origin than the Data API.
+        :raises ValueError: `start` or `end` is not timezone aware.
+
+        Items that aren't valid prices are skipped with a warning. When the page limit is reached before
+        `end` while the Data API still links on, that is logged as a warning too and the result can be
+        incomplete. A range without prices, such as one where `end` is not after `start`, gives no intervals.
         """
-        endpoint = f"{DATA_API_ENDPOINT}/v1/homes/{home_id}/prices"
-        url = endpoint
         if start.utcoffset() is None or end.utcoffset() is None:
             raise ValueError("Price times must be timezone aware")
+        if end <= start:
+            return Prices(currency=None, intervals=[])
+        endpoint = f"{DATA_API_ENDPOINT}/v1/homes/{home_id}/prices"
+        url = endpoint
         params: dict[str, Any] | None = {"since": _format_price_time(start)}
         # Each page holds up to 48 hours. The margin covers price history gaps.
-        max_pages = max(math.ceil((end - start) / PRICE_PAGE_SPAN), 1) + 5
+        max_pages = math.ceil((end - start) / PRICE_PAGE_SPAN) + 5
         currency: str | None = None
         intervals: dict[dt.datetime, PriceInterval] = {}
         cursor = start
         for _ in range(max_pages):
             page = await self._make_request("GET", url, params=params)
             currency = page.get("currency") or currency
-            page_intervals = [
-                interval for item in page.get("items") or [] if (interval := _parse_price_interval(item)) is not None
-            ]
+            items = page.get("items")
+            if not isinstance(items, list):
+                items = []
+            page_intervals = [interval for item in items if (interval := _parse_price_interval(item)) is not None]
+            if skipped := len(items) - len(page_intervals):
+                _LOGGER.warning("Home %s: skipped %d malformed price items", home_id, skipped)
             intervals.update((interval.start, interval) for interval in page_intervals if start <= interval.start < end)
             if page_intervals:
                 cursor = max(interval.start for interval in page_intervals) + PRICE_INTERVAL
@@ -391,9 +413,23 @@ class TibberDataAPI:
                 # An empty page at the present means newer prices aren't published yet.
                 break
             # An empty page in the past is a gap in the price history, and `next` skips it.
-            if cursor >= end or not (next_link := page.get("next")):
+            next_link = page.get("next")
+            if cursor >= end or not next_link or not isinstance(next_link, str):
                 break
             url, params = urljoin(endpoint, next_link), None
+            if not _is_data_api_url(url):
+                raise FatalHttpExceptionError(
+                    HTTPStatus.OK,
+                    f"A price page links to another origin: {urlsplit(url).netloc!r}",
+                    "INVALID_NEXT_LINK",
+                )
+        else:
+            _LOGGER.warning(
+                "Home %s: stopped after %d price pages before reaching %s, so the prices may be incomplete",
+                home_id,
+                max_pages,
+                end,
+            )
 
         return Prices(currency=currency, intervals=sorted(intervals.values(), key=lambda interval: interval.start))
 

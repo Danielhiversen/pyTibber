@@ -17,6 +17,9 @@ RESOLUTION_WEEKLY: Final = "WEEKLY"
 RESOLUTION_MONTHLY: Final = "MONTHLY"
 RESOLUTION_ANNUAL: Final = "ANNUAL"
 
+# The currency of a home before its prices have told it, by the country of its address.
+CURRENCY_BY_COUNTRY: Final = {"DE": "EUR", "NL": "EUR", "NO": "NOK", "SE": "SEK"}
+
 API_ERR_CODE_UNKNOWN: Final = "UNKNOWN"
 API_ERR_CODE_UNAUTH: Final = "UNAUTHENTICATED"
 HTTP_CODES_RETRIABLE: Final = [

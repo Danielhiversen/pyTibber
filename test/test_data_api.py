@@ -8,7 +8,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from tibber.data_api import PriceDetails, PriceInterval, TibberDataAPI, TibberDevice
-from tibber.exceptions import InsufficientScopeError, PricesNotAvailableError, RateLimitExceededError
+from tibber.exceptions import (
+    FatalHttpExceptionError,
+    InsufficientScopeError,
+    PricesNotAvailableError,
+    RateLimitExceededError,
+)
 from tibber.token_manager import TokenManager
 
 
@@ -292,10 +297,76 @@ async def test_get_prices_rejects_links_to_other_origins(
     request = AsyncMock(return_value=_page(_quarters(start.isoformat(), 1), "https://example.com/prices"))
     monkeypatch.setattr(data_api.websession, "request", request)
 
-    with pytest.raises(ValueError, match="Data API origin"):
+    with pytest.raises(FatalHttpExceptionError, match="another origin") as error:
         await data_api.get_prices("home-1", start, start + dt.timedelta(days=1))
 
+    assert error.value.extension_code == "INVALID_NEXT_LINK"
     assert request.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_get_prices_without_a_range_makes_no_request(
+    data_api: TibberDataAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An `end` that is not after `start` is an empty range."""
+    request = AsyncMock()
+    monkeypatch.setattr(data_api.websession, "request", request)
+    start = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
+
+    for end in (start, start - dt.timedelta(days=1)):
+        prices = await data_api.get_prices("home-1", start, end)
+        assert prices.intervals == []
+
+    request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_prices_warns_when_the_page_limit_is_reached(
+    data_api: TibberDataAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Pages that keep linking on without reaching `end` must not end silently."""
+    start = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
+    # A day needs one page, and the limit adds a margin of five for gaps in the price history.
+    request = AsyncMock(side_effect=[_page(_quarters(start.isoformat(), 1), f"{PRICES_URL}?since=more")] * 6)
+    monkeypatch.setattr(data_api.websession, "request", request)
+    caplog.set_level("WARNING", logger="tibber.data_api")
+
+    prices = await data_api.get_prices("home-1", start, start + dt.timedelta(days=1))
+
+    assert request.await_count == 6
+    assert len(prices.intervals) == 1
+    assert "stopped after 6 price pages" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_get_prices_warns_about_malformed_items(
+    data_api: TibberDataAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Items that aren't valid prices are skipped, loudly, instead of looking like missing prices."""
+    start = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
+    page = _response(
+        {
+            "currency": "NOK",
+            "items": [
+                {"time": "2026-01-01T00:00:00Z", "consumption": {"price": 1.0}},
+                {"time": "not a time", "consumption": {"price": 1.0}},
+                {"time": "2026-01-01T00:30:00", "consumption": {"price": 1.0}},
+                "not an item",
+            ],
+        },
+    )
+    monkeypatch.setattr(data_api.websession, "request", AsyncMock(return_value=page))
+    caplog.set_level("WARNING", logger="tibber.data_api")
+
+    prices = await data_api.get_prices("home-1", start, start + dt.timedelta(days=1))
+
+    assert [interval.start for interval in prices.intervals] == [start]
+    assert "skipped 3 malformed price items" in caplog.text
 
 
 @pytest.mark.asyncio
@@ -345,15 +416,31 @@ async def test_rate_limit_attempts_are_per_request(data_api: TibberDataAPI, monk
     ("retry_after", "expected"),
     [
         ("5", 5.0),
-        (format_datetime(dt.datetime.now(dt.UTC) + dt.timedelta(seconds=30), usegmt=True), 30.0),
+        ("1.9", 1.9),
+        ("-5", 0.0),
+        ("inf", None),
+        ("1e999", None),
+        ("nan", None),
         ("not a date", None),
     ],
 )
-def test_parse_retry_after(retry_after: str, expected: float | None) -> None:
-    """Retry-After is either seconds or an HTTP-date."""
-    seconds = TibberDataAPI._parse_retry_after(retry_after)  # noqa: SLF001
+def test_parse_retry_after_seconds(retry_after: str, expected: float | None) -> None:
+    """Retry-After in seconds is never negative, and a value that isn't a finite wait is no wait at all."""
+    assert TibberDataAPI._parse_retry_after(retry_after) == expected  # noqa: SLF001
 
-    if expected is None:
-        assert seconds is None
-    else:
-        assert seconds == pytest.approx(expected, abs=1.5)
+
+def test_parse_retry_after_http_date() -> None:
+    """An HTTP-date is the seconds until then, or 0 when it has passed."""
+    # The header has whole seconds, which takes up to a second off the wait.
+    retry_at = dt.datetime.now(dt.UTC) + dt.timedelta(seconds=30)
+
+    assert TibberDataAPI._parse_retry_after(format_datetime(retry_at, usegmt=True)) == pytest.approx(  # noqa: SLF001
+        30,
+        abs=1.5,
+    )
+    assert TibberDataAPI._parse_retry_after("Wed, 21 Oct 2015 07:28:00 GMT") == 0.0  # noqa: SLF001
+
+
+def test_infinite_retry_after_falls_back_to_backoff(data_api: TibberDataAPI) -> None:
+    """A Retry-After that can't be used must not break the wait calculation."""
+    assert 1.0 <= data_api._calculate_429_wait_time("inf", 0) <= 31.0  # noqa: SLF001

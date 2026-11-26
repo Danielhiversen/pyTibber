@@ -7,12 +7,13 @@ import datetime as dt
 import logging
 from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, call, create_autospec, patch
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiohttp
 import pytest
 
 import tibber
-from tibber.data_api import PriceDetails, PriceInterval
+from tibber.data_api import PriceDetails, PriceInterval, Prices
 from tibber.exceptions import (
     InvalidLoginError,
     PricesNotAvailableError,
@@ -1321,6 +1322,12 @@ def _interval(time: str, price: float) -> PriceInterval:
     return PriceInterval(start=dt.datetime.fromisoformat(time), consumption=PriceDetails(price=price))
 
 
+def _quarters(start: str, count: int) -> list[PriceInterval]:
+    """Return `count` consecutive 15-minute intervals from `start`, priced by their position."""
+    first = dt.datetime.fromisoformat(start)
+    return [_interval((first + dt.timedelta(minutes=15 * index)).isoformat(), float(index)) for index in range(count)]
+
+
 async def test_update_prices_fetches_today_and_tomorrow(
     home: tibber.TibberHome,
     tibber_connection: tibber.Tibber,
@@ -1386,6 +1393,96 @@ async def test_update_prices_raises_and_keeps_prices(
         await home.update_prices()
 
     assert home.prices == known_prices
+
+
+async def test_update_prices_only_fetches_the_unknown_prices(
+    home: tibber.TibberHome,
+    tibber_connection: tibber.Tibber,
+    monkeypatch: pytest.MonkeyPatch,
+    frozen_clock: type[FixedDateTime],
+) -> None:
+    """Published prices never change, so a later update asks for what follows the known ones."""
+    tibber_connection.time_zone = dt.timezone(dt.timedelta(hours=2))
+    today = _quarters("2026-05-06T00:00:00+02:00", 4)
+    yesterday = [_interval("2026-05-05T23:45:00+02:00", 9.0)]
+    home.prices = yesterday + today
+    new = [_interval("2026-05-06T01:00:00+02:00", 5.0)]
+    get_prices = AsyncMock(return_value=Prices(currency="NOK", intervals=new))
+    monkeypatch.setattr(tibber_connection.data_api, "get_prices", get_prices)
+    since = dt.datetime(2026, 5, 5, 23, 0, tzinfo=dt.UTC)
+    end = dt.datetime(2026, 5, 8, 0, 0, tzinfo=dt.timezone(dt.timedelta(hours=2)))
+
+    with patch("tibber.home.dt.datetime", frozen_clock):
+        await home.update_prices()
+
+    get_prices.assert_awaited_once_with(HOME_ID, since, end)
+    assert home.prices == today + new
+
+
+async def test_update_prices_fetches_nothing_when_the_prices_are_complete(
+    home: tibber.TibberHome,
+    tibber_connection: tibber.Tibber,
+    monkeypatch: pytest.MonkeyPatch,
+    frozen_clock: type[FixedDateTime],
+) -> None:
+    """With today's and tomorrow's prices known there is nothing to fetch, but yesterday's prices go."""
+    tibber_connection.time_zone = dt.timezone(dt.timedelta(hours=2))
+    complete = _quarters("2026-05-06T00:00:00+02:00", 192)
+    home.prices = [_interval("2026-05-05T23:45:00+02:00", 9.0), *complete]
+    get_prices = AsyncMock()
+    monkeypatch.setattr(tibber_connection.data_api, "get_prices", get_prices)
+
+    with patch("tibber.home.dt.datetime", frozen_clock):
+        await home.update_prices()
+
+    get_prices.assert_not_awaited()
+    assert home.prices == complete
+
+
+async def test_update_prices_fetches_a_hole_in_the_known_prices_again(
+    home: tibber.TibberHome,
+    tibber_connection: tibber.Tibber,
+    monkeypatch: pytest.MonkeyPatch,
+    frozen_clock: type[FixedDateTime],
+) -> None:
+    """A price that was missed once is fetched again, together with what follows it."""
+    tibber_connection.time_zone = dt.timezone(dt.timedelta(hours=2))
+    known = _quarters("2026-05-06T00:00:00+02:00", 3)
+    after_hole = [_interval("2026-05-06T01:00:00+02:00", 7.0)]
+    home.prices = known + after_hole
+    new = [_interval("2026-05-06T00:45:00+02:00", 3.0), *after_hole]
+    get_prices = AsyncMock(return_value=Prices(currency="NOK", intervals=new))
+    monkeypatch.setattr(tibber_connection.data_api, "get_prices", get_prices)
+
+    with patch("tibber.home.dt.datetime", frozen_clock):
+        await home.update_prices()
+
+    assert get_prices.await_args.args[1] == dt.datetime(2026, 5, 5, 22, 45, tzinfo=dt.UTC)
+    assert home.prices == known + new
+
+
+async def test_update_prices_counts_the_intervals_of_a_summer_time_change(
+    home: tibber.TibberHome,
+    tibber_connection: tibber.Tibber,
+    monkeypatch: pytest.MonkeyPatch,
+    frozen_clock: type[FixedDateTime],
+) -> None:
+    """The day that summer time ends has 100 intervals, and the next one to fetch comes after them."""
+    try:
+        tibber_connection.time_zone = ZoneInfo("Europe/Oslo")
+    except ZoneInfoNotFoundError:
+        pytest.skip("No time zone database")
+    day = _quarters("2026-10-24T22:00:00+00:00", 100)
+    home.prices = day
+    get_prices = AsyncMock(return_value=Prices(currency="NOK", intervals=[]))
+    monkeypatch.setattr(tibber_connection.data_api, "get_prices", get_prices)
+
+    with patch("tibber.home.dt.datetime", frozen_clock):
+        frozen_clock.current = dt.datetime(2026, 10, 25, 12, 0, tzinfo=dt.UTC)
+        await home.update_prices()
+
+    assert get_prices.await_args.args[1] == dt.datetime(2026, 10, 25, 23, 0, tzinfo=dt.UTC)
+    assert home.prices == day
 
 
 async def test_update_prices_clears_prices_when_not_available(
@@ -1480,15 +1577,119 @@ async def test_current_attributes(
 
 
 async def test_current_attributes_without_prices(home: tibber.TibberHome) -> None:
-    """No prices today gives zeros."""
-    assert home.current_attributes() == {
-        "max_price": 0.0,
-        "avg_price": 0.0,
-        "min_price": 0.0,
-        "off_peak_1": 0.0,
-        "peak": 0.0,
-        "off_peak_2": 0.0,
-    }
+    """No prices today gives nothing, as zeros would look like real prices."""
+    assert home.current_attributes() == {}
+
+    home.prices = [PriceInterval(start=dt.datetime(2026, 5, 6, tzinfo=dt.UTC), production=PriceDetails(price=1.0))]
+    assert home.current_attributes() == {}
+
+
+@pytest.mark.parametrize(
+    ("resolution", "prices", "expected"),
+    [
+        (
+            "HOURLY",
+            [
+                ("2026-05-05T22:00:00Z", 1.0),
+                ("2026-05-05T22:15:00Z", 2.0),
+                ("2026-05-05T22:30:00Z", 3.0),
+                ("2026-05-05T22:45:00Z", 4.0),
+                ("2026-05-05T23:00:00Z", 6.0),
+            ],
+            [("2026-05-06T00:00:00+02:00", 2.5), ("2026-05-06T01:00:00+02:00", 6.0)],
+        ),
+        (
+            "daily",
+            [("2026-05-05T21:45:00Z", 1.0), ("2026-05-05T22:00:00Z", 3.0), ("2026-05-05T22:15:00Z", 5.0)],
+            [("2026-05-05T00:00:00+02:00", 1.0), ("2026-05-06T00:00:00+02:00", 4.0)],
+        ),
+        (
+            "MONTHLY",
+            [("2026-04-30T21:45:00Z", 1.0), ("2026-04-30T22:00:00Z", 3.0), ("2026-05-01T22:00:00Z", 5.0)],
+            [("2026-04-01T00:00:00+02:00", 1.0), ("2026-05-01T00:00:00+02:00", 4.0)],
+        ),
+    ],
+)
+async def test_get_historic_price_data_averages_the_prices_of_each_period(
+    home: tibber.TibberHome,
+    tibber_connection: tibber.Tibber,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    resolution: str,
+    prices: list[tuple[str, float]],
+    expected: list[tuple[str, float]],
+) -> None:
+    """The 15-minute prices are averaged per period of the home's time zone, and a period needs a price."""
+    tibber_connection.time_zone = dt.timezone(dt.timedelta(hours=2))
+    intervals = [_interval(time, price) for time, price in prices]
+    # A production price alone isn't a price to pay, so it doesn't make a period of its own.
+    intervals.append(PriceInterval(start=dt.datetime(2026, 7, 1, tzinfo=dt.UTC), production=PriceDetails(price=9.0)))
+    get_prices = AsyncMock(return_value=Prices(currency="NOK", intervals=intervals))
+    monkeypatch.setattr(tibber_connection.data_api, "get_prices", get_prices)
+    start = dt.datetime(2026, 4, 1, tzinfo=dt.UTC)
+    end = dt.datetime(2026, 8, 1, tzinfo=dt.UTC)
+
+    entries = await home.get_historic_price_data(start, end, resolution)
+
+    get_prices.assert_awaited_once_with(HOME_ID, start, end)
+    assert entries == [{"time": time, "total": total} for time, total in expected]
+    assert home.prices == []
+
+
+async def test_get_historic_price_data_tells_apart_the_hours_of_a_summer_time_change(
+    home: tibber.TibberHome,
+    tibber_connection: tibber.Tibber,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The hour that summer time ends is there twice, and must not become one period."""
+    try:
+        tibber_connection.time_zone = ZoneInfo("Europe/Oslo")
+    except ZoneInfoNotFoundError:
+        pytest.skip("No time zone database")
+    intervals = [_interval("2026-10-25T00:00:00+00:00", 1.0), _interval("2026-10-25T01:00:00+00:00", 3.0)]
+    monkeypatch.setattr(
+        tibber_connection.data_api,
+        "get_prices",
+        AsyncMock(return_value=Prices(currency="NOK", intervals=intervals)),
+    )
+    start = dt.datetime(2026, 10, 25, tzinfo=dt.UTC)
+
+    entries = await home.get_historic_price_data(start, start + dt.timedelta(days=1))
+
+    assert entries == [
+        {"time": "2026-10-25T02:00:00+02:00", "total": 1.0},
+        {"time": "2026-10-25T02:00:00+01:00", "total": 3.0},
+    ]
+
+
+async def test_get_historic_price_data_rejects_unsupported_resolutions(
+    home: tibber.TibberHome,
+    tibber_connection: tibber.Tibber,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Data API has no weekly or annual prices, so they aren't made up from the 15-minute ones."""
+    get_prices = AsyncMock()
+    monkeypatch.setattr(tibber_connection.data_api, "get_prices", get_prices)
+    start = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
+
+    with pytest.raises(ValueError, match="Unsupported resolution WEEKLY"):
+        await home.get_historic_price_data(start, start + dt.timedelta(days=30), "WEEKLY")
+
+    get_prices.assert_not_awaited()
+
+
+async def test_get_historic_price_data_raises_when_prices_are_not_available(
+    home: tibber.TibberHome,
+    tibber_connection: tibber.Tibber,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A range before the price history of the home is an error, not an empty list."""
+    error = PricesNotAvailableError(403, "Before the history", "prices-not-available")
+    monkeypatch.setattr(tibber_connection.data_api, "get_prices", AsyncMock(side_effect=error))
+    start = dt.datetime(2000, 1, 1, tzinfo=dt.UTC)
+
+    with pytest.raises(PricesNotAvailableError):
+        await home.get_historic_price_data(start, start + dt.timedelta(days=1))
 
 
 @pytest.mark.parametrize(("country", "currency"), [("SE", "SEK"), ("NO", "NOK"), ("DE", "EUR"), ("XX", "")])
