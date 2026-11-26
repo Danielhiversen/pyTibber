@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import datetime as dt
 import logging
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
-from unittest.mock import AsyncMock, MagicMock, call, create_autospec, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiohttp
@@ -15,20 +17,19 @@ import pytest
 import tibber
 from tibber.data_api import PriceDetails, PriceInterval, Prices
 from tibber.exceptions import (
+    FatalHttpExceptionError,
+    InsufficientScopeError,
     InvalidLoginError,
+    LiveStreamError,
     PricesNotAvailableError,
     RateLimitExceededError,
     RealTimeConsumptionDisabledError,
-    SubscriptionFailedError,
-    WebsocketReconnectedError,
-    WebsocketTransportError,
+    RetryableHttpExceptionError,
 )
-from tibber.gql_queries import INFO, REAL_TIME_CONSUMPTION_ENABLED
-from tibber.home import REAL_TIME_CONSUMPTION_DISABLED_GRACE
-from tibber.realtime import TibberRT
+from tibber.live_events import LiveEventDevice, LiveMeasurement
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncGenerator
+    from collections.abc import AsyncIterator, Callable, Iterator, Sequence
 
     from .conftest import FixedDateTime
 
@@ -63,34 +64,9 @@ def mock_websession() -> MagicMock:
 
 
 @pytest.fixture
-def mock_realtime(tibber_connection: tibber.Tibber) -> MagicMock:
-    rt = create_autospec(TibberRT, instance=True, subscription_running=False)
-    rt.connect = AsyncMock(side_effect=lambda: setattr(rt, "subscription_running", True))
-    tibber_connection.realtime = rt
-    return rt
-
-
-@pytest.fixture
-async def home(tibber_connection: tibber.Tibber, mock_websession: MagicMock) -> tibber.TibberHome:
-    """Return a home that already believes real time consumption is enabled.
-
-    The status is seeded through the public API rather than by assigning to the private attribute,
-    so the fixture keeps working across refactors. The post mock is replaced afterwards, so that
-    tests start from a clean call count.
-    """
-    home = tibber.TibberHome(HOME_ID, tibber_connection)
-    mock_websession.post = _make_status_response(rt_enabled=True)
-    await home.update_real_time_consumption_enabled()
-    mock_websession.post = AsyncMock()
-    return home
-
-
-def _status_payload(rt_enabled: bool | None, *, with_features: bool = True) -> dict[str, Any]:
-    """Return a REAL_TIME_CONSUMPTION_ENABLED payload reporting the given status."""
-    home_payload: dict[str, Any] = {"id": HOME_ID}
-    if with_features:
-        home_payload["features"] = {"realTimeConsumptionEnabled": rt_enabled}
-    return {"data": {"viewer": {"home": home_payload}}}
+def home(tibber_connection: tibber.Tibber) -> tibber.TibberHome:
+    """Return a home."""
+    return tibber.TibberHome(HOME_ID, tibber_connection)
 
 
 def _json_response(payload: dict[str, Any]) -> MagicMock:
@@ -102,1215 +78,11 @@ def _json_response(payload: dict[str, Any]) -> MagicMock:
     return mock_response
 
 
-def _make_status_response(rt_enabled: bool) -> AsyncMock:
-    """Return a post mock whose response reports the given real time consumption status."""
-    return AsyncMock(return_value=_json_response(_status_payload(rt_enabled)))
-
-
-def _gql_call(query: str) -> Any:  # noqa: ANN401
-    """Return the expected websession.post call for a GraphQL query."""
-    return call(
-        "https://api.tibber.com/v1-beta/gql",
-        headers={
-            "Authorization": "Bearer test-token",
-            "User-Agent": "test",
-        },
-        data={"query": query, "variables": {}},
-        timeout=aiohttp.ClientTimeout(total=10),
-    )
-
-
-# One resubscribe cycle: refresh the real time consumption status, then refresh info.
-RESUBSCRIBE_HTTP_CALLS = [_gql_call(REAL_TIME_CONSUMPTION_ENABLED % HOME_ID), _gql_call(INFO)]
-
-
-def _make_blocking_subscribe(
-    yielded: list[Any],
-) -> tuple[asyncio.Event, Any]:
-    """Return (release_event, subscribe_fn) that yields *yielded* then blocks."""
-    release = asyncio.Event()
-
-    async def subscribe(*args: Any, **kwargs: Any) -> AsyncGenerator[Any, None]:  # noqa: ANN401, ARG001
-        for item in yielded:
-            yield item
-        await release.wait()
-
-    return release, subscribe
-
-
-async def test_rt_subscribe_connects_and_calls_callback(
-    home: tibber.TibberHome,
-    mock_realtime: MagicMock,
-) -> None:
-    """Test that rt_subscribe connects via realtime and delivers subscription data to the callback."""
-    sample_data = {"key": "value"}
-    _, subscribe_fn = _make_blocking_subscribe([sample_data])
-    mock_realtime.subscribe = subscribe_fn
-
-    received: list[dict] = []
-    callback_called = asyncio.Event()
-
-    def callback(data: dict) -> None:
-        received.append(data)
-        callback_called.set()
-
-    await home.rt_subscribe(callback)
-    await asyncio.wait_for(callback_called.wait(), timeout=1.0)
-
-    mock_realtime.connect.assert_awaited_once()
-    assert received == [{"data": sample_data}]
-    assert home.rt_subscription_running
-
-    home.rt_unsubscribe()
-    assert not home.rt_subscription_running
-
-
 async def test_rt_unsubscribe_noop_when_not_subscribed(home: tibber.TibberHome) -> None:
     """Calling rt_unsubscribe on a fresh home must not raise."""
     assert not home.rt_subscription_running
     home.rt_unsubscribe()  # should be a no-op
     assert not home.rt_subscription_running
-
-
-@pytest.mark.parametrize("enabled", [True, False])
-async def test_update_real_time_consumption_enabled_without_prior_info(
-    mock_websession: MagicMock,
-    tibber_connection: tibber.Tibber,
-    enabled: bool,
-) -> None:
-    """Updating the flag must not require info to be populated first."""
-    # A freshly constructed home has a never-read status and no info.
-    home = tibber.TibberHome(HOME_ID, tibber_connection)
-    assert home.info == {}
-
-    mock_websession.post = _make_status_response(rt_enabled=enabled)
-
-    await home.update_real_time_consumption_enabled()
-
-    assert home.has_real_time_consumption is enabled
-    # The method must not mutate info as a side effect.
-    assert home.info == {}
-
-
-async def test_rt_subscribe_multiple_items_all_delivered(
-    home: tibber.TibberHome,
-    mock_realtime: MagicMock,
-) -> None:
-    """All items yielded by subscribe must be delivered to the callback in order."""
-    items = [{"n": 1}, {"n": 2}, {"n": 3}]
-    _, subscribe_fn = _make_blocking_subscribe(items)
-    mock_realtime.subscribe = subscribe_fn
-
-    received: list[dict] = []
-    all_received = asyncio.Event()
-
-    def callback(data: dict) -> None:
-        received.append(data)
-        if len(received) == len(items):
-            all_received.set()
-
-    await home.rt_subscribe(callback)
-    await asyncio.wait_for(all_received.wait(), timeout=1.0)
-
-    assert received == [{"data": item} for item in items]
-
-    home.rt_unsubscribe()
-
-
-@pytest.mark.parametrize("real_time_consumption", [False, True])
-@pytest.mark.parametrize(
-    "error",
-    [
-        WebsocketReconnectedError("reconnected"),
-        WebsocketTransportError("transport error"),
-        RuntimeError("unexpected"),
-    ],
-)
-@patch("tibber.home.RESUBSCRIBE_WAIT_TIME", 0)
-async def test_rt_subscribe_on_error_called_on_exception(
-    mock_websession: MagicMock,
-    home: tibber.TibberHome,
-    mock_realtime: MagicMock,
-    error: Exception,
-    real_time_consumption: bool,
-) -> None:
-    """on_error must be called when subscribe raises an exception."""
-    # Track which call number we're on to return different responses
-    call_count = 0
-    resubscribe_called = asyncio.Event()
-
-    def make_response(rt_enabled: bool) -> MagicMock:
-        mock_response = MagicMock()
-        mock_response.status = 200
-        mock_response.content_type = "application/json"
-        mock_response.json = AsyncMock(
-            return_value={
-                "data": {
-                    "viewer": {
-                        "home": {
-                            "id": HOME_ID,
-                            "features": {"realTimeConsumptionEnabled": rt_enabled},
-                        },
-                    },
-                },
-            },
-        )
-        return mock_response
-
-    async def post_side_effect(*args: Any, **kwargs: Any) -> MagicMock:  # noqa: ARG001, ANN401
-        nonlocal call_count
-        call_count += 1
-        # First two calls (initial subscription) always returns True to start subscription
-        # Subsequent calls (resubscription) return the real_time_consumption value
-        if call_count <= 2:
-            return make_response(True)
-        resubscribe_called.set()
-        return make_response(real_time_consumption)
-
-    mock_websession.post.side_effect = post_side_effect
-
-    wait_for_events = asyncio.Event()
-    wait_for_events.set()  # allow subscribe to raise immediately
-
-    async def subscribe_raises(*args: Any, **kwargs: Any) -> AsyncGenerator:  # noqa: ANN401, ARG001
-        await wait_for_events.wait()
-        raise error
-        yield
-
-    mock_realtime.subscribe = subscribe_raises
-
-    on_error_called = asyncio.Event()
-    caught: list[Exception] = []
-
-    def on_error(exc: Exception) -> None:
-        caught.append(exc)
-        on_error_called.set()
-        wait_for_events.clear()  # allow test to control the flow after error is caught
-
-    await home.rt_subscribe(MagicMock(), on_error=on_error)
-    await asyncio.wait_for(on_error_called.wait(), timeout=1.0)
-
-    assert caught == [error]
-    # resubscription should have been triggered - wait for HTTP calls to complete
-    await asyncio.wait_for(resubscribe_called.wait(), timeout=1.0)
-    # The initial subscribe and the resubscribe after the error each run one full cycle. A single
-    # False reading only arms the grace-period timer, so the home keeps reporting its last known
-    # True and the call sequence is identical whether the resubscribe status query reports True
-    # or False.
-    expected_calls = RESUBSCRIBE_HTTP_CALLS * 2
-    assert mock_websession.post.call_count == len(expected_calls)
-    assert mock_websession.post.call_args_list == expected_calls
-    assert home.rt_subscription_running is True
-
-    home.rt_unsubscribe()
-
-    assert not home.rt_subscription_running
-
-
-@pytest.mark.parametrize(
-    "error",
-    [
-        WebsocketTransportError("transport error"),
-        WebsocketReconnectedError("reconnected"),
-    ],
-)
-@patch("tibber.home.RESUBSCRIBE_WAIT_TIME", 0)
-async def test_rt_subscribe_no_crash_when_subscribe_raises_without_on_error(
-    home: tibber.TibberHome,
-    mock_realtime: MagicMock,
-    error: Exception,
-) -> None:
-    """_start_listen must not propagate exceptions when no on_error is provided."""
-
-    async def subscribe_raises(*args: Any, **kwargs: Any) -> AsyncGenerator:  # noqa: ANN401, ARG001
-        raise error
-        yield
-
-    mock_realtime.subscribe = subscribe_raises
-
-    callback = MagicMock()
-    await home.rt_subscribe(callback)
-
-    # give the listener task a chance to run and finish without raising
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
-
-    callback.assert_not_called()
-    home.rt_unsubscribe()
-
-
-async def test_rt_resubscribe_raises_without_prior_subscribe(home: tibber.TibberHome) -> None:
-    """rt_resubscribe must raise RuntimeError when rt_subscribe has not been called."""
-    with pytest.raises(RuntimeError, match="rt_subscribe"):
-        await home.rt_resubscribe()
-
-
-async def test_rt_subscribe_raises_when_already_subscribed(
-    home: tibber.TibberHome,
-    mock_realtime: MagicMock,
-) -> None:
-    """rt_subscribe must raise RuntimeError when called while already subscribed."""
-    _, subscribe_fn = _make_blocking_subscribe([])
-    mock_realtime.subscribe = subscribe_fn
-
-    callback = MagicMock()
-    await home.rt_subscribe(callback)
-
-    with pytest.raises(RuntimeError, match="rt_unsubscribe"):
-        await home.rt_subscribe(callback)
-
-    home.rt_unsubscribe()
-
-
-async def test_rt_resubscribe_emits_deprecation_warning(
-    home: tibber.TibberHome,
-    mock_realtime: MagicMock,
-) -> None:
-    """rt_resubscribe must emit a DeprecationWarning."""
-    _, subscribe_fn = _make_blocking_subscribe([])
-    mock_realtime.subscribe = subscribe_fn
-
-    callback = MagicMock()
-    await home.rt_subscribe(callback)
-
-    with pytest.warns(DeprecationWarning, match="deprecated"):
-        await home.rt_resubscribe()
-
-    home.rt_unsubscribe()
-
-
-def _make_reconnect_watchdog_stopper() -> tuple[asyncio.Event, AsyncMock]:
-    """Return (reconnected_event, reconnect_mock) that bounds the watchdog loop.
-
-    The reconnect mock records the call and then raises CancelledError, which
-    terminates the watchdog coroutine right after the first reconnect. This keeps
-    the assertion on a single reconnect deterministic and stops the watchdog from
-    scheduling a follow-up resubscribe that would leak into teardown.
-    """
-    reconnected = asyncio.Event()
-
-    async def reconnect() -> None:
-        reconnected.set()
-        raise asyncio.CancelledError
-
-    return reconnected, AsyncMock(side_effect=reconnect)
-
-
-@patch("tibber.home.RT_SUBSCRIPTION_TIMEOUT", 0.2)
-async def test_rt_subscription_stays_connected_while_data_flows(
-    home: tibber.TibberHome,
-    mock_realtime: MagicMock,
-) -> None:
-    """The watchdog must not reconnect while fresh data keeps arriving.
-
-    Data streamed faster than the timeout keeps refreshing the freshness
-    timestamp the watchdog relies on, so it must leave the subscription alone.
-    """
-    stop = asyncio.Event()
-
-    async def subscribe(*args: Any, **kwargs: Any) -> AsyncGenerator[Any, None]:  # noqa: ANN401, ARG001
-        while not stop.is_set():
-            yield {"liveMeasurement": {}}
-            await asyncio.sleep(0.02)
-
-    mock_realtime.subscribe = subscribe
-
-    received: list[dict] = []
-    got_enough = asyncio.Event()
-
-    def callback(data: dict) -> None:
-        received.append(data)
-        if len(received) >= 5:
-            got_enough.set()
-
-    await home.rt_subscribe(callback)
-    # Enough data has flowed through the real handler to refresh the timestamp.
-    await asyncio.wait_for(got_enough.wait(), timeout=2.0)
-    # Let at least one full watchdog cycle run while data keeps arriving.
-    await asyncio.sleep(0.5)
-
-    mock_realtime.reconnect.assert_not_awaited()
-    assert home.rt_subscription_running
-
-    stop.set()
-    home.rt_unsubscribe()
-    assert not home.rt_subscription_running
-
-
-@patch("tibber.home.RT_SUBSCRIPTION_TIMEOUT", 0.05)
-async def test_rt_subscription_reconnects_when_data_goes_stale(
-    home: tibber.TibberHome,
-    mock_realtime: MagicMock,
-) -> None:
-    """The watchdog must reconnect after a subscription stops delivering data."""
-    reconnected, reconnect = _make_reconnect_watchdog_stopper()
-    mock_realtime.reconnect = reconnect
-
-    # One datum, then the subscription blocks forever and the data goes stale.
-    _, subscribe_fn = _make_blocking_subscribe([{"liveMeasurement": {}}])
-    mock_realtime.subscribe = subscribe_fn
-
-    received = asyncio.Event()
-
-    def callback(data: dict) -> None:  # noqa: ARG001
-        received.set()
-
-    await home.rt_subscribe(callback)
-    # Confirm the subscription started and delivered fresh data first.
-    await asyncio.wait_for(received.wait(), timeout=2.0)
-    # Data has now stopped, so the watchdog must reconnect once it goes stale.
-    await asyncio.wait_for(reconnected.wait(), timeout=2.0)
-
-    mock_realtime.reconnect.assert_awaited_once()
-    assert not home.rt_subscription_running
-
-    home.rt_unsubscribe()
-
-
-@patch("tibber.home.RT_SUBSCRIPTION_TIMEOUT", 0)
-async def test_rt_subscription_reconnects_when_no_data_received(
-    home: tibber.TibberHome,
-    mock_realtime: MagicMock,
-) -> None:
-    """A subscription that never delivered data must be treated as stale."""
-    reconnected, reconnect = _make_reconnect_watchdog_stopper()
-    mock_realtime.reconnect = reconnect
-
-    # Never yields any data.
-    _, subscribe_fn = _make_blocking_subscribe([])
-    mock_realtime.subscribe = subscribe_fn
-
-    await home.rt_subscribe(MagicMock())
-    await asyncio.wait_for(reconnected.wait(), timeout=2.0)
-
-    mock_realtime.reconnect.assert_awaited_once()
-    assert not home.rt_subscription_running
-
-    home.rt_unsubscribe()
-
-
-@pytest.mark.parametrize(
-    "post_error",
-    [
-        aiohttp.ClientError("boom"),
-        TimeoutError(),
-        ValueError("boom"),
-        InvalidLoginError(400, '"exp" claim timestamp check failed', "UNAUTHENTICATED"),
-    ],
-)
-@patch("tibber.home.RESUBSCRIBE_WAIT_TIME", 0)
-async def test_rt_subscribe_recovers_when_resubscribe_step_fails(
-    home: tibber.TibberHome,
-    mock_realtime: MagicMock,
-    mock_websession: MagicMock,
-    caplog: pytest.LogCaptureFixture,
-    post_error: Exception,
-) -> None:
-    """A failing resubscribe step is logged and must not abort the subscription.
-
-    The consumption-status refresh and the info update both run on the initial
-    subscribe. When they fail (transport errors take the TimeoutError/ClientError
-    branch, other errors the generic branch) the last known state is kept and the
-    subscription still comes up.
-    """
-    mock_websession.post.side_effect = post_error
-
-    sample_data = {"key": "value"}
-    _, subscribe_fn = _make_blocking_subscribe([sample_data])
-    mock_realtime.subscribe = subscribe_fn
-
-    received: list[dict] = []
-    callback_called = asyncio.Event()
-
-    def callback(data: dict) -> None:
-        received.append(data)
-        callback_called.set()
-
-    with caplog.at_level(logging.WARNING):
-        await home.rt_subscribe(callback)
-        await asyncio.wait_for(callback_called.wait(), timeout=1.0)
-
-    mock_realtime.connect.assert_awaited_once()
-    assert received == [{"data": sample_data}]
-    assert home.rt_subscription_running
-    assert "keeping last known status" in caplog.text
-    assert "keeping last known info" in caplog.text
-
-    home.rt_unsubscribe()
-
-
-@patch("tibber.home.RESUBSCRIBE_WAIT_TIME", 0)
-@pytest.mark.asyncio
-async def test_resubscribe_step_known_error_logs_without_traceback(
-    home: tibber.TibberHome,
-    mock_realtime: MagicMock,
-    mock_websession: MagicMock,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """Known API errors (HttpExceptionError) must log without a traceback.
-
-    Unknown errors (e.g. ValueError) must still emit exc_info so the traceback
-    is preserved for debugging.
-    """
-    # --- known error: no traceback ---
-    mock_websession.post.side_effect = InvalidLoginError(
-        400,
-        '"exp" claim timestamp check failed',
-        "UNAUTHENTICATED",
-    )
-    _, subscribe_fn = _make_blocking_subscribe([])
-    mock_realtime.subscribe = subscribe_fn
-
-    with caplog.at_level(logging.WARNING):
-        await home.rt_subscribe(MagicMock())
-
-    # The warning message contains the failure_message text; exc_info must be None.
-    known_records = [r for r in caplog.records if "keeping last known" in r.message]
-    assert known_records, "Expected warning records for the resubscribe step"
-    for rec in known_records:
-        assert rec.exc_info is None, "Known API error must not include traceback"
-
-    home.rt_unsubscribe()
-    caplog.clear()
-
-    # --- unknown error: traceback preserved ---
-    mock_websession.post.side_effect = ValueError("something unexpected")
-    _, subscribe_fn2 = _make_blocking_subscribe([])
-    mock_realtime.subscribe = subscribe_fn2
-
-    with caplog.at_level(logging.WARNING):
-        await home.rt_subscribe(MagicMock())
-
-    # exc_info must be set so the traceback is visible in logs for unexpected errors.
-    unknown_records = [r for r in caplog.records if "keeping last known" in r.message]
-    assert unknown_records, "Expected warning records for the resubscribe step"
-    for rec in unknown_records:
-        assert rec.exc_info is not None, "Unknown error must include traceback"
-
-    home.rt_unsubscribe()
-
-
-@patch("tibber.home.RT_SUBSCRIPTION_TIMEOUT", 0)
-async def test_rt_subscription_timeout_calls_on_error(
-    home: tibber.TibberHome,
-    mock_realtime: MagicMock,
-) -> None:
-    """The watchdog must deliver a SubscriptionFailedError to on_error on timeout."""
-    reconnected, reconnect = _make_reconnect_watchdog_stopper()
-    mock_realtime.reconnect = reconnect
-
-    # Never yields any data, so the watchdog treats the subscription as stale.
-    _, subscribe_fn = _make_blocking_subscribe([])
-    mock_realtime.subscribe = subscribe_fn
-
-    caught: list[Exception] = []
-    on_error_called = asyncio.Event()
-
-    def on_error(exc: Exception) -> None:
-        caught.append(exc)
-        on_error_called.set()
-
-    await home.rt_subscribe(MagicMock(), on_error=on_error)
-    await asyncio.wait_for(on_error_called.wait(), timeout=2.0)
-    await asyncio.wait_for(reconnected.wait(), timeout=2.0)
-
-    assert len(caught) == 1
-    assert isinstance(caught[0], SubscriptionFailedError)
-    assert HOME_ID in str(caught[0])
-    mock_realtime.reconnect.assert_awaited_once()
-
-    home.rt_unsubscribe()
-
-
-async def test_rt_subscribe_survives_callback_exception(
-    home: tibber.TibberHome,
-    mock_realtime: MagicMock,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """An exception raised by the callback must not stop later items from arriving."""
-    items = [{"first": 1}, {"second": 2}]
-    _, subscribe_fn = _make_blocking_subscribe(items)
-    mock_realtime.subscribe = subscribe_fn
-
-    calls: list[dict] = []
-    second_received = asyncio.Event()
-
-    def callback(data: dict) -> None:
-        calls.append(data)
-        if len(calls) == 1:
-            raise ValueError("callback boom")
-        second_received.set()
-
-    with caplog.at_level(logging.ERROR):
-        await home.rt_subscribe(callback)
-        await asyncio.wait_for(second_received.wait(), timeout=1.0)
-
-    assert calls == [{"data": items[0]}, {"data": items[1]}]
-    assert home.rt_subscription_running
-    assert "Error in rt_subscribe callback" in caplog.text
-
-    home.rt_unsubscribe()
-
-
-async def test_update_real_time_consumption_enabled_ignores_empty_response(
-    home: tibber.TibberHome,
-    mock_websession: MagicMock,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """An empty response must leave has_real_time_consumption unchanged."""
-    mock_response = MagicMock()
-    mock_response.status = 200
-    mock_response.content_type = "application/json"
-    mock_response.json = AsyncMock(return_value={})
-    mock_websession.post = AsyncMock(return_value=mock_response)
-
-    with caplog.at_level(logging.ERROR):
-        await home.update_real_time_consumption_enabled()
-
-    assert home.has_real_time_consumption is True
-    assert "Could not get real time consumption enabled status." in caplog.text
-
-
-@pytest.mark.parametrize(
-    "payload",
-    [
-        {"viewer": {"home": {}}},  # missing "features" -> KeyError
-        {"viewer": None},  # not subscriptable -> TypeError
-    ],
-)
-async def test_update_real_time_consumption_enabled_handles_malformed_payload(
-    home: tibber.TibberHome,
-    mock_websession: MagicMock,
-    payload: dict,
-) -> None:
-    """A malformed payload carries no usable information and must not change the last known status."""
-    mock_response = MagicMock()
-    mock_response.status = 200
-    mock_response.content_type = "application/json"
-    mock_response.json = AsyncMock(return_value={"data": payload})
-    mock_websession.post = AsyncMock(return_value=mock_response)
-
-    await home.update_real_time_consumption_enabled()
-
-    # The `home` fixture starts out with a known True status, which a malformed payload
-    # must not overwrite.
-    assert home.has_real_time_consumption is True
-
-
-@pytest.mark.parametrize(
-    "payload",
-    [
-        {"viewer": {"home": {}}},  # missing "features" -> KeyError
-        {"viewer": None},  # not subscriptable -> TypeError
-    ],
-)
-async def test_update_real_time_consumption_enabled_malformed_payload_stays_unknown(
-    tibber_connection: tibber.Tibber,
-    mock_websession: MagicMock,
-    payload: dict,
-) -> None:
-    """A malformed payload must leave a never-read status as unknown (None)."""
-    fresh_home = tibber.TibberHome(HOME_ID, tibber_connection)
-
-    mock_response = MagicMock()
-    mock_response.status = 200
-    mock_response.content_type = "application/json"
-    mock_response.json = AsyncMock(return_value={"data": payload})
-    mock_websession.post = AsyncMock(return_value=mock_response)
-
-    await fresh_home.update_real_time_consumption_enabled()
-
-    assert fresh_home.has_real_time_consumption is None
-
-
-async def test_status_false_without_prior_true_sets_false_immediately(
-    tibber_connection: tibber.Tibber,
-    mock_websession: MagicMock,
-) -> None:
-    """A False status with no known True resolves to False directly, with no grace period."""
-    fresh_home = tibber.TibberHome(HOME_ID, tibber_connection)
-    mock_websession.post = _make_status_response(rt_enabled=False)
-
-    await fresh_home.update_real_time_consumption_enabled()
-
-    assert fresh_home.has_real_time_consumption is False
-
-
-async def test_status_single_false_keeps_true_within_grace(
-    home: tibber.TibberHome,
-    mock_websession: MagicMock,
-) -> None:
-    """A single False status following a known True must keep reporting the last known True."""
-    mock_websession.post = _make_status_response(rt_enabled=False)
-
-    await home.update_real_time_consumption_enabled()
-
-    assert home.has_real_time_consumption is True
-
-
-async def test_status_repeated_false_within_grace_stays_true(
-    home: tibber.TibberHome,
-    mock_websession: MagicMock,
-) -> None:
-    """Repeated False statuses inside the grace period must keep reporting the last known True."""
-    mock_websession.post = _make_status_response(rt_enabled=False)
-
-    for _ in range(5):
-        await home.update_real_time_consumption_enabled()
-
-    assert home.has_real_time_consumption is True
-
-
-async def test_status_flips_false_only_strictly_after_grace(
-    home: tibber.TibberHome,
-    mock_websession: MagicMock,
-    frozen_clock: type[FixedDateTime],
-) -> None:
-    """The status must flip to False only once the grace period has been strictly exceeded."""
-    mock_websession.post = _make_status_response(rt_enabled=False)
-    armed = dt.datetime(2026, 5, 6, 0, 0, 0, tzinfo=dt.UTC)
-
-    with patch("tibber.home.dt.datetime", frozen_clock):
-        frozen_clock.current = armed
-        await home.update_real_time_consumption_enabled()
-        assert home.has_real_time_consumption is True
-
-        # Exactly at the boundary the grace period has not been exceeded yet.
-        frozen_clock.current = armed + REAL_TIME_CONSUMPTION_DISABLED_GRACE
-        await home.update_real_time_consumption_enabled()
-        assert home.has_real_time_consumption is True
-
-        frozen_clock.current = armed + REAL_TIME_CONSUMPTION_DISABLED_GRACE + dt.timedelta(seconds=1)
-        await home.update_real_time_consumption_enabled()
-        assert home.has_real_time_consumption is False
-
-
-async def test_status_true_reading_restarts_grace_period(
-    home: tibber.TibberHome,
-    mock_websession: MagicMock,
-    frozen_clock: type[FixedDateTime],
-) -> None:
-    """A True status must clear the grace-period timer so a later, unrelated False starts fresh.
-
-    Regression test: a False -> True -> False sequence must not jump straight to a confirmed
-    disable just because a timer from an earlier, already-recovered-from False was never cleared.
-    """
-    armed = dt.datetime(2026, 5, 6, 0, 0, 0, tzinfo=dt.UTC)
-    past_grace = REAL_TIME_CONSUMPTION_DISABLED_GRACE + dt.timedelta(seconds=1)
-
-    with patch("tibber.home.dt.datetime", frozen_clock):
-        frozen_clock.current = armed
-        mock_websession.post = _make_status_response(rt_enabled=False)
-        await home.update_real_time_consumption_enabled()
-
-        mock_websession.post = _make_status_response(rt_enabled=True)
-        await home.update_real_time_consumption_enabled()
-        assert home.has_real_time_consumption is True
-
-        # Long after the original timer would have expired, a brand new False must get a full
-        # fresh grace period rather than flipping on the stale timer.
-        mock_websession.post = _make_status_response(rt_enabled=False)
-        frozen_clock.current = armed + past_grace
-        await home.update_real_time_consumption_enabled()
-        assert home.has_real_time_consumption is True
-
-        frozen_clock.current = armed + past_grace + past_grace
-        await home.update_real_time_consumption_enabled()
-        assert home.has_real_time_consumption is False
-
-
-@patch("tibber.home.RESUBSCRIBE_WAIT_TIME", 0)
-@patch("tibber.home.RT_SUBSCRIPTION_TIMEOUT", 0.05)
-async def test_rt_subscription_resubscribes_after_watchdog_reconnect(
-    home: tibber.TibberHome,
-    mock_realtime: MagicMock,
-    mock_websession: MagicMock,
-) -> None:
-    """After a watchdog reconnect the subscription must resubscribe and resume data.
-
-    The first subscription never yields, so its data goes stale and the watchdog
-    reconnects. When reconnect succeeds (instead of raising) the watchdog schedules
-    a resubscribe, which brings up a fresh subscription that delivers data again.
-    """
-    mock_websession.post = _make_status_response(rt_enabled=True)
-
-    call_count = 0
-    stop = asyncio.Event()
-    got_data = asyncio.Event()
-
-    async def subscribe(*args: Any, **kwargs: Any) -> AsyncGenerator[Any, None]:  # noqa: ANN401, ARG001
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            # First subscription never yields: the data goes stale.
-            await asyncio.Event().wait()
-        else:
-            # After the reconnect the fresh subscription keeps data flowing.
-            while not stop.is_set():
-                yield {"liveMeasurement": {}}
-                await asyncio.sleep(0.01)
-
-    mock_realtime.subscribe = subscribe
-
-    def callback(data: dict) -> None:  # noqa: ARG001
-        got_data.set()
-
-    await home.rt_subscribe(callback)
-    await asyncio.wait_for(got_data.wait(), timeout=2.0)
-
-    assert mock_realtime.reconnect.await_count >= 1
-    assert home.rt_subscription_running
-
-    stop.set()
-    home.rt_unsubscribe()
-
-
-@patch("tibber.home.RESUBSCRIBE_WAIT_TIME", 0)
-@patch("tibber.home.RT_SUBSCRIPTION_TIMEOUT", 3600)
-async def test_rt_subscribe_recovers_from_repeated_errors(
-    home: tibber.TibberHome,
-    mock_realtime: MagicMock,
-    mock_websession: MagicMock,
-) -> None:
-    """Repeated subscription errors keep triggering resubscription until it holds.
-
-    The second resubscribe schedule cancels the previous (already completed)
-    resubscribe task, and the subscription ends up running once subscribe stops
-    failing. The watchdog is kept idle with a long timeout.
-    """
-    mock_websession.post = _make_status_response(rt_enabled=True)
-
-    call_count = 0
-    settled = asyncio.Event()
-    block = asyncio.Event()
-
-    async def subscribe(*args: Any, **kwargs: Any) -> AsyncGenerator[Any, None]:  # noqa: ANN401, ARG001
-        nonlocal call_count
-        call_count += 1
-        if call_count <= 2:
-            raise WebsocketTransportError("transport error")
-            yield
-        # The third subscription stays open, so resubscription settles.
-        settled.set()
-        await block.wait()
-
-    mock_realtime.subscribe = subscribe
-
-    await home.rt_subscribe(MagicMock())
-    await asyncio.wait_for(settled.wait(), timeout=1.0)
-
-    assert home.rt_subscription_running
-    assert mock_realtime.connect.await_count == 3
-
-    home.rt_unsubscribe()
-
-
-@patch("tibber.home.RESUBSCRIBE_WAIT_TIME", 0)
-async def test_rt_resubscribe_confirmed_disable_notifies_on_error(
-    home: tibber.TibberHome,
-    mock_realtime: MagicMock,
-    mock_websession: MagicMock,
-    frozen_clock: type[FixedDateTime],
-) -> None:
-    """A confirmed disable (False sustained past the grace period) must notify on_error and stop.
-
-    Only a status that has been False for the whole grace period may end the resubscribe loop,
-    and it must do so visibly. Repeated subscribe failures drive one status query per resubscribe
-    cycle: the first False arms the grace-period timer, and the clock is advanced past the grace
-    window before the second False so it confirms the disable.
-    """
-    armed = dt.datetime(2026, 5, 6, 0, 0, 0, tzinfo=dt.UTC)
-    status_calls = 0
-
-    async def post_side_effect(*args: Any, **kwargs: Any) -> MagicMock:  # noqa: ANN401, ARG001
-        nonlocal status_calls
-        if kwargs["data"]["query"] != REAL_TIME_CONSUMPTION_ENABLED % HOME_ID:
-            # Info refresh: a benign payload that carries no status, so it stays a no-op reading.
-            return _json_response(
-                {"data": {"viewer": {"name": "n", "userId": "u", "homes": [], "websocketSubscriptionUrl": None}}},
-            )
-        status_calls += 1
-        if status_calls == 1:
-            # Initial subscription reports real time consumption enabled.
-            return _json_response(_status_payload(rt_enabled=True))
-        if status_calls == 2:
-            # First False: arms the grace-period timer at the armed time, status stays True.
-            return _json_response(_status_payload(rt_enabled=False))
-        # Second False, now past the grace window: confirms the disable.
-        frozen_clock.current = armed + REAL_TIME_CONSUMPTION_DISABLED_GRACE + dt.timedelta(seconds=1)
-        return _json_response(_status_payload(rt_enabled=False))
-
-    mock_websession.post = AsyncMock(side_effect=post_side_effect)
-
-    async def subscribe_raises(*args: Any, **kwargs: Any) -> AsyncGenerator:  # noqa: ANN401, ARG001
-        raise WebsocketTransportError("transport error")
-        yield
-
-    mock_realtime.subscribe = subscribe_raises
-
-    disabled_error_seen = asyncio.Event()
-    caught: list[Exception] = []
-
-    def on_error(exc: Exception) -> None:
-        caught.append(exc)
-        if isinstance(exc, RealTimeConsumptionDisabledError):
-            disabled_error_seen.set()
-
-    with patch("tibber.home.dt.datetime", frozen_clock):
-        frozen_clock.current = armed
-        await home.rt_subscribe(MagicMock(), on_error=on_error)
-        await asyncio.wait_for(disabled_error_seen.wait(), timeout=1.0)
-
-    assert home.has_real_time_consumption is False
-    assert isinstance(caught[-1], RealTimeConsumptionDisabledError)
-    assert not home.rt_subscription_running
-
-    home.rt_unsubscribe()
-
-
-@patch("tibber.home.RESUBSCRIBE_WAIT_TIME", 0)
-async def test_rt_resubscribe_recovers_from_degraded_status_payload(
-    home: tibber.TibberHome,
-    mock_realtime: MagicMock,
-    mock_websession: MagicMock,
-) -> None:
-    """A degraded status-query payload during resubscribe must not disable a running home.
-
-    If a status query comes back with a well-formed 200 response whose payload carries
-    no usable `realTimeConsumptionEnabled` value, that must
-    be a no-op, so the resubscribe still refreshes info and brings the subscription back up.
-    """
-    call_count = 0
-
-    async def post_side_effect(*args: Any, **kwargs: Any) -> MagicMock:  # noqa: ARG001, ANN401
-        nonlocal call_count
-        call_count += 1
-        mock_response = MagicMock()
-        mock_response.status = 200
-        mock_response.content_type = "application/json"
-        if call_count == 1:
-            # Initial status query: real time consumption enabled.
-            mock_response.json = AsyncMock(
-                return_value={
-                    "data": {
-                        "viewer": {
-                            "home": {
-                                "id": HOME_ID,
-                                "features": {"realTimeConsumptionEnabled": True},
-                            },
-                        },
-                    },
-                },
-            )
-        elif call_count == 3:
-            # Resubscription status query: degraded response, the home cannot be resolved.
-            mock_response.json = AsyncMock(return_value={"data": {"viewer": {"home": None}}})
-        else:
-            mock_response.json = AsyncMock(
-                return_value={
-                    "data": {
-                        "viewer": {
-                            "name": "n",
-                            "userId": "u",
-                            "homes": [],
-                            "websocketSubscriptionUrl": None,
-                        },
-                    },
-                },
-            )
-        return mock_response
-
-    mock_websession.post = AsyncMock(side_effect=post_side_effect)
-
-    subscribe_call_count = 0
-    subscribed_again = asyncio.Event()
-
-    async def subscribe(*args: Any, **kwargs: Any) -> AsyncGenerator[Any, None]:  # noqa: ANN401, ARG001
-        nonlocal subscribe_call_count
-        subscribe_call_count += 1
-        if subscribe_call_count == 1:
-            raise WebsocketTransportError("transport error")
-            yield
-        subscribed_again.set()
-        yield {"liveMeasurement": {}}
-        await asyncio.Event().wait()
-
-    mock_realtime.subscribe = subscribe
-
-    await home.rt_subscribe(MagicMock(), on_error=lambda exc: None)  # noqa: ARG005
-    await asyncio.wait_for(subscribed_again.wait(), timeout=1.0)
-
-    assert home.has_real_time_consumption is True
-    assert mock_websession.post.call_count == 4
-    assert home.rt_subscription_running
-
-    home.rt_unsubscribe()
-
-
-def _info_payload(rt_enabled: bool | None, *, with_features: bool = True) -> dict[str, Any]:
-    """Return an UPDATE_INFO payload reporting the given real time consumption status."""
-    home_payload: dict[str, Any] = {
-        "id": HOME_ID,
-        "currentSubscription": {"status": "running"},
-    }
-    if with_features:
-        home_payload["features"] = {"realTimeConsumptionEnabled": rt_enabled}
-    return {"data": {"viewer": {"home": home_payload}}}
-
-
-def _make_status_query_router(rt_enabled: bool) -> AsyncMock:
-    """Return a post mock reporting the given status, and a benign payload for every other query."""
-
-    def respond(*args: Any, **kwargs: Any) -> MagicMock:  # noqa: ANN401, ARG001
-        if kwargs["data"]["query"] == REAL_TIME_CONSUMPTION_ENABLED % HOME_ID:
-            return _json_response(_status_payload(rt_enabled))
-        return _json_response(
-            {
-                "data": {
-                    "viewer": {
-                        "name": "n",
-                        "userId": "u",
-                        "homes": [],
-                        "websocketSubscriptionUrl": None,
-                    },
-                },
-            },
-        )
-
-    return AsyncMock(side_effect=respond)
-
-
-@pytest.mark.parametrize("callback_raises", [False, True])
-@patch("tibber.home.RESUBSCRIBE_WAIT_TIME", 0)
-async def test_live_data_restarts_grace_period(
-    home: tibber.TibberHome,
-    mock_realtime: MagicMock,
-    mock_websession: MagicMock,
-    frozen_clock: type[FixedDateTime],
-    callback_raises: bool,
-) -> None:
-    """Live real time data must clear the suspected-disable timer.
-
-    Regression test: a False status arms the grace-period timer, the subscription then runs
-    healthily for hours, and a later brand new False status must get a full fresh grace period
-    instead of flipping the status immediately because of the hours-old timer.
-
-    Parametrized over a callback that raises, because the timer must be cleared before the
-    consumer callback runs: a consumer whose callback always throws must not accumulate a stale
-    suspicion while data is flowing.
-    """
-    armed = dt.datetime(2026, 5, 6, 0, 0, 0, tzinfo=dt.UTC)
-    # Every real time consumption status query reports disabled.
-    mock_websession.post = _make_status_query_router(rt_enabled=False)
-
-    subscribe_calls = 0
-    measurement_delivered = asyncio.Event()
-    resubscribed = asyncio.Event()
-    release = asyncio.Event()
-
-    async def subscribe(*args: Any, **kwargs: Any) -> AsyncGenerator[Any, None]:  # noqa: ANN401, ARG001
-        nonlocal subscribe_calls
-        subscribe_calls += 1
-        if subscribe_calls == 1:
-            yield {"liveMeasurement": {}}
-            # Stay up until the test simulates a transient transport error hours later.
-            await release.wait()
-            raise WebsocketTransportError("transport error")
-        resubscribed.set()
-        yield {"liveMeasurement": {}}
-        await asyncio.Event().wait()
-
-    mock_realtime.subscribe = subscribe
-
-    disabled_seen = asyncio.Event()
-
-    def on_error(exc: Exception) -> None:
-        if isinstance(exc, RealTimeConsumptionDisabledError):
-            disabled_seen.set()
-
-    def callback(_data: dict) -> None:
-        measurement_delivered.set()
-        if callback_raises:
-            raise ValueError("callback boom")
-
-    with patch("tibber.home.dt.datetime", frozen_clock):
-        frozen_clock.current = armed
-        await home.rt_subscribe(callback, on_error=on_error)
-        # The status query reported disabled, which only arms the timer, so the subscription
-        # still comes up and the first measurement clears the suspicion again.
-        await asyncio.wait_for(measurement_delivered.wait(), timeout=1.0)
-        assert home.has_real_time_consumption is True
-
-        # Two hours of healthy subscription pass, then a transient transport error resubscribes.
-        frozen_clock.current = armed + dt.timedelta(hours=2)
-        release.set()
-        pending = [
-            asyncio.create_task(resubscribed.wait()),
-            asyncio.create_task(disabled_seen.wait()),
-        ]
-        _, still_pending = await asyncio.wait(
-            pending,
-            timeout=1.0,
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        for task in still_pending:
-            task.cancel()
-
-    assert not disabled_seen.is_set(), "a brand new False must not confirm a disable on a stale timer"
-    assert home.has_real_time_consumption is True
-    assert resubscribed.is_set()
-    assert home.rt_subscription_running
-
-    home.rt_unsubscribe()
-
-
-async def test_update_info_false_status_keeps_true_within_grace(
-    home: tibber.TibberHome,
-    mock_websession: MagicMock,
-) -> None:
-    """A False status from the info query must only arm the timer."""
-    mock_websession.post = AsyncMock(return_value=_json_response(_info_payload(rt_enabled=False)))
-
-    await home.update_info()
-
-    assert home.has_real_time_consumption is True
-
-
-async def test_update_info_malformed_status_is_a_no_op(
-    home: tibber.TibberHome,
-    mock_websession: MagicMock,
-) -> None:
-    """An info payload without a usable status must not change the last known status."""
-    mock_websession.post = AsyncMock(
-        return_value=_json_response(_info_payload(None, with_features=False)),
-    )
-
-    await home.update_info()
-
-    assert home.has_real_time_consumption is True
-
-
-@patch("tibber.home.RESUBSCRIBE_WAIT_TIME", 0)
-async def test_live_data_restarts_grace_period_armed_by_info_poll(
-    home: tibber.TibberHome,
-    mock_realtime: MagicMock,
-    mock_websession: MagicMock,
-    frozen_clock: type[FixedDateTime],
-) -> None:
-    """A timer armed by a periodic info poll must also be cleared by live data.
-
-    This is the shape a consumer normally hits in production: it polls home info on a
-    timer while the real time subscription runs, so a transient False can arm the grace-period
-    timer without any resubscribe happening at all.
-    """
-    armed = dt.datetime(2026, 5, 6, 0, 0, 0, tzinfo=dt.UTC)
-    mock_websession.post = _make_status_query_router(rt_enabled=True)
-
-    measurements: asyncio.Queue[Any] = asyncio.Queue()
-    gate = asyncio.Event()
-
-    async def subscribe(*args: Any, **kwargs: Any) -> AsyncGenerator[Any, None]:  # noqa: ANN401, ARG001
-        yield {"liveMeasurement": {}}
-        await gate.wait()
-        yield {"liveMeasurement": {}}
-        await asyncio.Event().wait()
-
-    mock_realtime.subscribe = subscribe
-
-    with patch("tibber.home.dt.datetime", frozen_clock):
-        frozen_clock.current = armed
-        await home.rt_subscribe(measurements.put_nowait)
-        await asyncio.wait_for(measurements.get(), timeout=1.0)
-
-        # An info poll reports real time consumption disabled, arming the grace-period timer.
-        mock_websession.post = AsyncMock(return_value=_json_response(_info_payload(rt_enabled=False)))
-        await home.update_info()
-        assert home.has_real_time_consumption is True
-
-        # The subscription is still healthy and delivers another measurement, clearing the timer.
-        gate.set()
-        await asyncio.wait_for(measurements.get(), timeout=1.0)
-
-        # Hours later another transient False must start a fresh grace period, not flip.
-        frozen_clock.current = armed + dt.timedelta(hours=2)
-        await home.update_info()
-
-    assert home.has_real_time_consumption is True
-
-    home.rt_unsubscribe()
-
-
-@patch("tibber.home.RESUBSCRIBE_WAIT_TIME", 0)
-async def test_live_data_recovers_confirmed_false_status(
-    home: tibber.TibberHome,
-    mock_realtime: MagicMock,
-    mock_websession: MagicMock,
-    frozen_clock: type[FixedDateTime],
-) -> None:
-    """A live measurement must recover a status that has already flipped to False.
-
-    A live measurement is proof that real time consumption works right now, so it counts as a
-    successful True status reading, not merely a timer clear. Once a sustained False from periodic
-    info polls has confirmed a disable while a listener is still attached, resumed live
-    data must restore the believed status to True so the next resubscribe does not stop.
-    """
-    armed = dt.datetime(2026, 5, 6, 0, 0, 0, tzinfo=dt.UTC)
-    mock_websession.post = _make_status_query_router(rt_enabled=True)
-
-    measurements: asyncio.Queue[Any] = asyncio.Queue()
-    gate = asyncio.Event()
-
-    async def subscribe(*args: Any, **kwargs: Any) -> AsyncGenerator[Any, None]:  # noqa: ANN401, ARG001
-        yield {"liveMeasurement": {}}
-        await gate.wait()
-        yield {"liveMeasurement": {}}
-        await asyncio.Event().wait()
-
-    mock_realtime.subscribe = subscribe
-
-    with patch("tibber.home.dt.datetime", frozen_clock):
-        frozen_clock.current = armed
-        await home.rt_subscribe(measurements.put_nowait)
-        await asyncio.wait_for(measurements.get(), timeout=1.0)
-        assert home.has_real_time_consumption is True
-
-        # An info poll reports disabled, arming the grace-period timer without flipping the status.
-        mock_websession.post = AsyncMock(return_value=_json_response(_info_payload(rt_enabled=False)))
-        await home.update_info()
-        assert home.has_real_time_consumption is True
-
-        # A second False poll past the grace window, with no live data in between, confirms the disable.
-        frozen_clock.current = armed + REAL_TIME_CONSUMPTION_DISABLED_GRACE + dt.timedelta(seconds=1)
-        await home.update_info()
-        assert home.has_real_time_consumption is False
-
-        # Live data resumes and proves real time consumption is working, restoring the status.
-        gate.set()
-        await asyncio.wait_for(measurements.get(), timeout=1.0)
-
-    assert home.has_real_time_consumption is True
-
-    home.rt_unsubscribe()
-
-
-async def test_rt_resubscribe_confirmed_disable_without_on_error_logs_and_stops(
-    tibber_connection: tibber.Tibber,
-    mock_realtime: MagicMock,
-    mock_websession: MagicMock,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """A confirmed disable must stop the resubscribe loop without raising when no on_error is set."""
-    # A never-read status resolves a False directly, with no grace period.
-    fresh_home = tibber.TibberHome(HOME_ID, tibber_connection)
-    mock_websession.post = _make_status_response(rt_enabled=False)
-
-    with caplog.at_level(logging.INFO):
-        await fresh_home.rt_subscribe(MagicMock())
-
-    assert fresh_home.has_real_time_consumption is False
-    mock_realtime.connect.assert_not_awaited()
-    assert not fresh_home.rt_subscription_running
-    assert f"Home {HOME_ID} does not have real time consumption enabled" in caplog.text
 
 
 def _price_item(time: str, price: float | None, **details: Any) -> dict[str, Any]:  # noqa: ANN401
@@ -1698,3 +470,758 @@ async def test_currency_falls_back_to_country(home: tibber.TibberHome, country: 
     home.info = {"viewer": {"home": {"address": {"country": country}}}}
 
     assert home.currency == currency
+
+
+# Live data from the Data API.
+#
+# `rt_subscribe` runs the live loop in a background task, which waits between connections through
+# `tibber.home._sleep`. `_sleeps` replaces that helper with a mock that records the delays without
+# waiting and ends the loop by raising CancelledError. Patching `tibber.home.asyncio.sleep` instead
+# would replace `asyncio.sleep` everywhere, these tests and pytest-asyncio included. `_sleeps` also
+# makes the backoff deterministic by having `random.uniform` return its upper bound.
+
+DEVICE = LiveEventDevice(id="pulse-1", type="tibber pulse")
+LIVE_TIME = dt.datetime(2026, 5, 6, 12, 30, tzinfo=dt.UTC)
+STAY_OPEN = None
+"""A stream script item: the connection stays open without data until it is cancelled."""
+
+
+def _measurement(**values: Any) -> LiveMeasurement:  # noqa: ANN401
+    """Return a 1000 W measurement from the Pulse at 12:30:00Z, with `values` overridden."""
+    return LiveMeasurement(**{"device_id": DEVICE.id, "timestamp": LIVE_TIME, "power": 1000.0, **values})
+
+
+class _ScriptedStream:
+    """A fake `stream_live_events` whose connections play scripts.
+
+    A connection yields the measurements of its script and raises its exceptions. It ends normally
+    after its last item, unless that item is `STAY_OPEN`. Connections beyond the scripts stay open.
+    `closed` counts the connections that have been closed.
+    """
+
+    def __init__(self) -> None:
+        self.scripts: list[list[LiveMeasurement | Exception | None]] = []
+        self.device_ids: list[list[str]] = []
+        self.closed = 0
+
+    async def __call__(self, home_id: str, device_ids: Sequence[str]) -> AsyncIterator[LiveMeasurement]:
+        assert home_id == HOME_ID
+        self.device_ids.append(list(device_ids))
+        connection = len(self.device_ids) - 1
+        try:
+            for item in self.scripts[connection] if connection < len(self.scripts) else [STAY_OPEN]:
+                if item is STAY_OPEN:
+                    await asyncio.Event().wait()
+                elif isinstance(item, Exception):
+                    raise item
+                else:
+                    yield item
+        finally:
+            self.closed += 1
+
+
+@pytest.fixture
+def discover(tibber_connection: tibber.Tibber, monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    """Fake the live device discovery, which finds the Pulse."""
+    mock = AsyncMock(return_value=[DEVICE])
+    monkeypatch.setattr(tibber_connection.data_api, "get_live_event_devices", mock)
+    return mock
+
+
+@pytest.fixture
+def stream(tibber_connection: tibber.Tibber, monkeypatch: pytest.MonkeyPatch) -> _ScriptedStream:
+    """Fake the live stream with scripted connections."""
+    fake = _ScriptedStream()
+    monkeypatch.setattr(tibber_connection.data_api, "stream_live_events", fake)
+    return fake
+
+
+@contextlib.contextmanager
+def _sleeps(stop_at: int) -> Iterator[AsyncMock]:
+    """Record the live loop's sleeps without waiting, and end the loop at sleep number `stop_at`."""
+    sleep = AsyncMock(side_effect=[*[None] * (stop_at - 1), asyncio.CancelledError])
+    with patch("tibber.home._sleep", sleep), patch("tibber.home.random.uniform", lambda _low, high: high):
+        yield sleep
+
+
+def _delays(sleep: AsyncMock) -> list[float]:
+    return [awaited.args[0] for awaited in sleep.await_args_list]
+
+
+async def _run_live_loop(
+    home: tibber.TibberHome,
+    callback: Callable[[LiveMeasurement], None] | None = None,
+    on_error: Callable[[Exception], None] | None = None,
+) -> asyncio.Task[None]:
+    """Subscribe, wait until the live loop has ended, and return its task."""
+    await home.rt_subscribe(callback or MagicMock(), on_error=on_error)
+    task = home._rt_task  # noqa: SLF001
+    await asyncio.wait([task], timeout=1)
+    assert task.done()
+    return task
+
+
+@pytest.mark.usefixtures("discover")
+async def test_rt_subscribe_delivers_enriched_measurement(home: tibber.TibberHome, stream: _ScriptedStream) -> None:
+    """The callback gets the enriched measurement, and the subscription is running meanwhile."""
+    measurement = _measurement(accumulated_consumption_last_hour=0.5)
+    stream.scripts = [[measurement]]
+    received: list[tuple[LiveMeasurement, bool]] = []
+
+    def callback(delivered: LiveMeasurement) -> None:
+        received.append((delivered, home.rt_subscription_running))
+
+    with _sleeps(stop_at=1):
+        task = await _run_live_loop(home, callback)
+
+    enriched = replace(measurement, power_production=0.0, estimated_hour_consumption=1.0)
+    assert received == [(enriched, True)]
+    assert stream.device_ids == [[DEVICE.id]]
+    assert home.live_event_devices == [DEVICE]
+    assert task.cancelled()
+    assert not home.rt_subscription_running
+
+
+@pytest.mark.usefixtures("discover", "stream")
+async def test_rt_subscribe_twice_raises(home: tibber.TibberHome) -> None:
+    """Subscribing while subscribed raises, and after rt_unsubscribe a new subscription starts at once."""
+    await home.rt_subscribe(MagicMock())
+
+    with pytest.raises(RuntimeError, match="rt_unsubscribe"):
+        await home.rt_subscribe(MagicMock())
+
+    first = home._rt_task  # noqa: SLF001
+    home.rt_unsubscribe()
+    await home.rt_subscribe(MagicMock())
+    second = home._rt_task  # noqa: SLF001
+    home.rt_unsubscribe()
+    await asyncio.wait([first, second], timeout=1)
+    assert first.cancelled()
+    assert second.cancelled()
+
+
+@pytest.mark.usefixtures("discover")
+async def test_rt_unsubscribe_cancels_task(home: tibber.TibberHome, stream: _ScriptedStream) -> None:
+    """rt_unsubscribe stops a running subscription at once and ends the live loop."""
+    delivered = asyncio.Event()
+    stream.scripts = [[_measurement(), STAY_OPEN]]
+    await home.rt_subscribe(lambda _: delivered.set())
+    await asyncio.wait_for(delivered.wait(), timeout=1)
+    assert home.rt_subscription_running
+    task = home._rt_task  # noqa: SLF001
+
+    home.rt_unsubscribe()
+
+    assert not home.rt_subscription_running
+    await asyncio.wait([task], timeout=1)
+    assert task.cancelled()
+
+
+async def test_rt_loop_caps_devices_at_five(
+    home: tibber.TibberHome,
+    discover: AsyncMock,
+    stream: _ScriptedStream,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Only the first five live devices are streamed, with a warning about the rest."""
+    devices = [LiveEventDevice(id=f"pulse-{n}", type="tibber pulse") for n in range(7)]
+    discover.return_value = devices
+    stream.scripts = [[]]
+
+    with caplog.at_level(logging.WARNING), _sleeps(stop_at=1):
+        await _run_live_loop(home)
+
+    assert stream.device_ids == [[device.id for device in devices[:5]]]
+    assert home.live_event_devices == devices
+    assert "has 7 live devices, streaming the first 5" in caplog.text
+
+
+async def test_rt_loop_reconnects_after_stream_end(
+    home: tibber.TibberHome,
+    discover: AsyncMock,
+    stream: _ScriptedStream,
+) -> None:
+    """A stream that ends is discovered and connected again, with a growing backoff."""
+    stream.scripts = [[], []]
+
+    with _sleeps(stop_at=2) as sleep:
+        await _run_live_loop(home)
+
+    assert _delays(sleep) == [1 + 1, 1 + 2]
+    assert discover.await_count == 2
+    assert len(stream.device_ids) == 2
+
+
+@pytest.mark.usefixtures("discover")
+@pytest.mark.parametrize(
+    "error",
+    [TimeoutError(), aiohttp.ClientConnectionError(), RetryableHttpExceptionError(503, "Service Unavailable")],
+    ids=["timeout", "connection", "5xx"],
+)
+async def test_rt_loop_reconnects_after_timeout(
+    home: tibber.TibberHome,
+    stream: _ScriptedStream,
+    error: Exception,
+) -> None:
+    """A timeout, connection error or 5xx is reported, and the loop backs off and reconnects."""
+    stream.scripts = [[error], [_measurement()]]
+    callback = MagicMock()
+    errors: list[Exception] = []
+
+    with _sleeps(stop_at=2) as sleep:
+        await _run_live_loop(home, callback, errors.append)
+
+    assert errors == [error]
+    callback.assert_called_once()
+    # The measurement of the second connection resets the backoff.
+    assert _delays(sleep) == [1 + 1, 1 + 1]
+
+
+@pytest.mark.usefixtures("discover")
+@pytest.mark.parametrize(
+    ("first_connection", "measurements"),
+    [([_measurement(), STAY_OPEN], 2), ([STAY_OPEN], 1)],
+    ids=["after_measurement", "before_first_measurement"],
+)
+async def test_rt_loop_reconnects_without_measurements(
+    home: tibber.TibberHome,
+    stream: _ScriptedStream,
+    first_connection: list[LiveMeasurement | Exception | None],
+    measurements: int,
+) -> None:
+    """A stream that stays open without measurements, such as one with only pings, times out and reconnects."""
+    stream.scripts = [first_connection, [_measurement()]]
+    callback = MagicMock()
+    errors: list[tuple[Exception, bool, int]] = []
+
+    def on_error(error: Exception) -> None:
+        errors.append((error, home.rt_subscription_running, stream.closed))
+
+    with patch("tibber.home.LIVE_NO_MEASUREMENT_TIMEOUT", 0.01), _sleeps(stop_at=2) as sleep:
+        task = await _run_live_loop(home, callback, on_error)
+
+    assert task.cancelled()
+    [(error, running, closed)] = errors
+    assert isinstance(error, TimeoutError)
+    assert str(error) == f"No live measurement for home {HOME_ID} in 0.01 s"
+    assert not running
+    assert closed == 1
+    assert len(stream.device_ids) == 2
+    assert stream.closed == 2
+    assert callback.call_count == measurements
+    # The timeout backs off like any transient error, and the second connection's measurement resets the backoff.
+    assert _delays(sleep) == [1 + 1, 1 + 1]
+
+
+@pytest.mark.usefixtures("discover")
+async def test_rt_loop_evicted_waits_long(home: tibber.TibberHome, stream: _ScriptedStream) -> None:
+    """An evicted stream waits five minutes before it connects again."""
+    evictions = [LiveStreamError("evicted", transient=False), LiveStreamError("evicted", transient=False)]
+    stream.scripts = [[evictions[0]], [evictions[1]]]
+    errors: list[Exception] = []
+
+    with _sleeps(stop_at=2) as sleep:
+        await _run_live_loop(home, on_error=errors.append)
+
+    assert _delays(sleep) == [300, 300]
+    assert errors == evictions
+
+
+@pytest.mark.usefixtures("discover")
+async def test_rt_loop_transient_uses_retry_after(home: tibber.TibberHome, stream: _ScriptedStream) -> None:
+    """A transient stream error waits as long as the server asks."""
+    error = LiveStreamError("upstream_unavailable", transient=True, retry_after=7)
+    stream.scripts = [[error]]
+    errors: list[Exception] = []
+
+    with _sleeps(stop_at=1) as sleep:
+        await _run_live_loop(home, on_error=errors.append)
+
+    assert _delays(sleep) == [7]
+    assert errors == [error]
+
+
+async def test_rt_loop_stream_error_backs_off(
+    home: tibber.TibberHome,
+    discover: AsyncMock,
+    stream: _ScriptedStream,
+) -> None:
+    """A transient error without retry_after backs off and discovers again."""
+    error = LiveStreamError("upstream_unavailable", transient=True)
+    stream.scripts = [[error], []]
+    errors: list[Exception] = []
+
+    with _sleeps(stop_at=2) as sleep:
+        await _run_live_loop(home, on_error=errors.append)
+
+    assert _delays(sleep) == [1 + 1, 1 + 2]
+    assert discover.await_count == 2
+    assert errors == [error]
+
+
+@pytest.mark.usefixtures("discover")
+@pytest.mark.parametrize(
+    ("error", "delay"),
+    [
+        (LiveStreamError("evicted", transient=False, retry_after=600), 600),
+        (LiveStreamError("evicted", transient=True, retry_after=600), 600),
+        (LiveStreamError("evicted", transient=False, retry_after=10), 300),
+        (LiveStreamError("device_not_streamable", transient=False, retry_after=42), 42),
+        (LiveStreamError("invalid_request", transient=False, retry_after=30), 30),
+        (LiveStreamError("invalid_request", transient=False), 900),
+        (LiveStreamError("upstream_unavailable", transient=True, retry_after=0.001), 1),
+        (LiveStreamError("upstream_unavailable", transient=True, retry_after=1e9), 3600),
+        (LiveStreamError("upstream_unavailable", transient=True, retry_after=float("inf")), 3600),
+        (LiveStreamError("upstream_unavailable", transient=True, retry_after=float("nan")), 1 + 1),
+        (LiveStreamError("upstream_unavailable", transient=True, retry_after=-5), 1 + 1),
+    ],
+    ids=[
+        "evicted_asks_longer",
+        "evicted_transient_asks_longer",
+        "evicted_asks_shorter",
+        "device_not_streamable",
+        "permanent_with_retry_after",
+        "permanent_without_retry_after",
+        "retry_after_too_short",
+        "retry_after_too_long",
+        "retry_after_infinite",
+        "retry_after_nan",
+        "retry_after_negative",
+    ],
+)
+async def test_rt_loop_stream_error_delay(
+    home: tibber.TibberHome,
+    stream: _ScriptedStream,
+    error: LiveStreamError,
+    delay: float,
+) -> None:
+    """The server's retry_after is kept between 1 s and 1 hour, and an eviction never waits less than 5 minutes."""
+    stream.scripts = [[error]]
+
+    with _sleeps(stop_at=1) as sleep:
+        await _run_live_loop(home)
+
+    assert _delays(sleep) == [delay]
+
+
+async def test_rt_loop_leaves_out_device_that_cannot_stream(
+    home: tibber.TibberHome,
+    discover: AsyncMock,
+    stream: _ScriptedStream,
+) -> None:
+    """A device the server can't stream is left out, so that the other devices stream and a further one joins."""
+    devices = [LiveEventDevice(id=f"pulse-{n}", type="tibber pulse") for n in range(6)]
+    discover.return_value = devices
+    error = LiveStreamError("device_not_streamable", transient=False, device_id="pulse-0")
+    stream.scripts = [[error], []]
+    errors: list[Exception] = []
+
+    with _sleeps(stop_at=2) as sleep:
+        await _run_live_loop(home, on_error=errors.append)
+
+    assert stream.device_ids == [
+        ["pulse-0", "pulse-1", "pulse-2", "pulse-3", "pulse-4"],
+        [f"pulse-{n}" for n in range(1, 6)],
+    ]
+    assert _delays(sleep) == [1 + 1, 1 + 2]
+    assert errors == [error]
+
+
+async def test_rt_loop_tries_device_that_cannot_stream_again_later(
+    home: tibber.TibberHome,
+    stream: _ScriptedStream,
+    discover: AsyncMock,
+) -> None:
+    """With no device left to stream, the loop reports it and waits 15 minutes, then tries the device again."""
+    error = LiveStreamError("device_not_streamable", transient=False, device_id=DEVICE.id)
+    stream.scripts = [[error], [_measurement()]]
+    callback = MagicMock()
+    errors: list[Exception] = []
+    # The clock is read by the first discovery (0 s), when the device can't stream (1 s), by the second discovery,
+    # which still leaves it out (2 s), and by the third discovery, which tries it again (1000 s).
+    clock = MagicMock(monotonic=MagicMock(side_effect=[0, 1, 2, 1000]))
+
+    with patch("tibber.home.time", clock), _sleeps(stop_at=3) as sleep:
+        await _run_live_loop(home, callback, errors.append)
+
+    assert errors[0] is error
+    assert isinstance(errors[1], RealTimeConsumptionDisabledError)
+    assert len(errors) == 2
+    assert _delays(sleep) == [1 + 1, 900, 1 + 1]
+    assert stream.device_ids == [[DEVICE.id], [DEVICE.id]]
+    assert discover.await_count == 3
+    callback.assert_called_once()
+
+
+async def test_rt_loop_keeps_last_devices_when_discovery_comes_back_empty(
+    home: tibber.TibberHome,
+    discover: AsyncMock,
+    stream: _ScriptedStream,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An empty discovery after a non-empty one is a hiccup of the API: the loop streams the last known devices."""
+    discover.side_effect = [[DEVICE], []]
+    stream.scripts = [[_measurement()], [_measurement()]]
+    callback = MagicMock()
+    errors: list[Exception] = []
+
+    with caplog.at_level(logging.WARNING), _sleeps(stop_at=2) as sleep:
+        await _run_live_loop(home, callback, errors.append)
+
+    assert errors == []
+    assert stream.device_ids == [[DEVICE.id], [DEVICE.id]]
+    assert callback.call_count == 2
+    assert _delays(sleep) == [1 + 1, 1 + 1]
+    assert "using the last known ones" in caplog.text
+
+
+@pytest.mark.usefixtures("discover")
+async def test_rt_loop_rate_limited_uses_retry_after(home: tibber.TibberHome, stream: _ScriptedStream) -> None:
+    """A rate limited connect waits as long as the rate limit asks."""
+    error = RateLimitExceededError(429, "Rate limited", "RATE_LIMITED", 12.5)
+    stream.scripts = [[error]]
+    errors: list[Exception] = []
+
+    with _sleeps(stop_at=1) as sleep:
+        await _run_live_loop(home, on_error=errors.append)
+
+    assert _delays(sleep) == [12.5]
+    assert errors == [error]
+
+
+async def test_rt_loop_no_devices_reports_and_retries(
+    home: tibber.TibberHome,
+    discover: AsyncMock,
+    stream: _ScriptedStream,
+) -> None:
+    """A home without live devices is reported, and discovery is tried again after 15 minutes."""
+    discover.side_effect = [[], [DEVICE]]
+    stream.scripts = [[]]
+    errors: list[Exception] = []
+
+    with _sleeps(stop_at=2) as sleep:
+        await _run_live_loop(home, on_error=errors.append)
+
+    assert [type(error) for error in errors] == [RealTimeConsumptionDisabledError]
+    assert _delays(sleep)[0] == 900
+    assert discover.await_count == 2
+    assert stream.device_ids == [[DEVICE.id]]
+
+
+@pytest.mark.usefixtures("discover")
+async def test_rt_loop_401_retries_once_then_backs_off(home: tibber.TibberHome, stream: _ScriptedStream) -> None:
+    """A 401 is retried at once with a fresh token, and every further 401 in a row waits 15 minutes."""
+    rejections = [InvalidLoginError(401, "Invalid token") for _ in range(3)]
+    stream.scripts = [[rejections[0]], [rejections[1]], [rejections[2]], [_measurement()]]
+    callback = MagicMock()
+    errors: list[Exception] = []
+    connections_at_sleep: list[int] = []
+
+    def record_connections(_delay: float) -> None:
+        connections_at_sleep.append(len(stream.device_ids))
+        if len(connections_at_sleep) == 3:
+            raise asyncio.CancelledError
+
+    with _sleeps(stop_at=3) as sleep:
+        sleep.side_effect = record_connections
+        task = await _run_live_loop(home, callback, errors.append)
+
+    assert task.cancelled()
+    assert errors == rejections
+    # Two connects without a sleep, then 15 minutes before each further connect after a 401.
+    assert connections_at_sleep == [2, 3, 4]
+    assert _delays(sleep) == [900, 900, 1 + 1]
+    callback.assert_called_once()
+
+
+@pytest.mark.usefixtures("discover")
+async def test_rt_loop_401_after_reconnect_retries_again(home: tibber.TibberHome, stream: _ScriptedStream) -> None:
+    """Only 401s in a row back off, a connection in between starts the count again."""
+    stream.scripts = [
+        [InvalidLoginError(401, "Invalid token")],
+        [_measurement()],
+        [InvalidLoginError(401, "Invalid token")],
+        [],
+    ]
+
+    with _sleeps(stop_at=2):
+        task = await _run_live_loop(home, on_error=MagicMock())
+
+    assert task.cancelled()
+    assert len(stream.device_ids) == 4
+
+
+@pytest.mark.usefixtures("discover")
+@pytest.mark.parametrize("status", [400, 404, 408, 409])
+async def test_rt_loop_other_4xx_retries_slowly(home: tibber.TibberHome, stream: _ScriptedStream, status: int) -> None:
+    """A 4xx other than 401, 403 and 429 is reported, and the loop looks again after 15 minutes."""
+    error = FatalHttpExceptionError(status, "Nope", f"HTTP_{status}")
+    stream.scripts = [[error], [_measurement()]]
+    callback = MagicMock()
+    errors: list[Exception] = []
+
+    with _sleeps(stop_at=2) as sleep:
+        task = await _run_live_loop(home, callback, errors.append)
+
+    assert task.cancelled()
+    assert errors == [error]
+    assert _delays(sleep) == [900, 1 + 1]
+    callback.assert_called_once()
+
+
+@pytest.mark.usefixtures("discover")
+@pytest.mark.parametrize(
+    "error",
+    [InsufficientScopeError(403, "Forbidden", "HTTP_403"), FatalHttpExceptionError(403, "Forbidden", "HTTP_403")],
+    ids=["insufficient_scope", "forbidden"],
+)
+async def test_rt_loop_403_stops(home: tibber.TibberHome, stream: _ScriptedStream, error: Exception) -> None:
+    """A 403, which a missing scope causes and retrying can't fix, is reported and stops the loop."""
+    stream.scripts = [[error]]
+    errors: list[Exception] = []
+
+    with _sleeps(stop_at=1) as sleep:
+        task = await _run_live_loop(home, on_error=errors.append)
+
+    assert not task.cancelled()
+    assert task.exception() is None
+    assert len(stream.device_ids) == 1
+    sleep.assert_not_awaited()
+    assert errors == [error]
+    assert not home.rt_subscription_running
+
+    # The stopped loop doesn't count as subscribed, so a new one can start.
+    await home.rt_subscribe(MagicMock())
+    restarted = home._rt_task  # noqa: SLF001
+    home.rt_unsubscribe()
+    await asyncio.wait([restarted], timeout=1)
+    assert restarted.cancelled()
+
+
+@pytest.mark.usefixtures("discover")
+async def test_rt_loop_logs_errors_without_on_error(
+    home: tibber.TibberHome,
+    stream: _ScriptedStream,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Without on_error, errors the loop recovers from are warnings, and errors that stop it are errors."""
+    stream.scripts = [[TimeoutError()], [InsufficientScopeError(403, "Forbidden", "HTTP_403")]]
+
+    with caplog.at_level(logging.WARNING), _sleeps(stop_at=2):
+        task = await _run_live_loop(home)
+
+    assert not task.cancelled()
+    assert [record.levelno for record in caplog.records] == [logging.WARNING, logging.ERROR]
+    assert "TimeoutError" in caplog.records[0].getMessage()
+    assert "InsufficientScopeError" in caplog.records[1].getMessage()
+
+
+async def test_rt_loop_unexpected_error_backs_off(
+    home: tibber.TibberHome,
+    discover: AsyncMock,
+    stream: _ScriptedStream,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An unexpected error in discovery or the stream is logged with its traceback, reported and backed off."""
+    discovery_error = AttributeError("malformed discovery payload")
+    stream_error = UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+    discover.side_effect = [discovery_error, [DEVICE], [DEVICE]]
+    stream.scripts = [[stream_error], []]
+    errors: list[Exception] = []
+
+    with caplog.at_level(logging.ERROR), _sleeps(stop_at=3) as sleep:
+        task = await _run_live_loop(home, on_error=errors.append)
+
+    assert task.cancelled()
+    assert errors == [discovery_error, stream_error]
+    assert _delays(sleep) == [1 + 1, 1 + 2, 1 + 4]
+    assert [record.exc_info[1] for record in caplog.records] == [discovery_error, stream_error]
+
+
+@pytest.mark.usefixtures("discover")
+async def test_rt_loop_enrichment_error_delivers_measurement_as_received(
+    home: tibber.TibberHome,
+    tibber_connection: tibber.Tibber,
+    stream: _ScriptedStream,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A measurement that can't be enriched is logged and passed on as received, without dropping the stream."""
+    tibber_connection.time_zone = dt.timezone(dt.timedelta(hours=-5))
+    # The local time of the first instant of year 1 in UTC-5 is before year 1, so enriching raises an OverflowError.
+    unenrichable = _measurement(timestamp=dt.datetime.min.replace(tzinfo=dt.UTC), accumulated_consumption_last_hour=0.1)
+    stream.scripts = [[unenrichable, unenrichable]]
+    callback = MagicMock()
+    errors: list[Exception] = []
+
+    with caplog.at_level(logging.ERROR), _sleeps(stop_at=1) as sleep:
+        task = await _run_live_loop(home, callback, errors.append)
+
+    assert task.cancelled()
+    assert errors == []
+    assert [call.args[0] for call in callback.call_args_list] == [unenrichable, unenrichable]
+    assert caplog.text.count("Error enriching a live measurement") == 2
+    # The measurements reset the backoff, and the stream then ends normally.
+    assert _delays(sleep) == [1 + 1]
+
+
+@pytest.mark.usefixtures("discover")
+async def test_rt_callback_exception_does_not_stop_loop(
+    home: tibber.TibberHome,
+    stream: _ScriptedStream,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An exception in the callback is logged, and the next measurements still arrive."""
+    stream.scripts = [[_measurement(), _measurement(power=2000.0)]]
+    powers: list[float | None] = []
+
+    def callback(measurement: LiveMeasurement) -> None:
+        powers.append(measurement.power)
+        if len(powers) == 1:
+            raise ValueError("callback boom")
+
+    with caplog.at_level(logging.ERROR), _sleeps(stop_at=1):
+        task = await _run_live_loop(home, callback)
+
+    assert powers == [1000.0, 2000.0]
+    assert task.cancelled()
+    assert "Error in rt_subscribe callback" in caplog.text
+
+
+@pytest.mark.usefixtures("discover")
+async def test_rt_on_error_exception_does_not_stop_loop(
+    home: tibber.TibberHome,
+    stream: _ScriptedStream,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An exception in on_error is logged, and the loop carries on."""
+    stream.scripts = [[TimeoutError()], []]
+
+    with caplog.at_level(logging.ERROR), _sleeps(stop_at=2):
+        task = await _run_live_loop(home, on_error=MagicMock(side_effect=ValueError("on_error boom")))
+
+    assert task.cancelled()
+    assert len(stream.device_ids) == 2
+    assert "Error in rt_subscribe on_error callback" in caplog.text
+
+
+def _sse_response(*events: bytes) -> MagicMock:
+    """Return a 200 response that streams the given Server-Sent Events."""
+
+    async def content() -> AsyncIterator[bytes]:
+        for event in events:
+            for line in event.splitlines(keepends=True):
+                yield line
+
+    return MagicMock(status=200, content=content(), release=MagicMock())
+
+
+async def test_rt_loop_refetches_token_each_connect(
+    mock_websession: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every connect of the real stream gets a fresh token from the token manager."""
+    refresh = AsyncMock(side_effect=["token-1", "token-2"])
+    connection = tibber.Tibber(websession=mock_websession, user_agent="test", refresh_access_token=refresh)
+    monkeypatch.setattr(connection.data_api, "get_live_event_devices", AsyncMock(return_value=[DEVICE]))
+    event = b'event: measurement\ndata: {"deviceId": "pulse-1", "power": 100}\n\n'
+    mock_websession.request = AsyncMock(side_effect=lambda *_args, **_kwargs: _sse_response(event))
+    home = tibber.TibberHome(HOME_ID, connection)
+    callback = MagicMock()
+
+    with _sleeps(stop_at=2):
+        await _run_live_loop(home, callback)
+
+    assert refresh.await_count == 2
+    authorizations = [awaited.kwargs["headers"]["Authorization"] for awaited in mock_websession.request.await_args_list]
+    assert authorizations == ["Bearer token-1", "Bearer token-2"]
+    assert callback.call_count == 2
+
+
+@pytest.mark.parametrize(
+    ("time_zone", "expected"),
+    [(dt.UTC, 1.499), (dt.timezone(dt.timedelta(hours=5, minutes=30)), 2.499)],
+    ids=["utc", "utc+0530"],
+)
+async def test_enrich_estimated_hour_consumption(
+    home: tibber.TibberHome,
+    tibber_connection: tibber.Tibber,
+    time_zone: dt.tzinfo,
+    expected: float,
+) -> None:
+    """The estimate adds the 5-minute average power for the rest of the hour in the client time zone."""
+    tibber_connection.time_zone = time_zone
+    home._enrich_measurement(_measurement(power=1000.0))  # noqa: SLF001
+    later = _measurement(
+        power=3000.0,
+        timestamp=LIVE_TIME + dt.timedelta(seconds=2),
+        accumulated_consumption_last_hour=0.5,
+    )
+
+    assert home._enrich_measurement(later).estimated_hour_consumption == expected  # noqa: SLF001
+
+
+async def test_enrich_power_zero_when_producing(home: tibber.TibberHome) -> None:
+    """A measurement that only reports production consumes nothing."""
+    enriched = home._enrich_measurement(_measurement(power=None, power_production=500.0))  # noqa: SLF001
+
+    assert enriched.power == 0.0
+    assert enriched.power_production == 500.0
+
+
+async def test_enrich_production_zero_when_consuming(home: tibber.TibberHome) -> None:
+    """A measurement that only reports consumption produces nothing."""
+    enriched = home._enrich_measurement(_measurement(power=800.0, power_production=None))  # noqa: SLF001
+
+    assert enriched.power == 800.0
+    assert enriched.power_production == 0.0
+
+
+@pytest.mark.parametrize(("reported", "expected"), [(-3.0, 0.0), (12.5, 12.5), (None, None)])
+async def test_enrich_clamps_last_meter_production(
+    home: tibber.TibberHome,
+    reported: float | None,
+    expected: float | None,
+) -> None:
+    """A negative meter production reading becomes zero."""
+    enriched = home._enrich_measurement(_measurement(last_meter_production=reported))  # noqa: SLF001
+
+    assert enriched.last_meter_production == expected
+
+
+async def test_enrich_power_window_is_per_device(home: tibber.TibberHome) -> None:
+    """The estimate of a device averages only the power of that device."""
+    home._enrich_measurement(_measurement(device_id="watty-1", power=1000.0))  # noqa: SLF001
+    pulse = _measurement(
+        power=3000.0,
+        timestamp=LIVE_TIME + dt.timedelta(seconds=2),
+        accumulated_consumption_last_hour=0.5,
+    )
+
+    assert home._enrich_measurement(pulse).estimated_hour_consumption == 1.998  # noqa: SLF001
+
+
+async def test_enrich_power_window_drops_old_power(home: tibber.TibberHome) -> None:
+    """Power older than five minutes drops out of the estimate."""
+    home._enrich_measurement(_measurement(power=1000.0))  # noqa: SLF001
+    later = _measurement(
+        power=3000.0,
+        timestamp=LIVE_TIME + dt.timedelta(minutes=5, seconds=1),
+        accumulated_consumption_last_hour=0.5,
+    )
+
+    assert home._enrich_measurement(later).estimated_hour_consumption == 1.749  # noqa: SLF001
+
+
+async def test_enrich_updates_peak_hour(home: tibber.TibberHome) -> None:
+    """A current hour above the month's peak hour becomes the peak hour."""
+    home._hourly_consumption_data.peak_hour = 1.0  # noqa: SLF001
+
+    home._enrich_measurement(_measurement(accumulated_consumption_last_hour=1.234))  # noqa: SLF001
+    assert home.peak_hour == 1.23
+    assert home.peak_hour_time == LIVE_TIME
+
+    home._enrich_measurement(  # noqa: SLF001
+        _measurement(accumulated_consumption_last_hour=0.5, timestamp=LIVE_TIME + dt.timedelta(minutes=1)),
+    )
+    assert home.peak_hour == 1.23
+    assert home.peak_hour_time == LIVE_TIME

@@ -15,7 +15,7 @@ _LOGGER = logging.getLogger(__name__)
 class TokenManager:
     """Manages the access token and optional refresh callback shared across all Tibber API clients.
 
-    All consumers (``Tibber.execute``, ``TibberDataAPI``, and ``TibberWebsocketsTransport``)
+    All consumers (``Tibber.execute``, ``TibberDataAPI`` and the live events stream)
     share one instance so the token has a single source of truth.  When a refresh callback is
     provided the token is fetched fresh before every request; concurrent callers coalesce into
     a single in-flight callback invocation.

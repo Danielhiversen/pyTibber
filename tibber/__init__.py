@@ -16,6 +16,7 @@ from .exceptions import (
     FatalHttpExceptionError,
     InsufficientScopeError,
     InvalidLoginError,
+    LiveStreamError,
     PricesNotAvailableError,
     RealTimeConsumptionDisabledError,
     RetryableHttpExceptionError,
@@ -23,7 +24,7 @@ from .exceptions import (
 )
 from .gql_queries import INFO, PUSH_NOTIFICATION
 from .home import TibberHome
-from .realtime import TibberRT
+from .live_events import LiveEventDevice, LiveMeasurement
 from .response_handler import extract_response_data
 from .token_manager import TokenManager
 
@@ -33,6 +34,9 @@ __all__ = [
     "FatalHttpExceptionError",
     "InsufficientScopeError",
     "InvalidLoginError",
+    "LiveEventDevice",
+    "LiveMeasurement",
+    "LiveStreamError",
     "PriceDetails",
     "PriceInterval",
     "Prices",
@@ -42,7 +46,6 @@ __all__ = [
     "Tibber",
     "TibberDataAPI",
     "TibberHome",
-    "TibberRT",
     "TokenManager",
 ]
 
@@ -83,12 +86,6 @@ class Tibber:
         self.websession = websession
         self.timeout: int = timeout
         self._token_manager = TokenManager(access_token, refresh_access_token=refresh_access_token)
-        self.realtime = TibberRT(
-            self._token_manager,
-            timeout,
-            self._user_agent,
-            ssl=ssl,
-        )
 
         self.time_zone: dt.tzinfo = time_zone or dt.UTC
         self._name: str = ""
@@ -105,8 +102,11 @@ class Tibber:
 
     async def close_connection(self) -> None:
         """Close the Tibber connection.
-        This method simply closes the websession used by the object.
+
+        Stops the live data of every home, so it can't reconnect on a closed websession, then closes
+        the websession used by the object.
         """
+        await self.rt_disconnect()
         await self.websession.close()
 
     async def execute(
@@ -165,9 +165,6 @@ class Tibber:
 
         if not (viewer := data.get("viewer")):
             return
-
-        if sub_endpoint := viewer.get("websocketSubscriptionUrl"):
-            await self.realtime.set_subscription_endpoint(sub_endpoint)
 
         self._name = viewer.get("name")
         self._user_id = viewer.get("userId")
@@ -244,16 +241,14 @@ class Tibber:
         )
 
     async def rt_disconnect(self) -> None:
-        """Stop subscription manager."""
+        """Stop the live data of every home and wait until their tasks have ended."""
+        tasks = [task for home in self._homes.values() if (task := home._rt_task) is not None]  # noqa: SLF001
         for home in self._homes.values():
             home.rt_unsubscribe()
-        await self.realtime.disconnect()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     async def set_access_token(self, access_token: str) -> None:
-        """Set access token for subsequent requests and websocket handshakes.
-
-        An active realtime session is left running: the server only validates the token when
-        the connection is established, and the next handshake picks up the new token.
+        """Set access token for subsequent requests.
 
         .. deprecated::
             Prefer providing a ``refresh_access_token`` callback at construction time so all

@@ -1,19 +1,26 @@
 """Tests for Tibber Data API."""
 
 import datetime as dt
+import json
+from collections.abc import AsyncIterator
 from email.utils import format_datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tibber.const import DATA_API_ENDPOINT
 from tibber.data_api import PriceDetails, PriceInterval, TibberDataAPI, TibberDevice
 from tibber.exceptions import (
     FatalHttpExceptionError,
     InsufficientScopeError,
+    InvalidLoginError,
+    LiveStreamError,
     PricesNotAvailableError,
     RateLimitExceededError,
+    RetryableHttpExceptionError,
 )
+from tibber.live_events import LIVE_EVENTS_READ_TIMEOUT, LiveEventDevice, LiveMeasurement
 from tibber.token_manager import TokenManager
 
 
@@ -444,3 +451,159 @@ def test_parse_retry_after_http_date() -> None:
 def test_infinite_retry_after_falls_back_to_backoff(data_api: TibberDataAPI) -> None:
     """A Retry-After that can't be used must not break the wait calculation."""
     assert 1.0 <= data_api._calculate_429_wait_time("inf", 0) <= 31.0  # noqa: SLF001
+
+
+def _set_request(data_api: TibberDataAPI, request: AsyncMock) -> AsyncMock:
+    data_api.websession.request = request  # type: ignore[method-assign]
+    return request
+
+
+def _fake_stream_response(frames: list[bytes], status: int = 200) -> MagicMock:
+    async def _content() -> AsyncIterator[bytes]:
+        for frame in frames:
+            for line in frame.splitlines(keepends=True):
+                yield line
+
+    return MagicMock(status=status, content=_content(), release=MagicMock())
+
+
+async def _collect(data_api: TibberDataAPI, device_ids: list[str] | None = None) -> list[LiveMeasurement]:
+    return [m async for m in data_api.stream_live_events("h1", ["a"] if device_ids is None else device_ids)]
+
+
+_MEASUREMENT = b'event: measurement\ndata: {"deviceId":"a","power":100}\n\n'
+
+
+@pytest.mark.asyncio
+async def test_get_live_event_devices(data_api: TibberDataAPI, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Devices with non-string ids or types are dropped."""
+    mocked = AsyncMock(
+        return_value={
+            "devices": [{"id": "p1", "type": "tibber pulse"}, {"id": 2, "type": "x"}, {"id": "w1", "type": "watty"}],
+        },
+    )
+    monkeypatch.setattr(data_api, "_make_request", mocked)
+
+    devices = await data_api.get_live_event_devices("h1")
+
+    assert devices == [LiveEventDevice("p1", "tibber pulse"), LiveEventDevice("w1", "watty")]
+    mocked.assert_awaited_once_with("GET", "/v1/homes/h1/live-events/devices")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("payload", "expected"),
+    [
+        ({"devices": None}, []),
+        ({"devices": [None, "x", {"id": "p1", "type": "tibber pulse"}]}, [LiveEventDevice("p1", "tibber pulse")]),
+    ],
+    ids=["null_devices", "non_dict_items"],
+)
+async def test_get_live_event_devices_skips_malformed(
+    data_api: TibberDataAPI,
+    monkeypatch: pytest.MonkeyPatch,
+    payload: dict[str, Any],
+    expected: list[LiveEventDevice],
+) -> None:
+    """A null device list, or items that aren't objects, don't break discovery."""
+    monkeypatch.setattr(data_api, "_make_request", AsyncMock(return_value=payload))
+
+    assert await data_api.get_live_event_devices("h1") == expected
+
+
+@pytest.mark.asyncio
+async def test_stream_live_events_request_shape(data_api: TibberDataAPI) -> None:
+    """The stream request carries auth, SSE accept header, device ids and is released."""
+    response = _fake_stream_response([b"event: ping\ndata:\n\n"])
+    request = _set_request(data_api, AsyncMock(return_value=response))
+
+    await _collect(data_api, ["a", "b"])
+
+    args, kwargs = request.await_args
+    assert args == ("GET", f"{DATA_API_ENDPOINT}/v1/homes/h1/live-events")
+    assert kwargs["params"] == [("deviceId", "a"), ("deviceId", "b")]
+    assert kwargs["headers"]["Authorization"] == "Bearer test-token"
+    assert kwargs["headers"]["Accept"] == "text/event-stream"
+    assert kwargs["headers"]["User-Agent"] == data_api._user_agent  # noqa: SLF001
+    response.release.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_stream_live_events_sets_read_timeout(data_api: TibberDataAPI) -> None:
+    """The stream has no total timeout but a socket read timeout."""
+    request = _set_request(data_api, AsyncMock(return_value=_fake_stream_response([])))
+
+    await _collect(data_api)
+
+    timeout = request.await_args.kwargs["timeout"]
+    assert timeout.total is None
+    assert timeout.sock_read == LIVE_EVENTS_READ_TIMEOUT
+    assert timeout.sock_connect == 10
+
+
+@pytest.mark.asyncio
+async def test_stream_live_events_yields_measurements_skips_ping_and_junk(data_api: TibberDataAPI) -> None:
+    """Only valid measurement events are yielded."""
+    frames = [
+        b"event: ping\ndata:\n\n",
+        _MEASUREMENT,
+        b"event: measurement\ndata: not json\n\n",
+        b'event: measurement\ndata: {"power":1}\n\n',
+    ]
+    _set_request(data_api, AsyncMock(return_value=_fake_stream_response(frames)))
+
+    assert await _collect(data_api) == [LiveMeasurement(device_id="a", power=100.0)]
+
+
+@pytest.mark.asyncio
+async def test_stream_live_events_stream_error(data_api: TibberDataAPI) -> None:
+    """A stream_error event raises LiveStreamError."""
+    payload = json.dumps({"code": "upstream_unavailable", "transient": True, "retryAfter": 7})
+    frames = [_MEASUREMENT, f"event: stream_error\ndata: {payload}\n\n".encode()]
+    response = _fake_stream_response(frames)
+    _set_request(data_api, AsyncMock(return_value=response))
+
+    with pytest.raises(LiveStreamError) as exc_info:
+        await _collect(data_api)
+
+    assert exc_info.value.code == "upstream_unavailable"
+    assert exc_info.value.transient is True
+    assert exc_info.value.retry_after == 7
+    response.release.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_stream_live_events_malformed_stream_error(data_api: TibberDataAPI) -> None:
+    """Malformed stream_error data becomes a transient unknown error."""
+    _set_request(
+        data_api,
+        AsyncMock(
+            return_value=_fake_stream_response([b"event: stream_error\ndata: nope\n\n"]),
+        ),
+    )
+
+    with pytest.raises(LiveStreamError) as exc_info:
+        await _collect(data_api)
+
+    assert exc_info.value.code == "unknown"
+    assert exc_info.value.transient is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "error"),
+    [(401, InvalidLoginError), (403, InsufficientScopeError), (503, RetryableHttpExceptionError)],
+)
+async def test_stream_live_events_http_errors(data_api: TibberDataAPI, status: int, error: type[Exception]) -> None:
+    """Non-200 responses raise through _handle_error_response and are released."""
+    response = _fake_stream_response([], status=status)
+    response.headers = {}
+    response.closed = True
+    response.text = AsyncMock(return_value="")
+    response.json = AsyncMock(return_value={})
+    _set_request(data_api, AsyncMock(return_value=response))
+
+    with pytest.raises(error):
+        await _collect(data_api)
+
+    response.release.assert_called_once()

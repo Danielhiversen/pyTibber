@@ -7,20 +7,11 @@ class TibberError(Exception):
     """Base exception for Tibber errors."""
 
 
-class SubscriptionEndpointMissingError(TibberError):
-    """Exception raised when subscription endpoint is missing."""
-
-
-class SubscriptionFailedError(TibberError):
-    """Exception raised when subscription fails."""
-
-
 class RealTimeConsumptionDisabledError(TibberError):
-    """Exception raised when a home is confirmed to have real time consumption disabled.
+    """Exception raised when a home has no streamable live devices.
 
-    Passed to the `on_error` callback of `TibberHome.rt_subscribe`. This error is terminal: the
-    resubscribe loop has stopped and will not retry on its own. To resume, call `rt_subscribe`
-    again, from a separate task rather than directly from the callback, and rate limit the retries.
+    Passed to the `on_error` callback of `TibberHome.rt_subscribe`. It is not terminal: the loop
+    keeps checking for devices and reports this error again until a streamable device appears.
     """
 
 
@@ -84,13 +75,25 @@ class NotForDemoUserError(FatalHttpExceptionError):
     """Exception raised when trying to use a feature not available for demo users"""
 
 
-class WebsocketError(TibberError):
-    """Base exception for Tibber websocket errors."""
+class LiveStreamError(TibberError):
+    """The Data API live events stream reported an error and closed.
 
+    :param code: the error code, for example `upstream_unavailable`, `device_not_streamable` or `evicted`
+    :param transient: whether reconnecting can be expected to help
+    :param retry_after: seconds the server asked to wait before reconnecting, if any
+    :param device_id: the device the error concerns, if any
+    """
 
-class WebsocketReconnectedError(WebsocketError):
-    """Exception raised when websocket has been reconnected."""
-
-
-class WebsocketTransportError(WebsocketError):
-    """Exception raised when websocket transport fails."""
+    def __init__(
+        self,
+        code: str,
+        *,
+        transient: bool,
+        retry_after: float | None = None,
+        device_id: str | None = None,
+    ) -> None:
+        self.code = code
+        self.transient = transient
+        self.retry_after = retry_after
+        self.device_id = device_id
+        super().__init__(f"Live stream error: {code}")

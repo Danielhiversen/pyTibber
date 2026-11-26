@@ -77,35 +77,49 @@ This breaks code that used the GraphQL prices:
 
 ## Example realtime data:
 
-An example of how to subscribe to realtime data (Pulse/Watty):
+Realtime data (Pulse/Watty) is streamed from the [Tibber Data API](https://data-api.tibber.com/docs/)
+as Server-Sent Events. It needs an OAuth access token with the `data-api-meters-read` scope. The demo token
+and personal access tokens do not work with the Data API. Without the scope, no live devices are found.
 
 ```python
-import tibber.const
 import asyncio
 
 import aiohttp
 import tibber
 
-def _callback(pkg):
-    print(pkg)
-    data = pkg.get("data")
-    if data is None:
-        return
-    print(data.get("liveMeasurement"))
+ACCESS_TOKEN = "oauth-access-token-with-data-api-meters-read"
+
+
+def _callback(measurement: tibber.LiveMeasurement) -> None:
+    print(measurement.device_id, measurement.timestamp, measurement.power, measurement.accumulated_consumption)
+
+
+def _on_error(error: Exception) -> None:
+    # For example RealTimeConsumptionDisabledError when the home has no streamable devices.
+    # The stream is reconnected automatically.
+    print("Live data error:", error)
 
 
 async def run():
     async with aiohttp.ClientSession() as session:
-        tibber_connection = tibber.Tibber(tibber.const.DEMO_TOKEN, websession=session, user_agent="change_this")
+        tibber_connection = tibber.Tibber(ACCESS_TOKEN, websession=session, user_agent="change_this")
         await tibber_connection.update_info()
-    home = tibber_connection.get_homes()[0]
-    await home.rt_subscribe(_callback)
+        home = tibber_connection.get_homes()[0]
 
-    while True:
-      await asyncio.sleep(10)
+        devices = await home.update_live_event_devices()
+        print(devices)
 
-loop = asyncio.run(run())
+        # Starts a background task and returns immediately.
+        await home.rt_subscribe(_callback, on_error=_on_error)
+        await asyncio.sleep(60)
+
+        await tibber_connection.rt_disconnect()
+
+asyncio.run(run())
 ```
+
+Without a `refresh_access_token` callback, the static access token expires after about an hour, and live data
+then stops reconnecting successfully.
 
 The library is used as part of Home Assistant.
 

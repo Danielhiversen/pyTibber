@@ -8,45 +8,42 @@ import datetime as dt
 import logging
 import random
 import time
-import warnings
-from typing import TYPE_CHECKING, Any
+from collections import deque
+from contextlib import aclosing
+from dataclasses import replace
+from http import HTTPStatus
+from typing import TYPE_CHECKING, Any, Final
 
 import aiohttp
-from gql import gql
 
 from .const import CURRENCY_BY_COUNTRY, RESOLUTION_DAILY, RESOLUTION_HOURLY, RESOLUTION_MONTHLY, RESOLUTION_WEEKLY
 from .data_api import PRICE_INTERVAL
 from .exceptions import (
+    FatalHttpExceptionError,
     HttpExceptionError,
+    InvalidLoginError,
+    LiveStreamError,
     PricesNotAvailableError,
+    RateLimitExceededError,
     RealTimeConsumptionDisabledError,
-    SubscriptionFailedError,
-    WebsocketReconnectedError,
-    WebsocketTransportError,
 )
 from .gql_queries import (
     HISTORIC_DATA,
     HISTORIC_DATA_DATE,
-    LIVE_SUBSCRIBE,
-    REAL_TIME_CONSUMPTION_ENABLED,
     UPDATE_INFO,
 )
+from .live_events import MAX_LIVE_EVENT_DEVICES
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import AsyncGenerator, Callable
 
     from . import Tibber
     from .data_api import PriceInterval
+    from .live_events import LiveEventDevice, LiveMeasurement
 
 _LOGGER = logging.getLogger(__name__)
 
-RT_SUBSCRIPTION_TIMEOUT = 60
-RESUBSCRIBE_WAIT_TIME = 60
-REAL_TIME_CONSUMPTION_DISABLED_GRACE = dt.timedelta(hours=1)
-
 MIN_REQUESTED_CONSUMPTION_HOURS: int = 3
-
-RESUBSCRIBE_MAX_ATTEMPTS: int = 5
 
 
 def _price_period_start(local_start: dt.datetime, resolution: str) -> dt.datetime:
@@ -55,6 +52,80 @@ def _price_period_start(local_start: dt.datetime, resolution: str) -> dt.datetim
         return local_start.replace(minute=0, second=0, microsecond=0)
     day = dt.datetime.combine(local_start.date(), dt.time(), tzinfo=local_start.tzinfo)
     return day if resolution == RESOLUTION_DAILY else day.replace(day=1)
+
+
+LIVE_RECONNECT_MIN_DELAY: Final = 1
+LIVE_RECONNECT_MAX_DELAY: Final = 60
+EVICTED_RETRY_DELAY: Final = 300
+# The longest wait a `retry_after` of the server can cause.
+LIVE_RETRY_AFTER_MAX: Final = 3600
+# The wait after errors that retrying quickly can't fix, but that may pass: no live devices, repeated 401s,
+# a 4xx other than 403, an error the server marks as permanent, and a device that can't stream.
+NO_LIVE_DEVICES_RETRY_DELAY: Final = 900
+# The server pings an idle stream, so a Pulse that has gone offline leaves the socket open without data.
+LIVE_NO_MEASUREMENT_TIMEOUT: Final = 120
+LIVE_POWER_WINDOW: Final = dt.timedelta(minutes=5)
+
+# Errors the live stream is expected to raise. Anything else is logged with its traceback.
+_EXPECTED_LIVE_ERRORS: Final = (
+    aiohttp.ClientError,
+    TimeoutError,
+    HttpExceptionError,
+    LiveStreamError,
+    RealTimeConsumptionDisabledError,
+)
+
+
+def _reconnect_delay(attempt: int) -> float:
+    """Return a random backoff for reconnect `attempt`: 1 s plus up to 2**attempt s, at most 1 + 60 s."""
+    return LIVE_RECONNECT_MIN_DELAY + random.uniform(0, min(2**attempt, LIVE_RECONNECT_MAX_DELAY))  # noqa: S311
+
+
+def _server_retry_after(error: LiveStreamError) -> float | None:
+    """Return the wait the server asked for, kept within `LIVE_RECONNECT_MIN_DELAY` and `LIVE_RETRY_AFTER_MAX`.
+
+    A missing, zero, negative or NaN `retry_after` means the server didn't ask for a wait.
+    """
+    retry_after = error.retry_after
+    if retry_after is None or not retry_after > 0:
+        return None
+    return min(max(retry_after, LIVE_RECONNECT_MIN_DELAY), LIVE_RETRY_AFTER_MAX)
+
+
+def _live_retry_delay(error: Exception | None, attempt: int, consecutive_401: int) -> float | None:  # noqa: PLR0911
+    """Return the seconds to wait before connecting again after a stream ended with `error`, or None to stop."""
+    if isinstance(error, InvalidLoginError):
+        # Connecting again fetches a fresh token, so the first 401 in a row is retried at once. A token
+        # refresh that failed for a moment can cause more, so further 401s in a row wait instead of stopping.
+        return 0 if consecutive_401 == 1 else NO_LIVE_DEVICES_RETRY_DELAY
+    if isinstance(error, HttpExceptionError) and error.status == HTTPStatus.FORBIDDEN:
+        # The token lacks the data-api-meters-read scope, and no number of retries adds it.
+        return None
+    if isinstance(error, RateLimitExceededError):
+        return error.retry_after
+    if isinstance(error, FatalHttpExceptionError):
+        # Any other 4xx, such as a 404 from a gateway during a rollout, can pass. Look again slowly.
+        return NO_LIVE_DEVICES_RETRY_DELAY
+    if isinstance(error, LiveStreamError):
+        retry_after = _server_retry_after(error)
+        if error.code == "evicted":
+            # Another client took over the home's only live connection, so don't fight over it.
+            return max(retry_after or 0, EVICTED_RETRY_DELAY)
+        if retry_after is not None:
+            return retry_after
+        if error.transient or error.code == "device_not_streamable":
+            # The next connection leaves out a device that can't stream, see `_rt_device_ids`.
+            return _reconnect_delay(attempt)
+        # An error that isn't transient and that we don't know. It may still pass, so look again slowly.
+        return NO_LIVE_DEVICES_RETRY_DELAY
+    if isinstance(error, RealTimeConsumptionDisabledError):
+        return NO_LIVE_DEVICES_RETRY_DELAY
+    return _reconnect_delay(attempt)
+
+
+async def _sleep(delay: float) -> None:
+    """Wait between live stream connections. A function of its own, so that tests can replace it."""
+    await asyncio.sleep(delay)
 
 
 class HourlyData:
@@ -98,20 +169,20 @@ class TibberHome:
         self._home_id: str = home_id
         self._currency: str | None = None
         self.prices: list[PriceInterval] = []
-        self._rt_power: list[tuple[dt.datetime, float]] = []
+        self.live_event_devices: list[LiveEventDevice] = []
         self.info: dict[str, dict[Any, Any]] = {}
         self.last_data_timestamp: dt.datetime | None = None
 
         self._hourly_consumption_data = HourlyData()
         self._hourly_production_data = HourlyData(production=True)
-        self._last_rt_data_received: float | None = None
-        self._rt_listener: asyncio.Task[None] | None = None
-        self._rt_callback: Callable[..., Any] | None = None
-        self._rt_on_error: Callable[[Exception], None] | None = None
-        self._rt_subscription_timeout_task: asyncio.Task[None] | None = None
-        self._has_real_time_consumption: None | bool = None
-        self._real_time_consumption_suggested_disabled: dt.datetime | None = None
-        self._resubscribe_task: asyncio.Task[None] | None = None
+        self._rt_task: asyncio.Task[None] | None = None
+        self._rt_streaming = False
+        # The (timestamp, kW) power readings of the last five minutes, per live device.
+        self._rt_power: dict[str, deque[tuple[dt.datetime, float]]] = {}
+        # The devices the server said can't stream, with the `time.monotonic()` until which they are left out.
+        self._rt_unstreamable: dict[str, float] = {}
+        # The ids of the last non-empty device discovery, which a later empty one doesn't replace.
+        self._rt_known_device_ids: list[str] = []
 
     def _merge_hourly_data(
         self,
@@ -246,8 +317,6 @@ class TibberHome:
             return
         self.info = data
 
-        self._update_has_real_time_consumption(self._extract_real_time_consumption_enabled(data))
-
     async def get_prices(self, start: dt.datetime, end: dt.datetime) -> list[PriceInterval]:
         """Get the 15-minute prices from `start` up to `end` from the Data API.
 
@@ -295,58 +364,6 @@ class TibberHome:
             return
         self.prices = known + new
 
-    async def update_real_time_consumption_enabled(self) -> None:
-        """Update the real time consumption enabled status."""
-        if not (data := await self._tibber_control.execute(REAL_TIME_CONSUMPTION_ENABLED % self._home_id)):
-            _LOGGER.error("Could not get real time consumption enabled status.")
-            return
-        self._update_has_real_time_consumption(self._extract_real_time_consumption_enabled(data))
-
-    @staticmethod
-    def _extract_real_time_consumption_enabled(data: dict[str, Any]) -> bool | None:
-        """Safely extract the real time consumption enabled flag from an info payload."""
-        try:
-            value = data["viewer"]["home"]["features"]["realTimeConsumptionEnabled"]
-        except (KeyError, TypeError):
-            return None
-        # Anything but a bool carries no usable information, treat it like a malformed payload.
-        return value if isinstance(value, bool) else None
-
-    def _update_has_real_time_consumption(self, enabled: bool | None) -> None:
-        """Update the believed real time consumption status from a single reading.
-
-        `enabled` is None when the reading carried no usable information (a malformed or
-        degraded API payload) and must not change the believed status at all.
-
-        A `False` reading following a known `True` does not immediately flip the status: it only
-        arms a grace-period timer and the home keeps reporting its last known `True`, so a single
-        bad or transiently-correct reading during a Tibber-side outage cannot strand the real time
-        subscription. The status flips to `False` only when a later `False` reading arrives more
-        than REAL_TIME_CONSUMPTION_DISABLED_GRACE after the timer was armed. Both a `True` reading
-        and incoming real time data (see `_handle_subscription_data`) clear the timer, so the grace
-        period always measures the time since the last evidence that real time consumption works.
-        """
-        if enabled is None:
-            return
-
-        if enabled is True:
-            self._real_time_consumption_suggested_disabled = None
-            self._has_real_time_consumption = True
-            return
-
-        # enabled is False from here on.
-        if self._has_real_time_consumption is not True:
-            self._real_time_consumption_suggested_disabled = None
-            self._has_real_time_consumption = False
-            return
-
-        now = dt.datetime.now(tz=dt.UTC)
-        if self._real_time_consumption_suggested_disabled is None:
-            self._real_time_consumption_suggested_disabled = now
-        elif now - self._real_time_consumption_suggested_disabled > REAL_TIME_CONSUMPTION_DISABLED_GRACE:
-            self._real_time_consumption_suggested_disabled = None
-            self._has_real_time_consumption = False
-
     @property
     def home_id(self) -> str:
         """Return home id."""
@@ -365,11 +382,6 @@ class TibberHome:
             "awaiting time restriction",
             "awaiting termination",
         ]
-
-    @property
-    def has_real_time_consumption(self) -> None | bool:
-        """Return home id."""
-        return self._has_real_time_consumption
 
     @property
     def has_production(self) -> bool:
@@ -453,247 +465,215 @@ class TibberHome:
         rank = (prices_today.index(price) + 1) / len(prices_today)
         return round(price, 4), price_time, rank
 
+    async def update_live_event_devices(self) -> list[LiveEventDevice]:
+        """Update `live_event_devices` with the devices of the home that can stream live data.
+
+        Without the data-api-meters-read scope the home has no live devices.
+        """
+        self.live_event_devices = await self._tibber_control.data_api.get_live_event_devices(self._home_id)
+        return self.live_event_devices
+
     async def rt_subscribe(
         self,
-        callback: Callable[..., Any],
+        callback: Callable[[LiveMeasurement], None],
         *,
         on_error: Callable[[Exception], None] | None = None,
     ) -> None:
-        """Connect to Tibber and subscribe to Tibber real time subscription.
+        """Stream live measurements from the home's Pulse or Watty in a background task.
 
-        :param callback: The function to call when data is received.
-        :param on_error: The function to call when an error occurs. Most errors are transient and
-            resubscription continues automatically, but a `RealTimeConsumptionDisabledError` is
-            terminal: the resubscribe loop has stopped and will not retry on its own. To resume,
-            call `rt_subscribe` again, from a separate task rather than directly from this
-            callback, and rate limit the retries.
+        Returns at once. The task discovers the live devices, streams the first five, and connects
+        again whenever the stream ends or fails, until `rt_unsubscribe` or an error that retrying
+        can't fix.
+
+        :param callback: Called with every measurement. Exceptions it raises are logged.
+        :param on_error: Called with every error instead of logging it, though unexpected errors are
+            logged with their traceback as well. The task stops after a 403, such as an
+            `InsufficientScopeError`, and carries on after anything else. A first `InvalidLoginError`
+            is retried at once, and further ones in a row every 15 minutes, as is any other 4xx. A home
+            without live devices is reported as a `RealTimeConsumptionDisabledError` every 15 minutes,
+            and a stream without a measurement for 2 minutes as a `TimeoutError`. The wait that the
+            server asks for in a stream error is kept between 1 s and 1 hour. A measurement that can't
+            be enriched is passed to `callback` as received. Once the task has stopped, `rt_subscribe`
+            can start a new one.
         """
-        if self._rt_listener is not None:
+        if self._rt_task is not None and not self._rt_task.done():
             raise RuntimeError("Already subscribed to real time data, call rt_unsubscribe first")
-        _LOGGER.debug("Subscribe, %s", self.home_id)
-        self._rt_callback = callback
-        self._rt_on_error = on_error
-        await self._rt_resubscribe()
-
-    async def _rt_subscribe(self) -> None:
-        """Subscribe to Tibber real time subscription."""
-        await self._tibber_control.realtime.connect()
-        self._rt_listener = asyncio.create_task(self._start_listen())
-        self._rt_subscription_timeout_task = asyncio.create_task(
-            self._rt_subscription_timeout(),
-        )
-
-    async def _start_listen(self) -> None:
-        """Subscribe to Tibber."""
-        on_error = self._rt_on_error
-        try:
-            async for _data in self._tibber_control.realtime.subscribe(
-                gql(
-                    LIVE_SUBSCRIBE % self.home_id,
-                ),
-                on_error=on_error,
-            ):
-                self._handle_subscription_data(_data)
-        except WebsocketReconnectedError as err:
-            _LOGGER.debug("Websocket reconnected for home %s, restarting subscription", self.home_id)
-            if on_error:
-                on_error(err)
-        except Exception as err:
-            if not isinstance(err, WebsocketTransportError):
-                _LOGGER.exception("Error in subscription")
-            else:
-                level = logging.DEBUG if on_error is not None else logging.ERROR
-                _LOGGER.log(
-                    level,
-                    "Error in subscription for home %s: %s: %s",
-                    self.home_id,
-                    err.__class__.__name__,
-                    err,
-                )
-            if on_error is not None:
-                on_error(err)
-
-        await asyncio.sleep(random.random() * RESUBSCRIBE_WAIT_TIME)  # noqa: S311
-        self._schedule_resubscribe()
-
-    def _handle_subscription_data(self, _data: dict[str, Any]) -> None:
-        """Handle incoming real time subscription data.
-
-        Record that data was received to keep the subscription timeout watchdog
-        from treating a healthy, active subscription as unresponsive, and treat the live
-        measurement as a successful `True` status reading: it proves real time consumption is
-        working right now, and it is the only such proof available while a subscription runs
-        healthily. This both clears any suspected-disable grace timer and restores the believed
-        status to `True`, so live data can recover a status that was already flipped to `False`.
-        """
-        self._last_rt_data_received = time.time()
-        if self._has_real_time_consumption is not True or self._real_time_consumption_suggested_disabled is not None:
-            _LOGGER.debug(
-                "Real time data received for home %s, treating live measurement as proof "
-                "real time consumption is enabled",
-                self.home_id,
-            )
-            self._update_has_real_time_consumption(True)
-        data = {"data": _data}
-        try:
-            data = self._add_extra_data(data)
-        except KeyError as err:
-            _LOGGER.debug("Missing expected key in rt_subscribe data, skipping enrichment: %s", err)
-        except Exception:
-            _LOGGER.exception("Error processing rt_subscribe data")
-        if self._rt_callback is None:
-            raise RuntimeError("No subscription callback set, call rt_subscribe first")
-        try:
-            self._rt_callback(data)
-        except Exception:
-            _LOGGER.exception("Error in rt_subscribe callback")
-            return
-        _LOGGER.debug(
-            "Data received for %s: %s",
-            self.home_id,
-            data,
-        )
-
-    def _add_extra_data(self, data: dict[str, Any]) -> dict[str, Any]:
-        live_data = data["data"]["liveMeasurement"]
-        _timestamp = dt.datetime.fromisoformat(live_data["timestamp"]).astimezone(self._tibber_control.time_zone)
-        while self._rt_power and self._rt_power[0][0] < _timestamp - dt.timedelta(minutes=5):
-            self._rt_power.pop(0)
-
-        self._rt_power.append((_timestamp, live_data["power"] / 1000))
-        if "lastMeterProduction" in live_data:
-            live_data["lastMeterProduction"] = max(0, live_data["lastMeterProduction"] or 0)
-
-        if (
-            (power_production := live_data.get("powerProduction"))
-            and power_production > 0
-            and live_data.get("power") is None
-        ):
-            live_data["power"] = 0
-
-        if live_data.get("power", 0) > 0 and live_data.get("powerProduction") is None:
-            live_data["powerProduction"] = 0
-
-        current_hour = live_data["accumulatedConsumptionLastHour"]
-        if current_hour is not None:
-            power = sum(p[1] for p in self._rt_power) / len(self._rt_power)
-            live_data["estimatedHourConsumption"] = round(
-                current_hour + power * (3600 - (_timestamp.minute * 60 + _timestamp.second)) / 3600,
-                3,
-            )
-            if self._hourly_consumption_data.peak_hour and current_hour > self._hourly_consumption_data.peak_hour:
-                self._hourly_consumption_data.peak_hour = round(current_hour, 2)
-                self._hourly_consumption_data.peak_hour_time = _timestamp
-        return data
-
-    def _schedule_resubscribe(self) -> None:
-        if self._resubscribe_task is not None:
-            # Cancelling the resubscribe task is a defensive no-op,
-            # since the the only callers of _schedule_resubscribe,
-            # _rt_listener and _rt_subscription_timeout_task, get cancelled on resubscribe.
-            self._resubscribe_task.cancel()
-        self._resubscribe_task = asyncio.create_task(self._rt_resubscribe())
-
-    async def rt_resubscribe(self) -> None:
-        """Resubscribe to Tibber data.
-
-        Deprecated. Resubscription will happen automatically.
-        """
-        warnings.warn(
-            "TibberHome.rt_resubscribe is deprecated, resubscription will happen automatically",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if self._rt_callback is None:
-            raise RuntimeError("No callback set for rt_resubscribe, call rt_subscribe first")
-        await self._rt_resubscribe()
-
-    async def _rt_resubscribe(self) -> None:
-        """Resubscribe to Tibber data."""
-        _LOGGER.info("Resubscribe, %s", self.home_id)
-        self.rt_unsubscribe()
-
-        await self._resubscribe_step(
-            self.update_real_time_consumption_enabled(),
-            "Failed to refresh real time consumption status, keeping last known status",
-        )
-        if self.has_real_time_consumption is False:
-            _LOGGER.info("Home %s does not have real time consumption enabled", self.home_id)
-            if (on_error := self._rt_on_error) is not None:
-                on_error(
-                    RealTimeConsumptionDisabledError(
-                        f"Home {self.home_id} does not have real time consumption enabled",
-                    ),
-                )
-            return
-
-        # Update info to set websocket subscription url
-        await self._resubscribe_step(
-            self._tibber_control.update_info(),
-            "Failed to update info, keeping last known info",
-        )
-
-        await self._rt_subscribe()
-
-    async def _resubscribe_step(self, coro: Awaitable[Any], failure_message: str) -> None:
-        """Await a resubscribe step, logging a warning on failure instead of aborting."""
-        try:
-            await coro
-        except (TimeoutError, aiohttp.ClientError):
-            # Transport errors are already logged at debug level inside execute.
-            _LOGGER.warning("Home %s: %s", self.home_id, failure_message)
-        except HttpExceptionError as err:
-            # Known API errors (e.g. an expired token) are expected here and don't warrant a traceback.
-            _LOGGER.warning("Home %s: %s: %s", self.home_id, failure_message, err)
-        except Exception:  # noqa: BLE001
-            _LOGGER.warning("Home %s: %s", self.home_id, failure_message, exc_info=True)
+        _LOGGER.debug("Subscribe, %s", self._home_id)
+        self._rt_task = asyncio.create_task(self._rt_run(callback, on_error))
 
     def rt_unsubscribe(self) -> None:
-        """Unsubscribe to Tibber data."""
-        _LOGGER.debug("Unsubscribe, %s", self.home_id)
-        if self._rt_listener is not None:
-            self._rt_listener.cancel()
-            self._rt_listener = None
-        if self._rt_subscription_timeout_task is not None:
-            self._rt_subscription_timeout_task.cancel()
-            self._rt_subscription_timeout_task = None
-        self._last_rt_data_received = None
-
-    async def _rt_subscription_timeout(self) -> None:
-        """Resubscribe if realtime subscription is unresponsive."""
-        on_error = self._rt_on_error
-        while True:
-            # Add some random time to avoid all homes resubscribing at the same time
-            # if there is an issue with the subscription
-            await asyncio.sleep(RT_SUBSCRIPTION_TIMEOUT + random.random() * RT_SUBSCRIPTION_TIMEOUT)  # noqa: S311
-            if (
-                self._last_rt_data_received is not None
-                and time.time() - self._last_rt_data_received <= RT_SUBSCRIPTION_TIMEOUT
-            ):
-                continue
-            if on_error:
-                on_error(
-                    SubscriptionFailedError(
-                        f"No real time data received for home {self.home_id} "
-                        f"in the last {RT_SUBSCRIPTION_TIMEOUT} seconds",
-                    ),
-                )
-            else:
-                _LOGGER.error(
-                    "No real time data received for home %s in the last %d seconds, reconnecting and resubscribing",
-                    self.home_id,
-                    RT_SUBSCRIPTION_TIMEOUT,
-                )
-            if self._rt_listener is not None:
-                self._rt_listener.cancel()
-                self._rt_listener = None
-            await self._tibber_control.realtime.reconnect()
-            self._schedule_resubscribe()
+        """Stop streaming live measurements. The task is cancelled and ends in the background."""
+        _LOGGER.debug("Unsubscribe, %s", self._home_id)
+        if self._rt_task is not None:
+            self._rt_task.cancel()
+            self._rt_task = None
+        self._rt_streaming = False
 
     @property
     def rt_subscription_running(self) -> bool:
-        """Is real time subscription running."""
-        return self._tibber_control.realtime.subscription_running and self._rt_listener is not None
+        """Return True while a live stream is open and has delivered a measurement."""
+        return self._rt_streaming
+
+    async def _rt_run(
+        self,
+        callback: Callable[[LiveMeasurement], None],
+        on_error: Callable[[Exception], None] | None,
+    ) -> None:
+        """Stream live measurements and connect again until cancelled or an error retrying can't fix."""
+        # The number of connections since the last measurement, which sets the backoff.
+        attempt = 0
+        consecutive_401 = 0
+        self._rt_unstreamable.clear()
+        self._rt_known_device_ids = []
+        while True:
+            error: Exception | None = None
+            try:
+                device_ids = await self._rt_device_ids()
+                stream = self._tibber_control.data_api.stream_live_events(self._home_id, device_ids)
+                # aclosing releases the response at once when the loop body raises.
+                async with aclosing(stream):
+                    while (measurement := await self._next_live_measurement(stream)) is not None:
+                        attempt = 0
+                        self._rt_streaming = True
+                        try:
+                            enriched = self._enrich_measurement(measurement)
+                        except Exception:
+                            # A measurement that can't be enriched is still worth more than a dropped connection.
+                            _LOGGER.exception("Error enriching a live measurement of home %s", self._home_id)
+                            enriched = measurement
+                        try:
+                            callback(enriched)
+                        except Exception:
+                            _LOGGER.exception("Error in rt_subscribe callback")
+            except Exception as err:  # noqa: BLE001
+                error = err
+            finally:
+                self._rt_streaming = False
+
+            if isinstance(error, LiveStreamError) and error.code == "device_not_streamable" and error.device_id:
+                # Leave the device out of the next connections, so that it doesn't hold back the others.
+                self._rt_unstreamable[error.device_id] = time.monotonic() + NO_LIVE_DEVICES_RETRY_DELAY
+            consecutive_401 = consecutive_401 + 1 if isinstance(error, InvalidLoginError) else 0
+            delay = _live_retry_delay(error, attempt, consecutive_401)
+            if error is not None:
+                self._rt_report(error, on_error, stopping=delay is None)
+            if delay is None:
+                return
+            if delay > 0:
+                await _sleep(delay)
+            attempt += 1
+
+    async def _next_live_measurement(self, stream: AsyncGenerator[LiveMeasurement, None]) -> LiveMeasurement | None:
+        """Return the next measurement of the stream, or None when the stream has ended.
+
+        :raises TimeoutError: No measurement arrived within `LIVE_NO_MEASUREMENT_TIMEOUT` seconds.
+        """
+        watchdog = asyncio.timeout(LIVE_NO_MEASUREMENT_TIMEOUT)
+        try:
+            async with watchdog:
+                return await anext(stream, None)
+        except TimeoutError:
+            if not watchdog.expired():
+                # The stream's own timeout, such as the socket read timeout.
+                raise
+            raise TimeoutError(
+                f"No live measurement for home {self._home_id} in {LIVE_NO_MEASUREMENT_TIMEOUT} s",
+            ) from None
+
+    async def _rt_device_ids(self) -> list[str]:
+        """Discover the home's live devices and return the ids of the ones to stream.
+
+        Devices that the server said can't stream are left out for `NO_LIVE_DEVICES_RETRY_DELAY` seconds. An
+        empty discovery after a non-empty one counts as a hiccup of the API, so the last known devices are used.
+        """
+        devices = await self.update_live_event_devices()
+        if devices:
+            self._rt_known_device_ids = [device.id for device in devices]
+        elif self._rt_known_device_ids:
+            _LOGGER.warning("Home %s: live device discovery found no devices, using the last known ones", self._home_id)
+        else:
+            raise RealTimeConsumptionDisabledError(
+                f"Home {self._home_id} has no live devices, or the token lacks the data-api-meters-read scope",
+            )
+
+        now = time.monotonic()
+        self._rt_unstreamable = {device_id: until for device_id, until in self._rt_unstreamable.items() if until > now}
+        device_ids = [device_id for device_id in self._rt_known_device_ids if device_id not in self._rt_unstreamable]
+        if not device_ids:
+            raise RealTimeConsumptionDisabledError(f"None of the live devices of home {self._home_id} can stream")
+        if len(device_ids) > MAX_LIVE_EVENT_DEVICES:
+            _LOGGER.warning(
+                "Home %s has %d live devices, streaming the first %d",
+                self._home_id,
+                len(device_ids),
+                MAX_LIVE_EVENT_DEVICES,
+            )
+        return device_ids[:MAX_LIVE_EVENT_DEVICES]
+
+    def _rt_report(
+        self,
+        error: Exception,
+        on_error: Callable[[Exception], None] | None,
+        *,
+        stopping: bool,
+    ) -> None:
+        """Pass a live stream error to `on_error`, or log it when there is none.
+
+        Unexpected errors are always logged, with their traceback.
+        """
+        if not isinstance(error, _EXPECTED_LIVE_ERRORS):
+            _LOGGER.error("Unexpected error in the live stream of home %s", self._home_id, exc_info=error)
+        elif on_error is None:
+            _LOGGER.log(
+                logging.ERROR if stopping else logging.WARNING,
+                "Live stream of home %s: %s: %s, %s",
+                self._home_id,
+                type(error).__name__,
+                error,
+                "stopping" if stopping else "retrying",
+            )
+        if on_error is not None:
+            try:
+                on_error(error)
+            except Exception:
+                _LOGGER.exception("Error in rt_subscribe on_error callback")
+
+    def _enrich_measurement(self, measurement: LiveMeasurement) -> LiveMeasurement:
+        """Return the measurement with the values pyTibber derives, and update the peak hour."""
+        power, power_production = measurement.power, measurement.power_production
+        if power is None and power_production is not None and power_production > 0:
+            power = 0.0
+        if power is not None and power > 0 and power_production is None:
+            power_production = 0.0
+        last_meter_production = measurement.last_meter_production
+        if last_meter_production is not None:
+            last_meter_production = max(0.0, last_meter_production)
+
+        estimated_hour_consumption = None
+        if (timestamp := measurement.timestamp) is not None:
+            window = self._rt_power.setdefault(measurement.device_id, deque())
+            while window and window[0][0] < timestamp - LIVE_POWER_WINDOW:
+                window.popleft()
+            if power is not None:
+                window.append((timestamp, power / 1000))
+            if (current_hour := measurement.accumulated_consumption_last_hour) is not None:
+                local_time = timestamp.astimezone(self._tibber_control.time_zone)
+                if window:
+                    average_kw = sum(kw for _, kw in window) / len(window)
+                    seconds_left = 3600 - (local_time.minute * 60 + local_time.second)
+                    estimated_hour_consumption = round(current_hour + average_kw * seconds_left / 3600, 3)
+                consumption = self._hourly_consumption_data
+                if consumption.peak_hour and current_hour > consumption.peak_hour:
+                    consumption.peak_hour = round(current_hour, 2)
+                    consumption.peak_hour_time = local_time
+
+        return replace(
+            measurement,
+            power=power,
+            power_production=power_production,
+            last_meter_production=last_meter_production,
+            estimated_hour_consumption=estimated_hour_consumption,
+        )
 
     async def get_historic_data(
         self,
