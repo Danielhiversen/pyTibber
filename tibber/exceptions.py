@@ -52,6 +52,18 @@ class FatalHttpExceptionError(HttpExceptionError):
     """Exception raised for HTTP codes that are non-retriable."""
 
 
+class PricesNotAvailableError(FatalHttpExceptionError):
+    """The Data API has no prices for this request.
+
+    The account has no access to prices, the home has no prices, or the request is before the
+    start of the home's price history.
+    """
+
+
+class InsufficientScopeError(FatalHttpExceptionError):
+    """The Data API denied the request, usually because the access token lacks a required scope."""
+
+
 class RetryableHttpExceptionError(HttpExceptionError):
     """Exception raised for HTTP codes that are possible to retry."""
 

@@ -3,7 +3,7 @@
 from http import HTTPStatus
 from typing import Final
 
-__version__ = "0.39.1"
+__version__ = "0.40.0"
 
 API_ENDPOINT: Final = "https://api.tibber.com/v1-beta/gql"
 DATA_API_ENDPOINT: Final = "https://data-api.tibber.com"
@@ -16,6 +16,9 @@ RESOLUTION_DAILY: Final = "DAILY"
 RESOLUTION_WEEKLY: Final = "WEEKLY"
 RESOLUTION_MONTHLY: Final = "MONTHLY"
 RESOLUTION_ANNUAL: Final = "ANNUAL"
+
+# The currency of a home before its prices have told it, by the country of its address.
+CURRENCY_BY_COUNTRY: Final = {"DE": "EUR", "NL": "EUR", "NO": "NOK", "SE": "SEK"}
 
 API_ERR_CODE_UNKNOWN: Final = "UNKNOWN"
 API_ERR_CODE_UNAUTH: Final = "UNAUTHENTICATED"

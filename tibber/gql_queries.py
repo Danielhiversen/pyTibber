@@ -38,24 +38,6 @@ HISTORIC_DATA_DATE = """
                       }}
                     }}
                     """
-HISTORIC_PRICE = """
-                {{
-                  viewer {{
-                    home(id: "{0}") {{
-                      currentSubscription {{
-                        priceRating {{
-                            {1} {{
-                              entries {{
-                                  time
-                                  total
-                              }}
-                            }}
-                         }}
-                     }}
-                  }}
-                  }}
-                }}
-          """
 INFO = """
         {
           viewer {
@@ -124,51 +106,10 @@ REAL_TIME_CONSUMPTION_ENABLED = """
           }
         }
         """
-UPDATE_CURRENT_PRICE = """
+UPDATE_INFO = """
         {
           viewer {
             home(id: "%s") {
-              currentSubscription {
-                priceInfo {
-                  current {
-                    energy
-                    tax
-                    total
-                    startsAt
-                  }
-                }
-              }
-            }
-          }
-        }
-        """
-
-UPDATE_INFO_PRICE = """
-        {
-          viewer {
-            home(id: "%s") {
-              currentSubscription {
-                priceInfo(resolution: QUARTER_HOURLY) {
-                  current {
-                    currency
-                    energy
-                    tax
-                    total
-                    startsAt
-                    level
-                  }
-                  today {
-                    total
-                    startsAt
-                    level
-                  }
-                  tomorrow {
-                    total
-                    startsAt
-                    level
-                  }
-                }
-              }
               appNickname
               features {
                 realTimeConsumptionEnabled
@@ -214,5 +155,4 @@ UPDATE_INFO_PRICE = """
             }
           }
         }
-
         """

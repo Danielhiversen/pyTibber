@@ -14,9 +14,11 @@ from typing import TYPE_CHECKING, Any
 import aiohttp
 from gql import gql
 
-from .const import RESOLUTION_DAILY, RESOLUTION_HOURLY, RESOLUTION_MONTHLY, RESOLUTION_WEEKLY
+from .const import CURRENCY_BY_COUNTRY, RESOLUTION_DAILY, RESOLUTION_HOURLY, RESOLUTION_MONTHLY, RESOLUTION_WEEKLY
+from .data_api import PRICE_INTERVAL
 from .exceptions import (
     HttpExceptionError,
+    PricesNotAvailableError,
     RealTimeConsumptionDisabledError,
     SubscriptionFailedError,
     WebsocketReconnectedError,
@@ -25,21 +27,19 @@ from .exceptions import (
 from .gql_queries import (
     HISTORIC_DATA,
     HISTORIC_DATA_DATE,
-    HISTORIC_PRICE,
     LIVE_SUBSCRIBE,
     REAL_TIME_CONSUMPTION_ENABLED,
-    UPDATE_INFO_PRICE,
+    UPDATE_INFO,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
     from . import Tibber
+    from .data_api import PriceInterval
 
 _LOGGER = logging.getLogger(__name__)
 
-MIN_IN_HOUR: int = 60
-MIN_IN_QUARTER: int = 15
 RT_SUBSCRIPTION_TIMEOUT = 60
 RESUBSCRIBE_WAIT_TIME = 60
 REAL_TIME_CONSUMPTION_DISABLED_GRACE = dt.timedelta(hours=1)
@@ -47,6 +47,14 @@ REAL_TIME_CONSUMPTION_DISABLED_GRACE = dt.timedelta(hours=1)
 MIN_REQUESTED_CONSUMPTION_HOURS: int = 3
 
 RESUBSCRIBE_MAX_ATTEMPTS: int = 5
+
+
+def _price_period_start(local_start: dt.datetime, resolution: str) -> dt.datetime:
+    """Return the start of the hour, day or month that a time in the home's time zone is in."""
+    if resolution == RESOLUTION_HOURLY:
+        return local_start.replace(minute=0, second=0, microsecond=0)
+    day = dt.datetime.combine(local_start.date(), dt.time(), tzinfo=local_start.tzinfo)
+    return day if resolution == RESOLUTION_DAILY else day.replace(day=1)
 
 
 class HourlyData:
@@ -88,7 +96,8 @@ class TibberHome:
         """
         self._tibber_control = tibber_control
         self._home_id: str = home_id
-        self.price_total: dict[str, float] = {}
+        self._currency: str | None = None
+        self.prices: list[PriceInterval] = []
         self._rt_power: list[tuple[dt.datetime, float]] = []
         self.info: dict[str, dict[Any, Any]] = {}
         self.last_data_timestamp: dt.datetime | None = None
@@ -231,51 +240,60 @@ class TibberHome:
         return self._hourly_production_data.data
 
     async def update_info(self) -> None:
-        """Update home info and the current price info asynchronously."""
-        await self.update_info_and_price_info()
-
-    async def update_info_and_price_info(self) -> None:
-        """Update home info and all price info asynchronously."""
-        if not (data := await self._tibber_control.execute(UPDATE_INFO_PRICE % self._home_id)):
+        """Update home info asynchronously."""
+        if not (data := await self._tibber_control.execute(UPDATE_INFO % self._home_id)):
             _LOGGER.error("Could not get the data.")
             return
         self.info = data
 
         self._update_has_real_time_consumption(self._extract_real_time_consumption_enabled(data))
 
-        # Handle inactive homes where currentSubscription might be None
-        # Access currentSubscription, handle missing keys
-        try:
-            viewer = self.info["viewer"]
-        except KeyError as err:
-            _LOGGER.error("Missing 'viewer' key in info for home %s: %s", self._home_id, err)
-            self.price_total = {}
-            return
-        try:
-            home = viewer["home"]
-        except KeyError as err:
-            _LOGGER.error("Missing 'home' key in viewer for home %s: %s", self._home_id, err)
-            self.price_total = {}
-            return
-        current_subscription = home.get("currentSubscription")
-        if current_subscription is None:
-            _LOGGER.debug("No active subscription for home %s", self._home_id)
-            self.price_total = {}
-            return
+    async def get_prices(self, start: dt.datetime, end: dt.datetime) -> list[PriceInterval]:
+        """Get the 15-minute prices from `start` up to `end` from the Data API.
 
-        price_info = current_subscription.get("priceInfo")
-        if price_info is None:
-            _LOGGER.debug("No price info available for home %s", self._home_id)
-            self.price_total = {}
-            return
+        Does not change `prices`. See `TibberDataAPI.get_prices` for the errors raised.
+        """
+        prices = await self._tibber_control.data_api.get_prices(self._home_id, start, end)
+        if prices.currency:
+            self._currency = prices.currency
+        return prices.intervals
 
-        today = price_info.get("today", [])
-        tomorrow = price_info.get("tomorrow", [])
+    def _first_unknown_price_start(self, start: dt.datetime) -> dt.datetime:
+        """Return the start of the first 15-minute interval from `start` on that `prices` doesn't have.
+
+        A hole in `prices` counts as unknown, so a price that was missed once is fetched again.
+        """
+        # Calculating in UTC keeps the intervals of a day with a change to or from summer time 15 minutes apart.
+        expected = start.astimezone(dt.UTC)
+        for interval in self.prices:
+            if interval.start < start:
+                continue
+            if interval.start != expected:
+                break
+            expected += PRICE_INTERVAL
+        return expected
+
+    async def update_prices(self) -> None:
+        """Update `prices` with today's and, once published, tomorrow's prices.
+
+        Published prices never change, so only the prices that `prices` doesn't have yet are fetched: the
+        first call of a day gets today's, and later ones only add tomorrow's once they are published, from
+        about 13:00 CET. Nothing is fetched when `prices` is complete. Yesterday's prices are dropped.
+
+        A home without prices gets no prices, other errors are raised and the known prices are kept.
+        """
+        today = dt.datetime.now(self._tibber_control.time_zone).date()
+        start = dt.datetime.combine(today, dt.time(), tzinfo=self._tibber_control.time_zone)
+        end = dt.datetime.combine(today + dt.timedelta(days=2), dt.time(), tzinfo=self._tibber_control.time_zone)
+        since = self._first_unknown_price_start(start)
+        known = [interval for interval in self.prices if start <= interval.start < since]
         try:
-            self.price_total = {item["startsAt"]: item["total"] for item in today + tomorrow}
-        except (KeyError, TypeError) as err:
-            _LOGGER.error("Malformed price info data for home %s: %s", self._home_id, err)
-            self.price_total = {}
+            new = await self.get_prices(since, end) if since < end else []
+        except PricesNotAvailableError as err:
+            _LOGGER.debug("No prices for home %s: %s", self._home_id, err)
+            self.prices = []
+            return
+        self.prices = known + new
 
     async def update_real_time_consumption_enabled(self) -> None:
         """Update the real time consumption enabled status."""
@@ -377,12 +395,8 @@ class TibberHome:
 
     @property
     def currency(self) -> str:
-        """Return the currency."""
-        try:
-            return self.info["viewer"]["home"]["currentSubscription"]["priceInfo"]["current"]["currency"]
-        except (KeyError, TypeError, IndexError):
-            _LOGGER.error("Could not find currency.")
-        return ""
+        """Return the currency of the prices, from the Data API or else the home's country."""
+        return self._currency or CURRENCY_BY_COUNTRY.get(self.country, "")
 
     @property
     def country(self) -> str:
@@ -409,41 +423,35 @@ class TibberHome:
             return ""
         return self.currency + "/" + self.consumption_unit
 
-    def current_price_rank(self, price_total: dict[str, float], price_time: dt.datetime | None) -> float | None:
-        """Gets the rank (0-1) of how expensive the current price is compared to the other prices today."""
-        # No price -> no rank
-        if price_time is None:
-            return None
-        # Map price_total to a list of tuples (datetime, float)
-        price_items_typed: list[tuple[dt.datetime, float]] = [
-            (
-                dt.datetime.fromisoformat(time).astimezone(self._tibber_control.time_zone),
-                price,
-            )
-            for time, price in price_total.items()
-        ]
+    def _local_start(self, interval: PriceInterval) -> dt.datetime:
+        return interval.start.astimezone(self._tibber_control.time_zone)
 
-        # Filter out prices not from today, sort by price
-        prices_today_sorted = sorted(
-            [item for item in price_items_typed if item[0].date() == price_time.date()],
-            key=lambda x: x[1],
-        )
-        # Find the rank of the current price
-        for idx, item in enumerate(prices_today_sorted, start=1):
-            if item[0] == price_time:
-                return idx / len(prices_today_sorted)
+    def prices_for_day(self, day: dt.date) -> list[PriceInterval]:
+        """Return the price intervals that start on a day in the home's time zone."""
+        return [interval for interval in self.prices if self._local_start(interval).date() == day]
+
+    @property
+    def current_price_interval(self) -> PriceInterval | None:
+        """Return the prices for the current 15-minute interval."""
+        now = dt.datetime.now(dt.UTC)
+        for interval in self.prices:
+            if interval.start <= now < interval.start + PRICE_INTERVAL:
+                return interval
         return None
 
     def current_price_data(self) -> tuple[float | None, dt.datetime | None, float | None]:
-        """Get current price."""
-        now = dt.datetime.now(self._tibber_control.time_zone)
-        for key, price_total in self.price_total.items():
-            price_time = dt.datetime.fromisoformat(key).astimezone(self._tibber_control.time_zone)
-            time_diff = (now - price_time).total_seconds() / MIN_IN_HOUR
-            if 0 <= time_diff < MIN_IN_QUARTER:
-                price_rank = self.current_price_rank(self.price_total, price_time)
-                return round(price_total, 4), price_time, price_rank
-        return None, None, None
+        """Return the current consumption price, its start time and its rank (0-1] among today's prices."""
+        interval = self.current_price_interval
+        if interval is None or interval.consumption is None or (price := interval.consumption.price) is None:
+            return None, None, None
+        price_time = self._local_start(interval)
+        prices_today = sorted(
+            consumption.price
+            for other in self.prices_for_day(price_time.date())
+            if (consumption := other.consumption) is not None and consumption.price is not None
+        )
+        rank = (prices_today.index(price) + 1) / len(prices_today)
+        return round(price, 4), price_time, rank
 
     async def rt_subscribe(
         self,
@@ -784,58 +792,69 @@ class TibberHome:
 
     async def get_historic_price_data(
         self,
+        start: dt.datetime,
+        end: dt.datetime,
         resolution: str = RESOLUTION_HOURLY,
-    ) -> list[dict[Any, Any]] | None:
-        """Get historic price data.
-        :param resolution: The resolution of the data. Can be HOURLY,
-            DAILY, WEEKLY, MONTHLY or ANNUAL
+    ) -> list[dict[str, Any]]:
+        """Get the mean consumption price per hour, day or month from the Data API.
+
+        The Data API has 15-minute prices only, so the prices of each period are averaged here. Periods
+        are in the home's time zone. A period that `start` or `end` cuts off only has the prices in the
+        range, and a period without a consumption price is left out.
+
+        :param start: Timezone aware start of the range.
+        :param end: Timezone aware end of the range (exclusive).
+        :param resolution: The period of each entry, HOURLY, DAILY or MONTHLY.
+        :return: The entries, oldest first, as `{"time": start of the period, "total": mean price}`.
+        :raises ValueError: The resolution is not supported.
+
+        See `TibberDataAPI.get_prices` for the errors that fetching the prices can raise.
         """
-        resolution = resolution.lower()
-        query = HISTORIC_PRICE.format(
-            self.home_id,
-            resolution,
-        )
-        if not (data := await self._tibber_control.execute(query)):
-            _LOGGER.error("Could not get the price data.")
-            return None
-        return data["viewer"]["home"]["currentSubscription"]["priceRating"][resolution]["entries"]
+        resolution = resolution.upper()
+        if resolution not in {RESOLUTION_HOURLY, RESOLUTION_DAILY, RESOLUTION_MONTHLY}:
+            raise ValueError(f"Unsupported resolution {resolution}, use HOURLY, DAILY or MONTHLY")
+        periods: dict[dt.datetime, list[float]] = {}
+        # The intervals are sorted, so the periods are as well. Their start in UTC tells apart the two
+        # hours that a change from summer time repeats.
+        for interval in await self.get_prices(start, end):
+            if interval.consumption is None or interval.consumption.price is None:
+                continue
+            period_start = _price_period_start(self._local_start(interval), resolution)
+            periods.setdefault(period_start.astimezone(dt.UTC), []).append(interval.consumption.price)
+        return [
+            {
+                "time": period_start.astimezone(self._tibber_control.time_zone).isoformat(),
+                "total": round(sum(prices) / len(prices), 4),
+            }
+            for period_start, prices in periods.items()
+        ]
 
     def current_attributes(self) -> dict[str, float]:
-        """Get current attributes."""
-        max_price = 0.0
-        min_price = 10000.0
-        sum_price = 0.0
-        off_peak_1 = 0.0
-        peak = 0.0
-        off_peak_2 = 0.0
-        num1 = 0.0
-        num0 = 0.0
-        num2 = 0.0
-        num = 0.0
-        now = dt.datetime.now(self._tibber_control.time_zone)
-        for key, _price_total in self.price_total.items():
-            price_time = dt.datetime.fromisoformat(key).astimezone(self._tibber_control.time_zone)
-            price_total = round(_price_total, 4)
-            if now.date() == price_time.date():
-                max_price = max(max_price, price_total)
-                min_price = min(min_price, price_total)
-                if price_time.hour < 8:  # noqa: PLR2004
-                    off_peak_1 += price_total
-                    num1 += 1
-                elif price_time.hour < 20:  # noqa: PLR2004
-                    peak += price_total
-                    num0 += 1
-                else:
-                    off_peak_2 += price_total
-                    num2 += 1
-                num += 1
-                sum_price += price_total
+        """Return today's max, average and min consumption price.
 
-        attr = {}
-        attr["max_price"] = max_price
-        attr["avg_price"] = round(sum_price / num, 4) if num > 0 else 0
-        attr["min_price"] = min_price
-        attr["off_peak_1"] = round(off_peak_1 / num1, 4) if num1 > 0 else 0
-        attr["peak"] = round(peak / num0, 4) if num0 > 0 else 0
-        attr["off_peak_2"] = round(off_peak_2 / num2, 4) if num2 > 0 else 0
-        return attr
+        Also returns the average price for off peak 1 (00-08), peak (08-20) and off peak 2 (20-24).
+        Without a consumption price today it returns nothing, as zero would be a real price.
+        """
+        today = dt.datetime.now(self._tibber_control.time_zone).date()
+        prices: list[float] = []
+        periods: dict[str, list[float]] = {"off_peak_1": [], "peak": [], "off_peak_2": []}
+        for interval in self.prices_for_day(today):
+            if interval.consumption is None or interval.consumption.price is None:
+                continue
+            price = round(interval.consumption.price, 4)
+            hour = self._local_start(interval).hour
+            period = "off_peak_1" if hour < 8 else "peak" if hour < 20 else "off_peak_2"  # noqa: PLR2004
+            periods[period].append(price)
+            prices.append(price)
+        if not prices:
+            return {}
+
+        def _average(values: list[float]) -> float:
+            return round(sum(values) / len(values), 4) if values else 0.0
+
+        return {
+            "max_price": max(prices),
+            "avg_price": _average(prices),
+            "min_price": min(prices),
+            **{period: _average(values) for period, values in periods.items()},
+        }

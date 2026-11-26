@@ -127,24 +127,8 @@ async def test_tibber():
                 assert home.home_id == "c70dcbe5-4485-4821-933d-a8a86452737b"
                 assert home.address1 == "Kungsgatan 8"
                 assert home.country == "SE"
-                assert home.price_unit == "SEK/kWh"
                 assert home.has_real_time_consumption
 
-                assert home.current_price_total is None
-                assert home.price_total == {}
-                assert home.current_price_info == {}
-
-                await home.update_current_price_info()
-                assert home.current_price_total > 0
-                assert isinstance(home.current_price_info.get("energy"), float | int)
-                assert isinstance(home.current_price_info.get("startsAt"), str)
-                assert isinstance(home.current_price_info.get("tax"), float | int)
-                assert isinstance(home.current_price_info.get("total"), float | int)
-
-                await home.update_price_info()
-                for key in home.price_total:
-                    assert isinstance(key, str)
-                    assert isinstance(home.price_total[key], float | int)
             else:
                 k += 1
                 assert home.home_id == "96a14971-525a-4420-aae9-e5aedaa129ff"
@@ -195,25 +179,6 @@ async def test_tibber_notification():
         )
         with pytest.raises(NotForDemoUserError, match="operation not allowed for demo user"):
             await tibber_connection.send_notification("Test title", "message")
-
-
-@pytest.mark.asyncio
-async def test_tibber_current_price_rank():
-    async with aiohttp.ClientSession() as session:
-        tibber_connection = tibber.Tibber(
-            websession=session,
-            user_agent="test",
-        )
-        await tibber_connection.update_info()
-
-        homes = tibber_connection.get_homes()
-        assert len(homes) == 1, "No homes found"
-
-        await homes[0].update_info_and_price_info()
-        _, _, price_rank = homes[0].current_price_data()
-
-        assert isinstance(price_rank, float), "Price rank was unset"
-        assert 0 <= price_rank <= 1, "Price rank is out of range"
 
 
 @pytest.mark.asyncio
