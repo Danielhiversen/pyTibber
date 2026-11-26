@@ -567,9 +567,10 @@ class TibberHome:
                 # aclosing releases the response at once when the loop body raises.
                 async with aclosing(stream):
                     async for measurement in stream:
+                        enriched = self._enrich_measurement(measurement)
+                        # Only a measurement that enriched cleanly resets the backoff.
                         attempt = 0
                         self._rt_streaming = True
-                        enriched = self._enrich_measurement(measurement)
                         try:
                             callback(enriched)
                         except Exception:

@@ -1110,6 +1110,28 @@ async def test_rt_loop_unexpected_error_backs_off(
 
 
 @pytest.mark.usefixtures("discover")
+async def test_rt_loop_enrichment_error_backs_off(
+    home: tibber.TibberHome,
+    stream: _ScriptedStream,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A measurement that fails enrichment doesn't reset the backoff, so repeated failures back off further."""
+    enrichment_errors = [ValueError("enrichment boom"), ValueError("enrichment boom")]
+    monkeypatch.setattr(home, "_enrich_measurement", MagicMock(side_effect=enrichment_errors))
+    stream.scripts = [[_measurement()], [_measurement()]]
+    callback = MagicMock()
+    errors: list[Exception] = []
+
+    with _sleeps(stop_at=2) as sleep:
+        task = await _run_live_loop(home, callback, errors.append)
+
+    assert task.cancelled()
+    assert errors == enrichment_errors
+    callback.assert_not_called()
+    assert _delays(sleep) == [1 + 1, 1 + 2]
+
+
+@pytest.mark.usefixtures("discover")
 async def test_rt_callback_exception_does_not_stop_loop(
     home: tibber.TibberHome,
     stream: _ScriptedStream,
