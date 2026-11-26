@@ -130,24 +130,16 @@ async def iter_sse_events(lines: AsyncIterable[bytes]) -> AsyncIterator[SseEvent
     """Yield events from raw SSE lines; an event still pending at end of input is discarded."""
     name = ""
     data: list[str] = []
-    seen = False
     async for raw in lines:
-        line = raw.decode("utf-8")
-        for ending in ("\r\n", "\n", "\r"):
-            if line.endswith(ending):
-                line = line.removesuffix(ending)
-                break
+        line = raw.decode("utf-8", errors="replace").rstrip("\r\n")
         if not line:
-            if seen:
+            if data:
                 yield SseEvent(name or "message", "\n".join(data))
-            name, data, seen = "", [], False
-            continue
-        if line.startswith(":"):
+            name, data = "", []
             continue
         field, _, value = line.partition(":")
         value = value.removeprefix(" ")
         if field == "event":
-            name, seen = value, True
+            name = value
         elif field == "data":
             data.append(value)
-            seen = True

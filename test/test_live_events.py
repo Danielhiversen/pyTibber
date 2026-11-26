@@ -128,9 +128,14 @@ def test_parse_bad_or_naive_timestamp(timestamp: str) -> None:
 
 
 async def test_sse_measurement_and_ping() -> None:
-    """Named events are dispatched on blank lines."""
+    """Named events are dispatched on blank lines; events without data are skipped."""
     events = await _collect([b"event: ping\n", b"\n", b"event: measurement\n", b'data: {"a":1}\n', b"\n"])
-    assert events == [SseEvent("ping", ""), SseEvent("measurement", '{"a":1}')]
+    assert events == [SseEvent("measurement", '{"a":1}')]
+
+
+async def test_sse_invalid_utf8_is_replaced() -> None:
+    """Malformed bytes don't raise."""
+    assert await _collect([b"data: \xff\n", b"\n"]) == [SseEvent("message", "\ufffd")]
 
 
 async def test_sse_multiline_crlf_comments() -> None:
