@@ -47,7 +47,7 @@ def test_parse_full_measurement() -> None:
             "currentL3": 3.3,
             "powerFactor": 0.95,
             "signalStrength": -71,
-        }
+        },
     )
     assert measurement is not None
     assert measurement.device_id == "dev-1"
@@ -100,7 +100,7 @@ def test_parse_rejects_bool_and_garbage() -> None:
 def test_parse_ignores_unknown_fields() -> None:
     """Unknown fields do not affect parsing."""
     assert parse_live_measurement({"deviceId": "d", "powerReactive": 5, "internalFoo": 1}) == LiveMeasurement(
-        device_id="d"
+        device_id="d",
     )
 
 
