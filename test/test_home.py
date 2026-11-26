@@ -741,21 +741,13 @@ async def test_rt_loop_transient_uses_retry_after(home: tibber.TibberHome, strea
     assert errors == [error]
 
 
-@pytest.mark.parametrize(
-    "error",
-    [
-        LiveStreamError("upstream_unavailable", transient=True),
-        LiveStreamError("device_not_streamable", transient=False, device_id=DEVICE.id),
-    ],
-    ids=["transient", "device_not_streamable"],
-)
 async def test_rt_loop_stream_error_backs_off(
     home: tibber.TibberHome,
     discover: AsyncMock,
     stream: _ScriptedStream,
-    error: LiveStreamError,
 ) -> None:
-    """A transient error without retry_after, or an unstreamable device, backs off and discovers again."""
+    """A transient error without retry_after backs off and discovers again."""
+    error = LiveStreamError("upstream_unavailable", transient=True)
     stream.scripts = [[error], []]
     errors: list[Exception] = []
 
@@ -765,6 +757,122 @@ async def test_rt_loop_stream_error_backs_off(
     assert _delays(sleep) == [1 + 1, 1 + 2]
     assert discover.await_count == 2
     assert errors == [error]
+
+
+@pytest.mark.usefixtures("discover")
+@pytest.mark.parametrize(
+    ("error", "delay"),
+    [
+        (LiveStreamError("evicted", transient=False, retry_after=600), 600),
+        (LiveStreamError("evicted", transient=True, retry_after=600), 600),
+        (LiveStreamError("evicted", transient=False, retry_after=10), 300),
+        (LiveStreamError("device_not_streamable", transient=False, retry_after=42), 42),
+        (LiveStreamError("invalid_request", transient=False, retry_after=30), 30),
+        (LiveStreamError("invalid_request", transient=False), 900),
+        (LiveStreamError("upstream_unavailable", transient=True, retry_after=0.001), 1),
+        (LiveStreamError("upstream_unavailable", transient=True, retry_after=1e9), 3600),
+        (LiveStreamError("upstream_unavailable", transient=True, retry_after=float("inf")), 3600),
+        (LiveStreamError("upstream_unavailable", transient=True, retry_after=float("nan")), 1 + 1),
+        (LiveStreamError("upstream_unavailable", transient=True, retry_after=-5), 1 + 1),
+    ],
+    ids=[
+        "evicted_asks_longer",
+        "evicted_transient_asks_longer",
+        "evicted_asks_shorter",
+        "device_not_streamable",
+        "permanent_with_retry_after",
+        "permanent_without_retry_after",
+        "retry_after_too_short",
+        "retry_after_too_long",
+        "retry_after_infinite",
+        "retry_after_nan",
+        "retry_after_negative",
+    ],
+)
+async def test_rt_loop_stream_error_delay(
+    home: tibber.TibberHome,
+    stream: _ScriptedStream,
+    error: LiveStreamError,
+    delay: float,
+) -> None:
+    """The server's retry_after is kept between 1 s and 1 hour, and an eviction never waits less than 5 minutes."""
+    stream.scripts = [[error]]
+
+    with _sleeps(stop_at=1) as sleep:
+        await _run_live_loop(home)
+
+    assert _delays(sleep) == [delay]
+
+
+async def test_rt_loop_leaves_out_device_that_cannot_stream(
+    home: tibber.TibberHome,
+    discover: AsyncMock,
+    stream: _ScriptedStream,
+) -> None:
+    """A device the server can't stream is left out, so that the other devices stream and a further one joins."""
+    devices = [LiveEventDevice(id=f"pulse-{n}", type="tibber pulse") for n in range(6)]
+    discover.return_value = devices
+    error = LiveStreamError("device_not_streamable", transient=False, device_id="pulse-0")
+    stream.scripts = [[error], []]
+    errors: list[Exception] = []
+
+    with _sleeps(stop_at=2) as sleep:
+        await _run_live_loop(home, on_error=errors.append)
+
+    assert stream.device_ids == [
+        ["pulse-0", "pulse-1", "pulse-2", "pulse-3", "pulse-4"],
+        [f"pulse-{n}" for n in range(1, 6)],
+    ]
+    assert _delays(sleep) == [1 + 1, 1 + 2]
+    assert errors == [error]
+
+
+async def test_rt_loop_tries_device_that_cannot_stream_again_later(
+    home: tibber.TibberHome,
+    stream: _ScriptedStream,
+    discover: AsyncMock,
+) -> None:
+    """With no device left to stream, the loop reports it and waits 15 minutes, then tries the device again."""
+    error = LiveStreamError("device_not_streamable", transient=False, device_id=DEVICE.id)
+    stream.scripts = [[error], [_measurement()]]
+    callback = MagicMock()
+    errors: list[Exception] = []
+    # The clock is read by the first discovery (0 s), when the device can't stream (1 s), by the second discovery,
+    # which still leaves it out (2 s), and by the third discovery, which tries it again (1000 s).
+    clock = MagicMock(monotonic=MagicMock(side_effect=[0, 1, 2, 1000]))
+
+    with patch("tibber.home.time", clock), _sleeps(stop_at=3) as sleep:
+        await _run_live_loop(home, callback, errors.append)
+
+    assert errors[0] is error
+    assert isinstance(errors[1], RealTimeConsumptionDisabledError)
+    assert len(errors) == 2
+    assert _delays(sleep) == [1 + 1, 900, 1 + 1]
+    assert stream.device_ids == [[DEVICE.id], [DEVICE.id]]
+    assert discover.await_count == 3
+    callback.assert_called_once()
+
+
+async def test_rt_loop_keeps_last_devices_when_discovery_comes_back_empty(
+    home: tibber.TibberHome,
+    discover: AsyncMock,
+    stream: _ScriptedStream,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An empty discovery after a non-empty one is a hiccup of the API: the loop streams the last known devices."""
+    discover.side_effect = [[DEVICE], []]
+    stream.scripts = [[_measurement()], [_measurement()]]
+    callback = MagicMock()
+    errors: list[Exception] = []
+
+    with caplog.at_level(logging.WARNING), _sleeps(stop_at=2) as sleep:
+        await _run_live_loop(home, callback, errors.append)
+
+    assert errors == []
+    assert stream.device_ids == [[DEVICE.id], [DEVICE.id]]
+    assert callback.call_count == 2
+    assert _delays(sleep) == [1 + 1, 1 + 1]
+    assert "using the last known ones" in caplog.text
 
 
 @pytest.mark.usefixtures("discover")
@@ -844,13 +952,31 @@ async def test_rt_loop_401_after_reconnect_retries_again(home: tibber.TibberHome
 
 
 @pytest.mark.usefixtures("discover")
+@pytest.mark.parametrize("status", [400, 404, 408, 409])
+async def test_rt_loop_other_4xx_retries_slowly(home: tibber.TibberHome, stream: _ScriptedStream, status: int) -> None:
+    """A 4xx other than 401, 403 and 429 is reported, and the loop looks again after 15 minutes."""
+    error = FatalHttpExceptionError(status, "Nope", f"HTTP_{status}")
+    stream.scripts = [[error], [_measurement()]]
+    callback = MagicMock()
+    errors: list[Exception] = []
+
+    with _sleeps(stop_at=2) as sleep:
+        task = await _run_live_loop(home, callback, errors.append)
+
+    assert task.cancelled()
+    assert errors == [error]
+    assert _delays(sleep) == [900, 1 + 1]
+    callback.assert_called_once()
+
+
+@pytest.mark.usefixtures("discover")
 @pytest.mark.parametrize(
     "error",
-    [InsufficientScopeError(403, "Forbidden", "HTTP_403"), FatalHttpExceptionError(404, "Not Found", "NOT_FOUND")],
-    ids=["403", "404"],
+    [InsufficientScopeError(403, "Forbidden", "HTTP_403"), FatalHttpExceptionError(403, "Forbidden", "HTTP_403")],
+    ids=["insufficient_scope", "forbidden"],
 )
 async def test_rt_loop_403_stops(home: tibber.TibberHome, stream: _ScriptedStream, error: Exception) -> None:
-    """A missing scope, or another error that retrying can't fix, is reported and stops the loop."""
+    """A 403, which a missing scope causes and retrying can't fix, is reported and stops the loop."""
     stream.scripts = [[error]]
     errors: list[Exception] = []
 
@@ -913,25 +1039,29 @@ async def test_rt_loop_unexpected_error_backs_off(
 
 
 @pytest.mark.usefixtures("discover")
-async def test_rt_loop_enrichment_error_backs_off(
+async def test_rt_loop_enrichment_error_delivers_measurement_as_received(
     home: tibber.TibberHome,
+    tibber_connection: tibber.Tibber,
     stream: _ScriptedStream,
-    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """A measurement that fails enrichment doesn't reset the backoff, so repeated failures back off further."""
-    enrichment_errors = [ValueError("enrichment boom"), ValueError("enrichment boom")]
-    monkeypatch.setattr(home, "_enrich_measurement", MagicMock(side_effect=enrichment_errors))
-    stream.scripts = [[_measurement()], [_measurement()]]
+    """A measurement that can't be enriched is logged and passed on as received, without dropping the stream."""
+    tibber_connection.time_zone = dt.timezone(dt.timedelta(hours=-5))
+    # The local time of the first instant of year 1 in UTC-5 is before year 1, so enriching raises an OverflowError.
+    unenrichable = _measurement(timestamp=dt.datetime.min.replace(tzinfo=dt.UTC), accumulated_consumption_last_hour=0.1)
+    stream.scripts = [[unenrichable, unenrichable]]
     callback = MagicMock()
     errors: list[Exception] = []
 
-    with _sleeps(stop_at=2) as sleep:
+    with caplog.at_level(logging.ERROR), _sleeps(stop_at=1) as sleep:
         task = await _run_live_loop(home, callback, errors.append)
 
     assert task.cancelled()
-    assert errors == enrichment_errors
-    callback.assert_not_called()
-    assert _delays(sleep) == [1 + 1, 1 + 2]
+    assert errors == []
+    assert [call.args[0] for call in callback.call_args_list] == [unenrichable, unenrichable]
+    assert caplog.text.count("Error enriching a live measurement") == 2
+    # The measurements reset the backoff, and the stream then ends normally.
+    assert _delays(sleep) == [1 + 1]
 
 
 @pytest.mark.usefixtures("discover")

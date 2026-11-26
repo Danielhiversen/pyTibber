@@ -7,9 +7,11 @@ import base64
 import datetime as dt
 import logging
 import random
+import time
 from collections import deque
 from contextlib import aclosing
 from dataclasses import replace
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Final
 
 import aiohttp
@@ -55,6 +57,10 @@ def _price_period_start(local_start: dt.datetime, resolution: str) -> dt.datetim
 LIVE_RECONNECT_MIN_DELAY: Final = 1
 LIVE_RECONNECT_MAX_DELAY: Final = 60
 EVICTED_RETRY_DELAY: Final = 300
+# The longest wait a `retry_after` of the server can cause.
+LIVE_RETRY_AFTER_MAX: Final = 3600
+# The wait after errors that retrying quickly can't fix, but that may pass: no live devices, repeated 401s,
+# a 4xx other than 403, an error the server marks as permanent, and a device that can't stream.
 NO_LIVE_DEVICES_RETRY_DELAY: Final = 900
 # The server pings an idle stream, so a Pulse that has gone offline leaves the socket open without data.
 LIVE_NO_MEASUREMENT_TIMEOUT: Final = 120
@@ -75,24 +81,43 @@ def _reconnect_delay(attempt: int) -> float:
     return LIVE_RECONNECT_MIN_DELAY + random.uniform(0, min(2**attempt, LIVE_RECONNECT_MAX_DELAY))  # noqa: S311
 
 
+def _server_retry_after(error: LiveStreamError) -> float | None:
+    """Return the wait the server asked for, kept within `LIVE_RECONNECT_MIN_DELAY` and `LIVE_RETRY_AFTER_MAX`.
+
+    A missing, zero, negative or NaN `retry_after` means the server didn't ask for a wait.
+    """
+    retry_after = error.retry_after
+    if retry_after is None or not retry_after > 0:
+        return None
+    return min(max(retry_after, LIVE_RECONNECT_MIN_DELAY), LIVE_RETRY_AFTER_MAX)
+
+
 def _live_retry_delay(error: Exception | None, attempt: int, consecutive_401: int) -> float | None:  # noqa: PLR0911
     """Return the seconds to wait before connecting again after a stream ended with `error`, or None to stop."""
     if isinstance(error, InvalidLoginError):
         # Connecting again fetches a fresh token, so the first 401 in a row is retried at once. A token
         # refresh that failed for a moment can cause more, so further 401s in a row wait instead of stopping.
         return 0 if consecutive_401 == 1 else NO_LIVE_DEVICES_RETRY_DELAY
-    if isinstance(error, FatalHttpExceptionError):
+    if isinstance(error, HttpExceptionError) and error.status == HTTPStatus.FORBIDDEN:
+        # The token lacks the data-api-meters-read scope, and no number of retries adds it.
         return None
     if isinstance(error, RateLimitExceededError):
         return error.retry_after
+    if isinstance(error, FatalHttpExceptionError):
+        # Any other 4xx, such as a 404 from a gateway during a rollout, can pass. Look again slowly.
+        return NO_LIVE_DEVICES_RETRY_DELAY
     if isinstance(error, LiveStreamError):
-        if error.transient and (error.retry_after or 0) > 0:
-            return error.retry_after
+        retry_after = _server_retry_after(error)
+        if error.code == "evicted":
+            # Another client took over the home's only live connection, so don't fight over it.
+            return max(retry_after or 0, EVICTED_RETRY_DELAY)
+        if retry_after is not None:
+            return retry_after
         if error.transient or error.code == "device_not_streamable":
-            # The next discovery leaves out a device that can't stream.
+            # The next connection leaves out a device that can't stream, see `_rt_device_ids`.
             return _reconnect_delay(attempt)
-        # `evicted`: another client took over the home's only live connection, so don't fight over it.
-        return EVICTED_RETRY_DELAY
+        # An error that isn't transient and that we don't know. It may still pass, so look again slowly.
+        return NO_LIVE_DEVICES_RETRY_DELAY
     if isinstance(error, RealTimeConsumptionDisabledError):
         return NO_LIVE_DEVICES_RETRY_DELAY
     return _reconnect_delay(attempt)
@@ -154,6 +179,10 @@ class TibberHome:
         self._rt_streaming = False
         # The (timestamp, kW) power readings of the last five minutes, per live device.
         self._rt_power: dict[str, deque[tuple[dt.datetime, float]]] = {}
+        # The devices the server said can't stream, with the `time.monotonic()` until which they are left out.
+        self._rt_unstreamable: dict[str, float] = {}
+        # The ids of the last non-empty device discovery, which a later empty one doesn't replace.
+        self._rt_known_device_ids: list[str] = []
 
     def _merge_hourly_data(
         self,
@@ -458,12 +487,14 @@ class TibberHome:
 
         :param callback: Called with every measurement. Exceptions it raises are logged.
         :param on_error: Called with every error instead of logging it, though unexpected errors are
-            logged with their traceback as well. The task stops after a `FatalHttpExceptionError` other
-            than `InvalidLoginError`, such as an `InsufficientScopeError`, and carries on after anything
-            else. A first `InvalidLoginError` is retried at once, and further ones in a row every 15
-            minutes. A home without live devices is reported as a `RealTimeConsumptionDisabledError`
-            every 15 minutes, and a stream without a measurement for 2 minutes as a `TimeoutError`.
-            Once the task has stopped, `rt_subscribe` can start a new one.
+            logged with their traceback as well. The task stops after a 403, such as an
+            `InsufficientScopeError`, and carries on after anything else. A first `InvalidLoginError`
+            is retried at once, and further ones in a row every 15 minutes, as is any other 4xx. A home
+            without live devices is reported as a `RealTimeConsumptionDisabledError` every 15 minutes,
+            and a stream without a measurement for 2 minutes as a `TimeoutError`. The wait that the
+            server asks for in a stream error is kept between 1 s and 1 hour. A measurement that can't
+            be enriched is passed to `callback` as received. Once the task has stopped, `rt_subscribe`
+            can start a new one.
         """
         if self._rt_task is not None and not self._rt_task.done():
             raise RuntimeError("Already subscribed to real time data, call rt_unsubscribe first")
@@ -492,6 +523,8 @@ class TibberHome:
         # The number of connections since the last measurement, which sets the backoff.
         attempt = 0
         consecutive_401 = 0
+        self._rt_unstreamable.clear()
+        self._rt_known_device_ids = []
         while True:
             error: Exception | None = None
             try:
@@ -500,10 +533,14 @@ class TibberHome:
                 # aclosing releases the response at once when the loop body raises.
                 async with aclosing(stream):
                     while (measurement := await self._next_live_measurement(stream)) is not None:
-                        enriched = self._enrich_measurement(measurement)
-                        # Only a measurement that enriched cleanly resets the backoff.
                         attempt = 0
                         self._rt_streaming = True
+                        try:
+                            enriched = self._enrich_measurement(measurement)
+                        except Exception:
+                            # A measurement that can't be enriched is still worth more than a dropped connection.
+                            _LOGGER.exception("Error enriching a live measurement of home %s", self._home_id)
+                            enriched = measurement
                         try:
                             callback(enriched)
                         except Exception:
@@ -513,6 +550,9 @@ class TibberHome:
             finally:
                 self._rt_streaming = False
 
+            if isinstance(error, LiveStreamError) and error.code == "device_not_streamable" and error.device_id:
+                # Leave the device out of the next connections, so that it doesn't hold back the others.
+                self._rt_unstreamable[error.device_id] = time.monotonic() + NO_LIVE_DEVICES_RETRY_DELAY
             consecutive_401 = consecutive_401 + 1 if isinstance(error, InvalidLoginError) else 0
             delay = _live_retry_delay(error, attempt, consecutive_401)
             if error is not None:
@@ -541,20 +581,34 @@ class TibberHome:
             ) from None
 
     async def _rt_device_ids(self) -> list[str]:
-        """Discover the home's live devices and return the ids of the ones to stream."""
+        """Discover the home's live devices and return the ids of the ones to stream.
+
+        Devices that the server said can't stream are left out for `NO_LIVE_DEVICES_RETRY_DELAY` seconds. An
+        empty discovery after a non-empty one counts as a hiccup of the API, so the last known devices are used.
+        """
         devices = await self.update_live_event_devices()
-        if not devices:
+        if devices:
+            self._rt_known_device_ids = [device.id for device in devices]
+        elif self._rt_known_device_ids:
+            _LOGGER.warning("Home %s: live device discovery found no devices, using the last known ones", self._home_id)
+        else:
             raise RealTimeConsumptionDisabledError(
                 f"Home {self._home_id} has no live devices, or the token lacks the data-api-meters-read scope",
             )
-        if len(devices) > MAX_LIVE_EVENT_DEVICES:
+
+        now = time.monotonic()
+        self._rt_unstreamable = {device_id: until for device_id, until in self._rt_unstreamable.items() if until > now}
+        device_ids = [device_id for device_id in self._rt_known_device_ids if device_id not in self._rt_unstreamable]
+        if not device_ids:
+            raise RealTimeConsumptionDisabledError(f"None of the live devices of home {self._home_id} can stream")
+        if len(device_ids) > MAX_LIVE_EVENT_DEVICES:
             _LOGGER.warning(
                 "Home %s has %d live devices, streaming the first %d",
                 self._home_id,
-                len(devices),
+                len(device_ids),
                 MAX_LIVE_EVENT_DEVICES,
             )
-        return [device.id for device in devices[:MAX_LIVE_EVENT_DEVICES]]
+        return device_ids[:MAX_LIVE_EVENT_DEVICES]
 
     def _rt_report(
         self,
