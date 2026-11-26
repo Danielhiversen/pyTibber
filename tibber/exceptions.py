@@ -52,6 +52,10 @@ class FatalHttpExceptionError(HttpExceptionError):
     """Exception raised for HTTP codes that are non-retriable."""
 
 
+class PricesNotAvailableError(FatalHttpExceptionError):
+    """The Data API does not make prices available for this request."""
+
+
 class RetryableHttpExceptionError(HttpExceptionError):
     """Exception raised for HTTP codes that are possible to retry."""
 

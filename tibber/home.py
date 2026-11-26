@@ -9,7 +9,7 @@ import logging
 import random
 import time
 import warnings
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import aiohttp
 from gql import gql
@@ -32,9 +32,10 @@ from .gql_queries import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Awaitable, Callable, Iterable
 
     from . import Tibber
+    from .data_api import PriceItem
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -90,6 +91,9 @@ class TibberHome:
         self._home_id: str = home_id
         self._currency: str = ""
         self.price_total: dict[str, float] = {}
+        self.subsidized_price_total: dict[str, float] = {}
+        self.production_price_total: dict[str, float] = {}
+        self.price_items: dict[str, PriceItem] = {}
         self._rt_power: list[tuple[dt.datetime, float]] = []
         self.info: dict[str, dict[Any, Any]] = {}
         self.last_data_timestamp: dt.datetime | None = None
@@ -240,6 +244,23 @@ class TibberHome:
 
         self._update_has_real_time_consumption(self._extract_real_time_consumption_enabled(data))
 
+    async def get_prices(
+        self,
+        since: dt.datetime | str | None = None,
+        until: dt.datetime | str | None = None,
+        cursor: str | None = None,
+        *,
+        url: str | None = None,
+    ) -> dict[str, Any]:
+        """Fetch a raw price page, including its pagination links."""
+        return await self._tibber_control.data_api.get_prices(
+            self._home_id,
+            since=since,
+            until=until,
+            cursor=cursor,
+            url=url,
+        )
+
     async def update_price_info(
         self,
         since: dt.datetime | str | None = None,
@@ -249,41 +270,56 @@ class TibberHome:
 
         Errors are raised to the caller, so it can retry. Known prices are kept on error.
         """
-        data = await self._tibber_control.data_api.get_prices(
-            self._home_id,
-            since=since,
-            until=until,
-        )
+        data = await self.get_prices(since=since, until=until)
 
         if not data:
             _LOGGER.error("No price data returned for home %s", self._home_id)
             return
 
-        if currency := data.get("currency"):
-            self._currency = currency
-
         items = data.get("items", [])
+        currency = data.get("currency")
         if not items:
             _LOGGER.debug("No price items returned for home %s", self._home_id)
             return
 
         price_total: dict[str, float] = {}
+        subsidized_price_total: dict[str, float] = {}
+        production_price_total: dict[str, float] = {}
+        price_items: dict[str, PriceItem] = {}
         for item in items:
             if not isinstance(item, dict):
                 continue
             time_str = item.get("time")
-            if not time_str:
+            if not isinstance(time_str, str):
                 continue
-            consumption = item.get("consumption")
-            if isinstance(consumption, dict):
-                price = consumption.get("price")
-                if price is not None:
-                    try:
-                        price_total[time_str] = float(price)
-                    except (ValueError, TypeError):
-                        continue
+            try:
+                dt.datetime.fromisoformat(time_str)
+            except ValueError:
+                continue
+            price_items[time_str] = cast("PriceItem", item)
+            for direction, field, totals in (
+                ("consumption", "price", price_total),
+                ("consumption", "subsidizedPrice", subsidized_price_total),
+                ("production", "price", production_price_total),
+            ):
+                details = item.get(direction)
+                if not isinstance(details, dict) or (price := details.get(field)) is None:
+                    continue
+                try:
+                    totals[time_str] = float(price)
+                except (ValueError, TypeError):
+                    continue
 
+        if currency:
+            self._currency = currency
         self.price_total = price_total
+        self.subsidized_price_total = subsidized_price_total
+        self.production_price_total = production_price_total
+        self.price_items = price_items
+
+    async def update_current_price_info(self) -> None:
+        """Refresh the Data API prices used by the current-price properties."""
+        await self.update_price_info()
 
     async def update_info_and_price_info(self) -> None:
         """Update home info and all price info asynchronously."""
@@ -439,19 +475,41 @@ class TibberHome:
         )
         # Find the rank of the current price
         for idx, item in enumerate(prices_today_sorted, start=1):
-            if item[0] == price_time:
+            if item[0].timestamp() == price_time.timestamp():
                 return idx / len(prices_today_sorted)
         return None
 
+    def _current_price_interval(self, prices: Iterable[str]) -> tuple[str, dt.datetime] | None:
+        now = dt.datetime.now(self._tibber_control.time_zone).timestamp()
+        for key in prices:
+            price_time = dt.datetime.fromisoformat(key).astimezone(self._tibber_control.time_zone)
+            if 0 <= now - price_time.timestamp() < MIN_IN_QUARTER * MIN_IN_HOUR:
+                return key, price_time
+        return None
+
+    @property
+    def current_price_total(self) -> float | None:
+        """Return the consumption price for the current 15-minute interval."""
+        interval = self._current_price_interval(self.price_total)
+        return self.price_total[interval[0]] if interval is not None else None
+
+    @property
+    def current_price_info(self) -> dict[str, Any]:
+        """Return Data API details and available legacy fields for the current interval."""
+        interval = self._current_price_interval(self.price_items)
+        if interval is None:
+            return {}
+        key, _ = interval
+        info: dict[str, Any] = {**self.price_items[key], "startsAt": key, "currency": self.currency}
+        if key in self.price_total:
+            info["total"] = self.price_total[key]
+        return info
+
     def current_price_data(self) -> tuple[float | None, dt.datetime | None, float | None]:
         """Get current price."""
-        now = dt.datetime.now(self._tibber_control.time_zone)
-        for key, price_total in self.price_total.items():
-            price_time = dt.datetime.fromisoformat(key).astimezone(self._tibber_control.time_zone)
-            time_diff = (now - price_time).total_seconds() / MIN_IN_HOUR
-            if 0 <= time_diff < MIN_IN_QUARTER:
-                price_rank = self.current_price_rank(self.price_total, price_time)
-                return round(price_total, 4), price_time, price_rank
+        if (interval := self._current_price_interval(self.price_total)) is not None:
+            key, price_time = interval
+            return round(self.price_total[key], 4), price_time, self.current_price_rank(self.price_total, price_time)
         return None, None, None
 
     async def rt_subscribe(
@@ -646,7 +704,7 @@ class TibberHome:
         except HttpExceptionError as err:
             # Known API errors (e.g. an expired token) are expected here and don't warrant a traceback.
             _LOGGER.warning("Home %s: %s: %s", self.home_id, failure_message, err)
-        except Exception:  # noqa: BLE001
+        except Exception:
             _LOGGER.warning("Home %s: %s", self.home_id, failure_message, exc_info=True)
 
     def rt_unsubscribe(self) -> None:

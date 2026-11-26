@@ -7,7 +7,8 @@ import datetime as dt
 import logging
 import random
 from http import HTTPStatus
-from typing import TYPE_CHECKING, Any, NoReturn, TypeAlias
+from typing import TYPE_CHECKING, Any, NoReturn, NotRequired, TypeAlias, TypedDict
+from urllib.parse import urljoin, urlsplit
 
 import aiohttp
 
@@ -15,6 +16,7 @@ from .const import DATA_API_ENDPOINT, DEFAULT_TIMEOUT, USERINFO_ENDPOINT, __vers
 from .exceptions import (
     FatalHttpExceptionError,
     InvalidLoginError,
+    PricesNotAvailableError,
     RateLimitExceededError,
     RetryableHttpExceptionError,
     UserAgentMissingError,
@@ -29,6 +31,23 @@ _LOGGER = logging.getLogger(__name__)
 MAX_RATE_LIMIT_ATTEMPTS = 2
 
 SensorValue: TypeAlias = bool | int | float | str | None
+
+
+class PriceDetails(TypedDict, total=False):
+    """Prices and applicable VAT for consumption or production."""
+
+    price: float | None
+    subsidizedPrice: float | None
+    thirdPartyPrice: float | None
+    vatPercent: float | None
+
+
+class PriceItem(TypedDict):
+    """Prices for one 15-minute interval."""
+
+    time: str
+    consumption: NotRequired[PriceDetails | None]
+    production: NotRequired[PriceDetails | None]
 
 
 class TibberDataAPI:
@@ -95,11 +114,13 @@ class TibberDataAPI:
         """Make a request to the Data API.
 
         :param method: HTTP method (GET, POST, etc.).
-        :param endpoint: API endpoint path.
+        :param endpoint: API endpoint path or absolute Data API URL.
         :param params: Query parameters.
         :param retry: Number of retries on failure.
         """
-        url = f"{DATA_API_ENDPOINT}{endpoint}"
+        url = urljoin(DATA_API_ENDPOINT, endpoint)
+        if urlsplit(url)[:2] != urlsplit(DATA_API_ENDPOINT)[:2]:
+            raise ValueError("Request URL must use the Tibber Data API origin")
         access_token = await self._token_manager.async_get_access_token()
 
         headers = {
@@ -200,6 +221,12 @@ class TibberDataAPI:
         detail, extension_code = await self._read_error_response(response)
         response.close()
 
+        if (
+            status == HTTPStatus.FORBIDDEN
+            and extension_code == "https://developer.tibber.com/errors/prices-not-available"
+        ):
+            raise PricesNotAvailableError(status, detail, extension_code)
+
         fatal_codes: dict[int, str] = {
             HTTPStatus.BAD_REQUEST.value: "BAD_REQUEST",
             HTTPStatus.NOT_FOUND.value: "NOT_FOUND",
@@ -238,7 +265,7 @@ class TibberDataAPI:
         extension_code = f"HTTP_{response.status}"
         detail: str | None = response.reason
 
-        if response.content_type == "application/json":
+        if response.content_type in {"application/json", "application/problem+json"}:
             try:
                 error_data = await response.json()
             except (aiohttp.ContentTypeError, ValueError):
@@ -271,6 +298,8 @@ class TibberDataAPI:
         since: dt.datetime | str | None = None,
         until: dt.datetime | str | None = None,
         cursor: str | None = None,
+        *,
+        url: str | None = None,
     ) -> dict[str, Any]:
         """Get energy prices for a home from the Data API.
 
@@ -283,9 +312,16 @@ class TibberDataAPI:
         :param home_id: The ID of the home.
         :param since: Start time to page forward from (needs offset, e.g. ISO 8601 string or aware datetime).
         :param until: End time to page backward from (needs offset, e.g. ISO 8601 string or aware datetime).
-        :param cursor: Optional cursor for pagination.
+        :param cursor: Optional opaque cursor or pagination link.
+        :param url: A next or previous link, which takes precedence over query parameters.
         :return: Dict containing 'currency', 'query', 'items', 'prev', 'next'.
         """
+        endpoint = f"/v1/homes/{home_id}/prices"
+        if url is None and cursor is not None and ("://" in cursor or cursor.startswith(("/v1/", "//", "?"))):
+            url = cursor
+        if url is not None:
+            return await self._make_request("GET", urljoin(f"{DATA_API_ENDPOINT}{endpoint}", url))
+
         params: dict[str, Any] = {}
         if since is not None:
             if isinstance(since, dt.datetime):
@@ -306,7 +342,9 @@ class TibberDataAPI:
         if cursor is not None:
             params["cursor"] = str(cursor)
 
-        return await self._make_request("GET", f"/v1/homes/{home_id}/prices", params=params or None)
+        return await self._make_request("GET", endpoint, params=params or None)
+
+    get_prices_for_home = get_prices
 
     async def get_devices_for_home(self, home_id: str) -> list[dict[str, Any]]:
         """Get all devices for a specific home."""

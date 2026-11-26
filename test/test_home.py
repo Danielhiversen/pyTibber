@@ -1326,9 +1326,14 @@ async def test_home_update_price_info_populates_price_total(
     price_payload = {
         "currency": "EUR",
         "items": [
-            {"time": "2026-11-24T06:00:00+01:00", "consumption": {"price": 0.45}},
+            {
+                "time": "2026-11-24T06:00:00+01:00",
+                "consumption": {"price": 0.45, "subsidizedPrice": 0.0, "vatPercent": 25},
+                "production": {"price": -0.1, "thirdPartyPrice": 0.02},
+            },
             {"time": "2026-11-24T06:15:00+01:00", "consumption": {"price": 0.50}},
         ],
+        "next": "https://data-api.tibber.com/v1/homes/home-1/prices?cursor=next",
     }
     mock_response = MagicMock()
     mock_response.status = 200
@@ -1336,6 +1341,7 @@ async def test_home_update_price_info_populates_price_total(
     mock_response.json = AsyncMock(return_value=price_payload)
     mock_websession.request = AsyncMock(return_value=mock_response)
 
+    assert await home.get_prices() == price_payload
     await home.update_price_info()
 
     assert home.currency == "EUR"
@@ -1344,6 +1350,9 @@ async def test_home_update_price_info_populates_price_total(
         "2026-11-24T06:00:00+01:00": 0.45,
         "2026-11-24T06:15:00+01:00": 0.50,
     }
+    assert home.subsidized_price_total == {"2026-11-24T06:00:00+01:00": 0.0}
+    assert home.production_price_total == {"2026-11-24T06:00:00+01:00": -0.1}
+    assert list(home.price_items.values()) == price_payload["items"]
 
 
 @pytest.mark.parametrize(
@@ -1381,10 +1390,19 @@ async def test_current_price_data_from_data_api_prices(
         for time, price in {"02:00": 1.0, "02:15": 3.0, "02:30": 2.0, "02:45": 4.0}.items()
     ]
     mock_websession.request = AsyncMock(return_value=_json_response({"currency": "NOK", "items": items}))
-    await home.update_price_info()
+    assert home.current_price_total is None
+    assert home.current_price_info == {}
+    await home.update_current_price_info()
 
     with patch("tibber.home.dt.datetime", frozen_clock):
         price, price_time, price_rank = home.current_price_data()
+        assert home.current_price_total == 2.0
+        assert home.current_price_info == {
+            **items[2],
+            "startsAt": "2026-05-06T02:30:00+00:00",
+            "currency": "NOK",
+            "total": 2.0,
+        }
 
     assert price == 2.0
     assert price_time == dt.datetime(2026, 5, 6, 2, 30, tzinfo=dt.UTC)

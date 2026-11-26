@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from tibber.data_api import TibberDataAPI, TibberDevice
+from tibber.exceptions import PricesNotAvailableError
 from tibber.token_manager import TokenManager
 
 
@@ -149,7 +150,7 @@ async def test_get_all_devices_flattens_device_lists(
         if endpoint.endswith("/devices"):
             home_id = endpoint.split("/")[3]
             return devices_payload[home_id]
-        device_id = endpoint.split("/")[-1]
+        device_id = endpoint.rsplit("/", maxsplit=1)[-1]
         return device_detail_payload[device_id]
 
     monkeypatch.setattr(data_api, "_make_request", AsyncMock(side_effect=fake_make_request))
@@ -222,3 +223,51 @@ async def test_get_prices_defaults_to_no_params(
     await data_api.get_prices("home-1")
 
     mocked_make_request.assert_awaited_once_with("GET", "/v1/homes/home-1/prices", params=None)
+
+
+@pytest.mark.asyncio
+async def test_get_prices_follows_next_link(data_api: TibberDataAPI, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Follow a returned link directly and keep its query intact."""
+    next_url = "https://data-api.tibber.com/v1/homes/home-1/prices?cursor=abc%2B123"
+    first_page = MagicMock(status=200, content_type="application/json")
+    first_page.json = AsyncMock(return_value={"next": next_url, "items": []})
+    second_page = MagicMock(status=200, content_type="application/json")
+    second_page.json = AsyncMock(return_value={"next": None, "items": []})
+    request = AsyncMock(side_effect=[first_page, second_page])
+    monkeypatch.setattr(data_api.websession, "request", request)
+
+    page = await data_api.get_prices_for_home("home-1")
+    assert await data_api.get_prices("home-1", cursor=page["next"]) == {"next": None, "items": []}
+    assert request.await_args.args == ("GET", next_url)
+    assert request.await_args.kwargs.get("params") is None
+
+
+@pytest.mark.asyncio
+async def test_get_prices_rejects_links_to_other_origins(
+    data_api: TibberDataAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep authenticated pagination requests on the Data API origin."""
+    request = AsyncMock()
+    monkeypatch.setattr(data_api.websession, "request", request)
+
+    with pytest.raises(ValueError, match="Data API origin"):
+        await data_api.get_prices("home-1", url="https://example.com/prices")
+
+    request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_prices_maps_unavailable_error(data_api: TibberDataAPI, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Expose the Tibber problem type as a dedicated exception."""
+    response = MagicMock(status=403, content_type="application/problem+json")
+    response.json = AsyncMock(
+        return_value={
+            "type": "https://developer.tibber.com/errors/prices-not-available",
+            "detail": "Prices unavailable",
+        },
+    )
+    monkeypatch.setattr(data_api.websession, "request", AsyncMock(return_value=response))
+
+    with pytest.raises(PricesNotAvailableError, match="Prices unavailable"):
+        await data_api.get_prices("home-1")
