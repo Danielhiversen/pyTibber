@@ -607,15 +607,3 @@ async def test_stream_live_events_http_errors(data_api: TibberDataAPI, status: i
         await _collect(data_api)
 
     response.release.assert_called_once()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("device_ids", [[], ["a", "b", "c", "d", "e", "f"]])
-async def test_stream_live_events_validates_device_count(data_api: TibberDataAPI, device_ids: list[str]) -> None:
-    """Device counts outside 1..5 are rejected before any request."""
-    request = _set_request(data_api, AsyncMock())
-
-    with pytest.raises(ValueError, match="device"):
-        await _collect(data_api, device_ids)
-
-    request.assert_not_called()

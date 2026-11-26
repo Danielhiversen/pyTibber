@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:
@@ -88,6 +88,22 @@ def _parse_timestamp(value: object) -> dt.datetime | None:
     return parsed if parsed.utcoffset() is not None else None
 
 
+# Fields that pyTibber parses or derives itself; every other field is a number under its camelCase name.
+_SPECIAL_FIELDS: Final = frozenset(
+    {"device_id", "timestamp", "currency", "signal_strength", "estimated_hour_consumption"},
+)
+
+
+def _camel_case(name: str) -> str:
+    first, *rest = name.split("_")
+    return first + "".join(part.capitalize() for part in rest)
+
+
+_NUMBER_FIELDS: Final = tuple(
+    (field.name, _camel_case(field.name)) for field in fields(LiveMeasurement) if field.name not in _SPECIAL_FIELDS
+)
+
+
 def parse_live_measurement(data: object) -> LiveMeasurement | None:
     """Parse a ``measurement`` event payload, or return None when it has no device id."""
     if not isinstance(data, dict):
@@ -99,30 +115,9 @@ def parse_live_measurement(data: object) -> LiveMeasurement | None:
     return LiveMeasurement(
         device_id=device_id,
         timestamp=_parse_timestamp(data.get("timestamp")),
-        power=_parse_number(data.get("power")),
-        power_production=_parse_number(data.get("powerProduction")),
-        min_power=_parse_number(data.get("minPower")),
-        average_power=_parse_number(data.get("averagePower")),
-        max_power=_parse_number(data.get("maxPower")),
-        min_power_production=_parse_number(data.get("minPowerProduction")),
-        max_power_production=_parse_number(data.get("maxPowerProduction")),
-        accumulated_consumption=_parse_number(data.get("accumulatedConsumption")),
-        accumulated_production=_parse_number(data.get("accumulatedProduction")),
-        accumulated_consumption_last_hour=_parse_number(data.get("accumulatedConsumptionLastHour")),
-        accumulated_production_last_hour=_parse_number(data.get("accumulatedProductionLastHour")),
-        accumulated_cost=_parse_number(data.get("accumulatedCost")),
-        accumulated_reward=_parse_number(data.get("accumulatedReward")),
         currency=currency if isinstance(currency, str) else None,
-        last_meter_consumption=_parse_number(data.get("lastMeterConsumption")),
-        last_meter_production=_parse_number(data.get("lastMeterProduction")),
-        voltage_l1=_parse_number(data.get("voltageL1")),
-        voltage_l2=_parse_number(data.get("voltageL2")),
-        voltage_l3=_parse_number(data.get("voltageL3")),
-        current_l1=_parse_number(data.get("currentL1")),
-        current_l2=_parse_number(data.get("currentL2")),
-        current_l3=_parse_number(data.get("currentL3")),
-        power_factor=_parse_number(data.get("powerFactor")),
         signal_strength=_parse_int(data.get("signalStrength")),
+        **{name: _parse_number(data.get(key)) for name, key in _NUMBER_FIELDS},
     )
 
 

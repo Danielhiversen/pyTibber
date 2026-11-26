@@ -29,7 +29,6 @@ from .exceptions import (
 )
 from .live_events import (
     LIVE_EVENTS_READ_TIMEOUT,
-    MAX_LIVE_EVENT_DEVICES,
     LiveEventDevice,
     LiveMeasurement,
     iter_sse_events,
@@ -38,7 +37,7 @@ from .live_events import (
 from .response_handler import extract_response_data
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Sequence
+    from collections.abc import AsyncGenerator, Sequence
 
     from .token_manager import TokenManager
 
@@ -486,18 +485,19 @@ class TibberDataAPI:
             and device["type"]
         ]
 
-    async def stream_live_events(self, home_id: str, device_ids: Sequence[str]) -> AsyncIterator[LiveMeasurement]:
+    async def stream_live_events(
+        self,
+        home_id: str,
+        device_ids: Sequence[str],
+    ) -> AsyncGenerator[LiveMeasurement, None]:
         """Stream live measurements for up to five devices of a home.
 
         Yields measurements until the server closes the stream. Only one live events connection per
         home is allowed, a new connection evicts the old one.
 
-        :raises ValueError: `device_ids` is empty or has more than five ids.
         :raises LiveStreamError: The server sent a `stream_error` event.
         :raises HttpExceptionError: The server answered with a non-200 status.
         """
-        if not 1 <= len(device_ids) <= MAX_LIVE_EVENT_DEVICES:
-            raise ValueError(f"Live events need between 1 and {MAX_LIVE_EVENT_DEVICES} device ids")
         access_token = await self._token_manager.async_get_access_token()
         headers = {
             "Authorization": f"Bearer {access_token}",

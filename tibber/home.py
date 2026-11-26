@@ -10,7 +10,7 @@ import random
 from collections import deque
 from contextlib import aclosing
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, Final, cast
+from typing import TYPE_CHECKING, Any, Final
 
 import aiohttp
 
@@ -72,9 +72,7 @@ _EXPECTED_LIVE_ERRORS: Final = (
 
 def _reconnect_delay(attempt: int) -> float:
     """Return a random backoff for reconnect `attempt`: 1 s plus up to 2**attempt s, at most 1 + 60 s."""
-    # Capping the exponent keeps 2**attempt small after a long outage, without changing the result.
-    exponent = min(attempt, LIVE_RECONNECT_MAX_DELAY.bit_length())
-    return LIVE_RECONNECT_MIN_DELAY + random.uniform(0, min(2**exponent, LIVE_RECONNECT_MAX_DELAY))  # noqa: S311
+    return LIVE_RECONNECT_MIN_DELAY + random.uniform(0, min(2**attempt, LIVE_RECONNECT_MAX_DELAY))  # noqa: S311
 
 
 def _live_retry_delay(error: Exception | None, attempt: int, consecutive_401: int) -> float | None:  # noqa: PLR0911
@@ -498,10 +496,7 @@ class TibberHome:
             error: Exception | None = None
             try:
                 device_ids = await self._rt_device_ids()
-                stream = cast(
-                    "AsyncGenerator[LiveMeasurement, None]",
-                    self._tibber_control.data_api.stream_live_events(self._home_id, device_ids),
-                )
+                stream = self._tibber_control.data_api.stream_live_events(self._home_id, device_ids)
                 # aclosing releases the response at once when the loop body raises.
                 async with aclosing(stream):
                     while (measurement := await self._next_live_measurement(stream)) is not None:
@@ -600,7 +595,7 @@ class TibberHome:
         if last_meter_production is not None:
             last_meter_production = max(0.0, last_meter_production)
 
-        estimated_hour_consumption = measurement.estimated_hour_consumption
+        estimated_hour_consumption = None
         if (timestamp := measurement.timestamp) is not None:
             window = self._rt_power.setdefault(measurement.device_id, deque())
             while window and window[0][0] < timestamp - LIVE_POWER_WINDOW:
