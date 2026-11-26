@@ -1,7 +1,8 @@
 """Tests for pyTibber."""
 
+import asyncio
 import datetime as dt
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
@@ -9,6 +10,7 @@ import pytest
 import tibber
 from tibber.const import RESOLUTION_DAILY, RESOLUTION_HOURLY
 from tibber.exceptions import FatalHttpExceptionError, InvalidLoginError, NotForDemoUserError
+from tibber.live_events import LiveEventDevice
 
 from .conftest import FixedDateTime
 
@@ -319,28 +321,31 @@ async def test_set_access_token_updates_token_manager_without_reconnect(
 
 
 @pytest.mark.asyncio
-async def test_rt_disconnect_unsubscribes_homes_before_disconnecting(monkeypatch: pytest.MonkeyPatch) -> None:
-    """rt_disconnect must unsubscribe every home before tearing down the realtime connection."""
+async def test_rt_disconnect_cancels_home_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """rt_disconnect cancels the live task of every subscribed home and waits until they have ended."""
     tibber_connection = tibber.Tibber(
         access_token="existing-token",
         websession=MagicMock(),
         user_agent="test",
     )
-    manager = MagicMock()
-    manager.realtime_disconnect = AsyncMock()
-    monkeypatch.setattr(tibber_connection.realtime, "disconnect", manager.realtime_disconnect)
+    tibber_connection._all_home_ids = ["a", "b", "c"]  # noqa: SLF001
 
-    home_a = MagicMock()
-    home_b = MagicMock()
-    home_a.rt_unsubscribe = manager.unsubscribe_a
-    home_b.rt_unsubscribe = manager.unsubscribe_b
-    tibber_connection._homes = {"a": home_a, "b": home_b}  # noqa: SLF001
+    discovering: list[str] = []
+
+    async def discover_forever(home_id: str) -> list[LiveEventDevice]:
+        discovering.append(home_id)
+        await asyncio.Event().wait()
+        return []
+
+    monkeypatch.setattr(tibber_connection.data_api, "get_live_event_devices", discover_forever)
+    subscribed = [tibber_connection.get_home("a"), tibber_connection.get_home("b")]
+    tibber_connection.get_home("c")  # never subscribed
+    for home in subscribed:
+        await home.rt_subscribe(MagicMock())
+    tasks = [home._rt_task for home in subscribed]  # noqa: SLF001
+    await asyncio.sleep(0)
+    assert discovering == ["a", "b"]
 
     await tibber_connection.rt_disconnect()
 
-    # Both homes are unsubscribed, and the realtime disconnect happens last.
-    assert manager.mock_calls == [
-        call.unsubscribe_a(),
-        call.unsubscribe_b(),
-        call.realtime_disconnect(),
-    ]
+    assert all(task.cancelled() for task in tasks)

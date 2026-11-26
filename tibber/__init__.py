@@ -16,6 +16,7 @@ from .exceptions import (
     FatalHttpExceptionError,
     InsufficientScopeError,
     InvalidLoginError,
+    LiveStreamError,
     PricesNotAvailableError,
     RealTimeConsumptionDisabledError,
     RetryableHttpExceptionError,
@@ -23,6 +24,7 @@ from .exceptions import (
 )
 from .gql_queries import INFO, PUSH_NOTIFICATION
 from .home import TibberHome
+from .live_events import LiveEventDevice, LiveMeasurement
 from .realtime import TibberRT
 from .response_handler import extract_response_data
 from .token_manager import TokenManager
@@ -33,6 +35,9 @@ __all__ = [
     "FatalHttpExceptionError",
     "InsufficientScopeError",
     "InvalidLoginError",
+    "LiveEventDevice",
+    "LiveMeasurement",
+    "LiveStreamError",
     "PriceDetails",
     "PriceInterval",
     "Prices",
@@ -244,10 +249,11 @@ class Tibber:
         )
 
     async def rt_disconnect(self) -> None:
-        """Stop subscription manager."""
+        """Stop the live data of every home and wait until their tasks have ended."""
+        tasks = [task for home in self._homes.values() if (task := home._rt_task) is not None]  # noqa: SLF001
         for home in self._homes.values():
             home.rt_unsubscribe()
-        await self.realtime.disconnect()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     async def set_access_token(self, access_token: str) -> None:
         """Set access token for subsequent requests and websocket handshakes.
