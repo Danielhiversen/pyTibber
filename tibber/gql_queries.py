@@ -49,39 +49,8 @@ INFO = """
                 status
               }
             }
-            websocketSubscriptionUrl
           }
         }
-        """
-LIVE_SUBSCRIBE = """
-            subscription{
-              liveMeasurement(homeId:"%s"){
-                accumulatedConsumption
-                accumulatedConsumptionLastHour
-                accumulatedCost
-                accumulatedProduction
-                accumulatedProductionLastHour
-                accumulatedReward
-                averagePower
-                currency
-                currentL1
-                currentL2
-                currentL3
-                lastMeterConsumption
-                lastMeterProduction
-                maxPower
-                minPower
-                power
-                powerFactor
-                powerProduction
-                powerReactive
-                signalStrength
-                timestamp
-                voltagePhase1
-                voltagePhase2
-                voltagePhase3
-            }
-           }
         """
 PUSH_NOTIFICATION = """
         mutation{{
@@ -94,26 +63,11 @@ PUSH_NOTIFICATION = """
           }}
         }}
         """
-REAL_TIME_CONSUMPTION_ENABLED = """
-        {
-          viewer {
-            home(id: "%s") {
-              id
-              features {
-                realTimeConsumptionEnabled
-              }
-            }
-          }
-        }
-        """
 UPDATE_INFO = """
         {
           viewer {
             home(id: "%s") {
               appNickname
-              features {
-                realTimeConsumptionEnabled
-              }
               currentSubscription {
                 status
               }

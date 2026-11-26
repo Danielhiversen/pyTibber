@@ -28,7 +28,6 @@ from .exceptions import (
 from .gql_queries import (
     HISTORIC_DATA,
     HISTORIC_DATA_DATE,
-    REAL_TIME_CONSUMPTION_ENABLED,
     UPDATE_INFO,
 )
 from .live_events import MAX_LIVE_EVENT_DEVICES
@@ -42,11 +41,7 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-REAL_TIME_CONSUMPTION_DISABLED_GRACE = dt.timedelta(hours=1)
-
 MIN_REQUESTED_CONSUMPTION_HOURS: int = 3
-
-RESUBSCRIBE_MAX_ATTEMPTS: int = 5
 
 
 def _price_period_start(local_start: dt.datetime, resolution: str) -> dt.datetime:
@@ -158,8 +153,6 @@ class TibberHome:
         self._rt_streaming = False
         # The (timestamp, kW) power readings of the last five minutes, per live device.
         self._rt_power: dict[str, deque[tuple[dt.datetime, float]]] = {}
-        self._has_real_time_consumption: None | bool = None
-        self._real_time_consumption_suggested_disabled: dt.datetime | None = None
 
     def _merge_hourly_data(
         self,
@@ -294,8 +287,6 @@ class TibberHome:
             return
         self.info = data
 
-        self._update_has_real_time_consumption(self._extract_real_time_consumption_enabled(data))
-
     async def get_prices(self, start: dt.datetime, end: dt.datetime) -> list[PriceInterval]:
         """Get the 15-minute prices from `start` up to `end` from the Data API.
 
@@ -343,58 +334,6 @@ class TibberHome:
             return
         self.prices = known + new
 
-    async def update_real_time_consumption_enabled(self) -> None:
-        """Update the real time consumption enabled status."""
-        if not (data := await self._tibber_control.execute(REAL_TIME_CONSUMPTION_ENABLED % self._home_id)):
-            _LOGGER.error("Could not get real time consumption enabled status.")
-            return
-        self._update_has_real_time_consumption(self._extract_real_time_consumption_enabled(data))
-
-    @staticmethod
-    def _extract_real_time_consumption_enabled(data: dict[str, Any]) -> bool | None:
-        """Safely extract the real time consumption enabled flag from an info payload."""
-        try:
-            value = data["viewer"]["home"]["features"]["realTimeConsumptionEnabled"]
-        except (KeyError, TypeError):
-            return None
-        # Anything but a bool carries no usable information, treat it like a malformed payload.
-        return value if isinstance(value, bool) else None
-
-    def _update_has_real_time_consumption(self, enabled: bool | None) -> None:
-        """Update the believed real time consumption status from a single reading.
-
-        `enabled` is None when the reading carried no usable information (a malformed or
-        degraded API payload) and must not change the believed status at all.
-
-        A `False` reading following a known `True` does not immediately flip the status: it only
-        arms a grace-period timer and the home keeps reporting its last known `True`, so a single
-        bad or transiently-correct reading during a Tibber-side outage cannot strand the real time
-        subscription. The status flips to `False` only when a later `False` reading arrives more
-        than REAL_TIME_CONSUMPTION_DISABLED_GRACE after the timer was armed. Both a `True` reading
-        and incoming real time data (see `_handle_subscription_data`) clear the timer, so the grace
-        period always measures the time since the last evidence that real time consumption works.
-        """
-        if enabled is None:
-            return
-
-        if enabled is True:
-            self._real_time_consumption_suggested_disabled = None
-            self._has_real_time_consumption = True
-            return
-
-        # enabled is False from here on.
-        if self._has_real_time_consumption is not True:
-            self._real_time_consumption_suggested_disabled = None
-            self._has_real_time_consumption = False
-            return
-
-        now = dt.datetime.now(tz=dt.UTC)
-        if self._real_time_consumption_suggested_disabled is None:
-            self._real_time_consumption_suggested_disabled = now
-        elif now - self._real_time_consumption_suggested_disabled > REAL_TIME_CONSUMPTION_DISABLED_GRACE:
-            self._real_time_consumption_suggested_disabled = None
-            self._has_real_time_consumption = False
-
     @property
     def home_id(self) -> str:
         """Return home id."""
@@ -413,11 +352,6 @@ class TibberHome:
             "awaiting time restriction",
             "awaiting termination",
         ]
-
-    @property
-    def has_real_time_consumption(self) -> None | bool:
-        """Return home id."""
-        return self._has_real_time_consumption
 
     @property
     def has_production(self) -> bool:

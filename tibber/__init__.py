@@ -25,7 +25,6 @@ from .exceptions import (
 from .gql_queries import INFO, PUSH_NOTIFICATION
 from .home import TibberHome
 from .live_events import LiveEventDevice, LiveMeasurement
-from .realtime import TibberRT
 from .response_handler import extract_response_data
 from .token_manager import TokenManager
 
@@ -47,7 +46,6 @@ __all__ = [
     "Tibber",
     "TibberDataAPI",
     "TibberHome",
-    "TibberRT",
     "TokenManager",
 ]
 
@@ -88,12 +86,6 @@ class Tibber:
         self.websession = websession
         self.timeout: int = timeout
         self._token_manager = TokenManager(access_token, refresh_access_token=refresh_access_token)
-        self.realtime = TibberRT(
-            self._token_manager,
-            timeout,
-            self._user_agent,
-            ssl=ssl,
-        )
 
         self.time_zone: dt.tzinfo = time_zone or dt.UTC
         self._name: str = ""
@@ -170,9 +162,6 @@ class Tibber:
 
         if not (viewer := data.get("viewer")):
             return
-
-        if sub_endpoint := viewer.get("websocketSubscriptionUrl"):
-            await self.realtime.set_subscription_endpoint(sub_endpoint)
 
         self._name = viewer.get("name")
         self._user_id = viewer.get("userId")
@@ -256,10 +245,7 @@ class Tibber:
         await asyncio.gather(*tasks, return_exceptions=True)
 
     async def set_access_token(self, access_token: str) -> None:
-        """Set access token for subsequent requests and websocket handshakes.
-
-        An active realtime session is left running: the server only validates the token when
-        the connection is established, and the next handshake picks up the new token.
+        """Set access token for subsequent requests.
 
         .. deprecated::
             Prefer providing a ``refresh_access_token`` callback at construction time so all

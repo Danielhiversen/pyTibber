@@ -2,7 +2,7 @@
 
 import asyncio
 import datetime as dt
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import aiohttp
 import pytest
@@ -129,7 +129,6 @@ async def test_tibber():
                 assert home.home_id == "c70dcbe5-4485-4821-933d-a8a86452737b"
                 assert home.address1 == "Kungsgatan 8"
                 assert home.country == "SE"
-                assert home.has_real_time_consumption
 
             else:
                 k += 1
@@ -300,24 +299,18 @@ async def test_set_access_token_emits_deprecation_warning() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("access_token", ["new-token", "existing-token"])
-async def test_set_access_token_updates_token_manager_without_reconnect(
-    monkeypatch: pytest.MonkeyPatch,
-    access_token: str,
-) -> None:
-    """set_access_token must update the shared TokenManager and leave the RT session running."""
+async def test_set_access_token_updates_token_manager(access_token: str) -> None:
+    """set_access_token must update the shared TokenManager."""
     tibber_connection = tibber.Tibber(
         access_token="existing-token",
         websession=MagicMock(),
         user_agent="test",
     )
-    mock_reconnect = AsyncMock()
-    monkeypatch.setattr(tibber_connection.realtime, "reconnect", mock_reconnect)
 
     with pytest.warns(DeprecationWarning, match="refresh_access_token"):
         await tibber_connection.set_access_token(access_token)
 
     assert tibber_connection._token_manager.access_token == access_token  # noqa: SLF001
-    mock_reconnect.assert_not_awaited()
 
 
 @pytest.mark.asyncio

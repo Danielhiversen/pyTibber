@@ -7,20 +7,11 @@ class TibberError(Exception):
     """Base exception for Tibber errors."""
 
 
-class SubscriptionEndpointMissingError(TibberError):
-    """Exception raised when subscription endpoint is missing."""
-
-
-class SubscriptionFailedError(TibberError):
-    """Exception raised when subscription fails."""
-
-
 class RealTimeConsumptionDisabledError(TibberError):
-    """Exception raised when a home is confirmed to have real time consumption disabled.
+    """Exception raised when a home has no streamable live devices.
 
-    Passed to the `on_error` callback of `TibberHome.rt_subscribe`. This error is terminal: the
-    resubscribe loop has stopped and will not retry on its own. To resume, call `rt_subscribe`
-    again, from a separate task rather than directly from the callback, and rate limit the retries.
+    Passed to the `on_error` callback of `TibberHome.rt_subscribe`. It is not terminal: the loop
+    keeps checking for devices and reports this error again until a streamable device appears.
     """
 
 
@@ -82,18 +73,6 @@ class InvalidLoginError(FatalHttpExceptionError):
 
 class NotForDemoUserError(FatalHttpExceptionError):
     """Exception raised when trying to use a feature not available for demo users"""
-
-
-class WebsocketError(TibberError):
-    """Base exception for Tibber websocket errors."""
-
-
-class WebsocketReconnectedError(WebsocketError):
-    """Exception raised when websocket has been reconnected."""
-
-
-class WebsocketTransportError(WebsocketError):
-    """Exception raised when websocket transport fails."""
 
 
 class LiveStreamError(TibberError):

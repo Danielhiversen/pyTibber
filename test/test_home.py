@@ -26,7 +26,6 @@ from tibber.exceptions import (
     RealTimeConsumptionDisabledError,
     RetryableHttpExceptionError,
 )
-from tibber.home import REAL_TIME_CONSUMPTION_DISABLED_GRACE
 from tibber.live_events import LiveEventDevice, LiveMeasurement
 
 if TYPE_CHECKING:
@@ -65,26 +64,9 @@ def mock_websession() -> MagicMock:
 
 
 @pytest.fixture
-async def home(tibber_connection: tibber.Tibber, mock_websession: MagicMock) -> tibber.TibberHome:
-    """Return a home that already believes real time consumption is enabled.
-
-    The status is seeded through the public API rather than by assigning to the private attribute,
-    so the fixture keeps working across refactors. The post mock is replaced afterwards, so that
-    tests start from a clean call count.
-    """
-    home = tibber.TibberHome(HOME_ID, tibber_connection)
-    mock_websession.post = _make_status_response(rt_enabled=True)
-    await home.update_real_time_consumption_enabled()
-    mock_websession.post = AsyncMock()
-    return home
-
-
-def _status_payload(rt_enabled: bool | None, *, with_features: bool = True) -> dict[str, Any]:
-    """Return a REAL_TIME_CONSUMPTION_ENABLED payload reporting the given status."""
-    home_payload: dict[str, Any] = {"id": HOME_ID}
-    if with_features:
-        home_payload["features"] = {"realTimeConsumptionEnabled": rt_enabled}
-    return {"data": {"viewer": {"home": home_payload}}}
+def home(tibber_connection: tibber.Tibber) -> tibber.TibberHome:
+    """Return a home."""
+    return tibber.TibberHome(HOME_ID, tibber_connection)
 
 
 def _json_response(payload: dict[str, Any]) -> MagicMock:
@@ -96,240 +78,11 @@ def _json_response(payload: dict[str, Any]) -> MagicMock:
     return mock_response
 
 
-def _make_status_response(rt_enabled: bool) -> AsyncMock:
-    """Return a post mock whose response reports the given real time consumption status."""
-    return AsyncMock(return_value=_json_response(_status_payload(rt_enabled)))
-
-
 async def test_rt_unsubscribe_noop_when_not_subscribed(home: tibber.TibberHome) -> None:
     """Calling rt_unsubscribe on a fresh home must not raise."""
     assert not home.rt_subscription_running
     home.rt_unsubscribe()  # should be a no-op
     assert not home.rt_subscription_running
-
-
-@pytest.mark.parametrize("enabled", [True, False])
-async def test_update_real_time_consumption_enabled_without_prior_info(
-    mock_websession: MagicMock,
-    tibber_connection: tibber.Tibber,
-    enabled: bool,
-) -> None:
-    """Updating the flag must not require info to be populated first."""
-    # A freshly constructed home has a never-read status and no info.
-    home = tibber.TibberHome(HOME_ID, tibber_connection)
-    assert home.info == {}
-
-    mock_websession.post = _make_status_response(rt_enabled=enabled)
-
-    await home.update_real_time_consumption_enabled()
-
-    assert home.has_real_time_consumption is enabled
-    # The method must not mutate info as a side effect.
-    assert home.info == {}
-
-
-async def test_update_real_time_consumption_enabled_ignores_empty_response(
-    home: tibber.TibberHome,
-    mock_websession: MagicMock,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """An empty response must leave has_real_time_consumption unchanged."""
-    mock_response = MagicMock()
-    mock_response.status = 200
-    mock_response.content_type = "application/json"
-    mock_response.json = AsyncMock(return_value={})
-    mock_websession.post = AsyncMock(return_value=mock_response)
-
-    with caplog.at_level(logging.ERROR):
-        await home.update_real_time_consumption_enabled()
-
-    assert home.has_real_time_consumption is True
-    assert "Could not get real time consumption enabled status." in caplog.text
-
-
-@pytest.mark.parametrize(
-    "payload",
-    [
-        {"viewer": {"home": {}}},  # missing "features" -> KeyError
-        {"viewer": None},  # not subscriptable -> TypeError
-    ],
-)
-async def test_update_real_time_consumption_enabled_handles_malformed_payload(
-    home: tibber.TibberHome,
-    mock_websession: MagicMock,
-    payload: dict,
-) -> None:
-    """A malformed payload carries no usable information and must not change the last known status."""
-    mock_response = MagicMock()
-    mock_response.status = 200
-    mock_response.content_type = "application/json"
-    mock_response.json = AsyncMock(return_value={"data": payload})
-    mock_websession.post = AsyncMock(return_value=mock_response)
-
-    await home.update_real_time_consumption_enabled()
-
-    # The `home` fixture starts out with a known True status, which a malformed payload
-    # must not overwrite.
-    assert home.has_real_time_consumption is True
-
-
-@pytest.mark.parametrize(
-    "payload",
-    [
-        {"viewer": {"home": {}}},  # missing "features" -> KeyError
-        {"viewer": None},  # not subscriptable -> TypeError
-    ],
-)
-async def test_update_real_time_consumption_enabled_malformed_payload_stays_unknown(
-    tibber_connection: tibber.Tibber,
-    mock_websession: MagicMock,
-    payload: dict,
-) -> None:
-    """A malformed payload must leave a never-read status as unknown (None)."""
-    fresh_home = tibber.TibberHome(HOME_ID, tibber_connection)
-
-    mock_response = MagicMock()
-    mock_response.status = 200
-    mock_response.content_type = "application/json"
-    mock_response.json = AsyncMock(return_value={"data": payload})
-    mock_websession.post = AsyncMock(return_value=mock_response)
-
-    await fresh_home.update_real_time_consumption_enabled()
-
-    assert fresh_home.has_real_time_consumption is None
-
-
-async def test_status_false_without_prior_true_sets_false_immediately(
-    tibber_connection: tibber.Tibber,
-    mock_websession: MagicMock,
-) -> None:
-    """A False status with no known True resolves to False directly, with no grace period."""
-    fresh_home = tibber.TibberHome(HOME_ID, tibber_connection)
-    mock_websession.post = _make_status_response(rt_enabled=False)
-
-    await fresh_home.update_real_time_consumption_enabled()
-
-    assert fresh_home.has_real_time_consumption is False
-
-
-async def test_status_single_false_keeps_true_within_grace(
-    home: tibber.TibberHome,
-    mock_websession: MagicMock,
-) -> None:
-    """A single False status following a known True must keep reporting the last known True."""
-    mock_websession.post = _make_status_response(rt_enabled=False)
-
-    await home.update_real_time_consumption_enabled()
-
-    assert home.has_real_time_consumption is True
-
-
-async def test_status_repeated_false_within_grace_stays_true(
-    home: tibber.TibberHome,
-    mock_websession: MagicMock,
-) -> None:
-    """Repeated False statuses inside the grace period must keep reporting the last known True."""
-    mock_websession.post = _make_status_response(rt_enabled=False)
-
-    for _ in range(5):
-        await home.update_real_time_consumption_enabled()
-
-    assert home.has_real_time_consumption is True
-
-
-async def test_status_flips_false_only_strictly_after_grace(
-    home: tibber.TibberHome,
-    mock_websession: MagicMock,
-    frozen_clock: type[FixedDateTime],
-) -> None:
-    """The status must flip to False only once the grace period has been strictly exceeded."""
-    mock_websession.post = _make_status_response(rt_enabled=False)
-    armed = dt.datetime(2026, 5, 6, 0, 0, 0, tzinfo=dt.UTC)
-
-    with patch("tibber.home.dt.datetime", frozen_clock):
-        frozen_clock.current = armed
-        await home.update_real_time_consumption_enabled()
-        assert home.has_real_time_consumption is True
-
-        # Exactly at the boundary the grace period has not been exceeded yet.
-        frozen_clock.current = armed + REAL_TIME_CONSUMPTION_DISABLED_GRACE
-        await home.update_real_time_consumption_enabled()
-        assert home.has_real_time_consumption is True
-
-        frozen_clock.current = armed + REAL_TIME_CONSUMPTION_DISABLED_GRACE + dt.timedelta(seconds=1)
-        await home.update_real_time_consumption_enabled()
-        assert home.has_real_time_consumption is False
-
-
-async def test_status_true_reading_restarts_grace_period(
-    home: tibber.TibberHome,
-    mock_websession: MagicMock,
-    frozen_clock: type[FixedDateTime],
-) -> None:
-    """A True status must clear the grace-period timer so a later, unrelated False starts fresh.
-
-    Regression test: a False -> True -> False sequence must not jump straight to a confirmed
-    disable just because a timer from an earlier, already-recovered-from False was never cleared.
-    """
-    armed = dt.datetime(2026, 5, 6, 0, 0, 0, tzinfo=dt.UTC)
-    past_grace = REAL_TIME_CONSUMPTION_DISABLED_GRACE + dt.timedelta(seconds=1)
-
-    with patch("tibber.home.dt.datetime", frozen_clock):
-        frozen_clock.current = armed
-        mock_websession.post = _make_status_response(rt_enabled=False)
-        await home.update_real_time_consumption_enabled()
-
-        mock_websession.post = _make_status_response(rt_enabled=True)
-        await home.update_real_time_consumption_enabled()
-        assert home.has_real_time_consumption is True
-
-        # Long after the original timer would have expired, a brand new False must get a full
-        # fresh grace period rather than flipping on the stale timer.
-        mock_websession.post = _make_status_response(rt_enabled=False)
-        frozen_clock.current = armed + past_grace
-        await home.update_real_time_consumption_enabled()
-        assert home.has_real_time_consumption is True
-
-        frozen_clock.current = armed + past_grace + past_grace
-        await home.update_real_time_consumption_enabled()
-        assert home.has_real_time_consumption is False
-
-
-def _info_payload(rt_enabled: bool | None, *, with_features: bool = True) -> dict[str, Any]:
-    """Return an UPDATE_INFO payload reporting the given real time consumption status."""
-    home_payload: dict[str, Any] = {
-        "id": HOME_ID,
-        "currentSubscription": {"status": "running"},
-    }
-    if with_features:
-        home_payload["features"] = {"realTimeConsumptionEnabled": rt_enabled}
-    return {"data": {"viewer": {"home": home_payload}}}
-
-
-async def test_update_info_false_status_keeps_true_within_grace(
-    home: tibber.TibberHome,
-    mock_websession: MagicMock,
-) -> None:
-    """A False status from the info query must only arm the timer."""
-    mock_websession.post = AsyncMock(return_value=_json_response(_info_payload(rt_enabled=False)))
-
-    await home.update_info()
-
-    assert home.has_real_time_consumption is True
-
-
-async def test_update_info_malformed_status_is_a_no_op(
-    home: tibber.TibberHome,
-    mock_websession: MagicMock,
-) -> None:
-    """An info payload without a usable status must not change the last known status."""
-    mock_websession.post = AsyncMock(
-        return_value=_json_response(_info_payload(None, with_features=False)),
-    )
-
-    await home.update_info()
-
-    assert home.has_real_time_consumption is True
 
 
 def _price_item(time: str, price: float | None, **details: Any) -> dict[str, Any]:  # noqa: ANN401
