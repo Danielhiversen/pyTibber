@@ -20,7 +20,7 @@ from .exceptions import (
     UserAgentMissingError,
 )
 from .gql_queries import INFO, PUSH_NOTIFICATION
-from .home import TibberHome
+from .home import TibberHome, is_ended_subscription_still_valid
 from .realtime import TibberRT
 from .response_handler import extract_response_data
 from .token_manager import TokenManager
@@ -173,7 +173,9 @@ class Tibber:
             self._all_home_ids += [home_id]
             if not (subs := _home.get("subscriptions")):
                 continue
-            if subs[0].get("status") is not None and subs[0]["status"].lower() == "running":
+            if (
+                subs[0].get("status") is not None and subs[0]["status"].lower() == "running"
+            ) or is_ended_subscription_still_valid(subs[0]):
                 self._active_home_ids += [home_id]
 
     def get_home_ids(self, only_active: bool = True) -> list[str]:

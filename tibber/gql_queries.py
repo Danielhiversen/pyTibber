@@ -65,6 +65,7 @@ INFO = """
               id
               subscriptions {
                 status
+                validTo
               }
             }
             websocketSubscriptionUrl
@@ -175,6 +176,7 @@ UPDATE_INFO_PRICE = """
               }
               currentSubscription {
                 status
+                validTo
               }
               address {
                 address1
